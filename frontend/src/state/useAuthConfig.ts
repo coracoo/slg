@@ -1,23 +1,13 @@
-// 登录入口配置（v44 GET /auth/config）：{ googleClientId, wechatEnabled, githubEnabled, passwordLogin }。
+// 登录入口配置（GET /auth/config）：密码注册默认关闭，仅显式 passwordSignup=true 开放。
 // 登录页与账号设置共用；模块级缓存一次（Client ID 只在服务端配一处，经此下发）。
 // 拉取失败按「密码登录可用、第三方入口未配置」处理（v47：旧后端没有 passwordLogin 字段时
 // 前端按 true 处理，行为与 v46 一致），调用方可手动 retry。
 
 import { useCallback, useEffect, useState } from 'react';
 import { AUTH_CONFIG_URL } from '../api/client';
+import { FALLBACK_AUTH_CONFIG, parseAuthConfig, type AuthConfig } from './authConfig';
 
-export interface AuthConfig {
-  /** null = 服务端没配置 Google，前端不显示任何 Google 入口 */
-  googleClientId: string | null;
-  /** false = 服务端没配置微信，登录页不显示「微信扫码」分页 */
-  wechatEnabled: boolean;
-  /** false = 服务端没配置 GitHub OAuth App，前端不显示 GitHub 入口（v45） */
-  githubEnabled: boolean;
-  /** false = 本站在 PASSWORD_LOGIN_DISABLED_HOSTS 里（国际站），不显示用户名密码表单（v47） */
-  passwordLogin: boolean;
-}
-
-const FALLBACK: AuthConfig = { googleClientId: null, wechatEnabled: false, githubEnabled: false, passwordLogin: true };
+export type { AuthConfig } from './authConfig';
 
 let cached: AuthConfig | null = null;
 let inflight: Promise<AuthConfig> | null = null;
@@ -26,18 +16,12 @@ async function fetchAuthConfig(): Promise<AuthConfig> {
   try {
     const res = await fetch(AUTH_CONFIG_URL);
     if (!res.ok) {
-      return FALLBACK;
+      return FALLBACK_AUTH_CONFIG;
     }
-    const body = (await res.json()) as Partial<AuthConfig>;
-    return {
-      googleClientId: typeof body.googleClientId === 'string' && body.googleClientId ? body.googleClientId : null,
-      wechatEnabled: body.wechatEnabled === true,
-      githubEnabled: body.githubEnabled === true,
-      // v47：国际站返回 false；旧后端没有该字段时按 true（保持原行为）
-      passwordLogin: body.passwordLogin !== false,
-    };
+    const body = (await res.json()) as Record<string, unknown>;
+    return parseAuthConfig(body);
   } catch {
-    return FALLBACK;
+    return FALLBACK_AUTH_CONFIG;
   }
 }
 

@@ -33,10 +33,11 @@ const githubSites = readGithubSites({
   }),
 } as NodeJS.ProcessEnv);
 
-async function configFor(host: string): Promise<Record<string, unknown>> {
+async function configFor(host: string, passwordSignupEnabled?: boolean): Promise<Record<string, unknown>> {
   const app = Fastify();
   registerAuthConfigRoute(app, {
     googleClientId: 'google-client-id',
+    passwordSignupEnabled,
     wechatEnabled: true,
     trustProxy: false,
     isPasswordLoginDisabled: (h) => isPasswordLoginDisabled(h, disabledHosts),
@@ -69,4 +70,13 @@ test('未知 Host：按默认处理（密码登录可用，GitHub 走 default �
   assert.equal(body.wechatEnabled, true);
   // GITHUB_SITES 只配了 .cn / .cc 两站且无 default 套 → 未知 Host 没有 GitHub 配置
   assert.equal(body.githubEnabled, false);
+});
+
+
+test('self-hosted signup is off by default and respects the password-disabled site', async () => {
+  assert.equal((await configFor(CN)).passwordSignup, false);
+  assert.equal((await configFor(CN, false)).passwordSignup, false);
+  assert.equal((await configFor(CN, true)).passwordSignup, true);
+  assert.equal((await configFor(CC, true)).passwordSignup, false);
+  assert.equal((await configFor('localhost:5175', true)).passwordSignup, true);
 });

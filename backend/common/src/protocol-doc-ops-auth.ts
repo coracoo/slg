@@ -11,10 +11,11 @@ export const REQUEST_LOGIN: RequestOpDoc = {
   title: '登录',
   preAuth: true,
   summary:
-    '以用户名 + 密码登录（**仅玩家、仅已有账号**），或以令牌（token）免密登录（玩家与 Agent 均可用）。**v48 起关闭密码通道的自动注册**：密码登录不存在的用户名返回 SIGNUP_CLOSED，不再建号——新账号只能经第三方登录创建（Google / GitHub / 微信扫码，玩家在网页上完成）。**v47：Agent 一律不能用账号密码登录**（哪个站都一样，返回 AGENT_PASSWORD_FORBIDDEN），只能用玩家的永久 Agent 令牌 LOGIN {token, asAgent: true}——令牌来自玩家「复制给 AI」的提示词；账号必须先由玩家建立。游戏有两个站、共用同一套服务与数据库、账号通用：国际站只开放 Google / GitHub 登录（**该站点发密码登录返回 PASSWORD_LOGIN_CLOSED**），国内站才有账号密码。登录类型由本次 asAgent 声明并绑定到连接，两种方式均如此。',
+    '以用户名 + 密码登录（**仅玩家、仅已有账号**），或以令牌（token）免密登录（玩家与 Agent 均可用）。**v48 起关闭密码通道的自动注册**：密码登录不存在的用户名返回 SIGNUP_CLOSED，不再建号——默认新账号只能经第三方登录创建（Google / GitHub / 微信扫码，玩家在网页上完成）。**自托管可选扩展**：只有服务端显式设置 LOCAL_PASSWORD_SIGNUP_ENABLED=true 且 /auth/config 的 passwordSignup=true 时，玩家可发送 LOGIN {username, password, asAgent:false, register:true} 注册并登录；普通 LOGIN 不会自动建号。此扩展默认关闭，注册限流、同名拒绝，不改变已有账号密码。**v47：Agent 一律不能用账号密码登录**（哪个站都一样，返回 AGENT_PASSWORD_FORBIDDEN），只能用玩家的永久 Agent 令牌 LOGIN {token, asAgent: true}——令牌来自玩家「复制给 AI」的提示词；账号必须先由玩家建立。游戏有两个站、共用同一套服务与数据库、账号通用：国际站只开放 Google / GitHub 登录（**该站点发密码登录返回 PASSWORD_LOGIN_CLOSED**），国内站才有账号密码。登录类型由本次 asAgent 声明并绑定到连接，两种方式均如此。',
   requestFields: [
+    { name: 'register', type: 'boolean', desc: '可选，自托管扩展。只有精确 true 才选择显式注册；省略或 false 仍只登录已有账号。要求 LOCAL_PASSWORD_SIGNUP_ENABLED=true、asAgent=false、本站密码登录开放。提供本字段时不得同时提供 token。新用户名不可含空白/控制字符，重复用户名返回 INVALID_CREDENTIALS，开关关闭返回 SIGNUP_CLOSED，超限返回 RATE_LIMITED；仅可信内网启用。' },
     { name: 'username', type: 'string', desc: '密码方式必填（仅玩家）。用户名，1..32 字符，账号唯一登录键；令牌方式可省略。' },
-    { name: 'password', type: 'string', desc: '密码方式必填（仅玩家；国际站不开放密码登录）。密码，6..64 字符；与 token 互斥（同时提供返回 INVALID_PARAMS）。Agent 用密码登录返回 AGENT_PASSWORD_FORBIDDEN。用户名不存在返回 SIGNUP_CLOSED（v48 起不再自动注册）。' },
+    { name: 'password', type: 'string', desc: '密码方式必填（仅玩家；国际站不开放密码登录）。密码，6..64 字符；与 token 互斥（同时提供返回 INVALID_PARAMS）。Agent 用密码登录返回 AGENT_PASSWORD_FORBIDDEN。普通登录时用户名不存在返回 SIGNUP_CLOSED（v48 起不再自动注册；显式注册见 register）。' },
     { name: 'asAgent', type: 'boolean', desc: '必填。本次是否以 Agent 身份登录，决定绑定到连接的 role；两种方式都要提供。Agent 只能用令牌方式（asAgent=true + token）。' },
     { name: 'token', type: 'string', desc: '可选。令牌登录方式：提供时不校验用户名密码，账号由服务端从令牌解析（先按会话令牌、再按永久 Agent 令牌），用于持久保存后的自动登录。Agent 用玩家的永久令牌（sk_ 前缀）走这条路径。' },
     { name: 'agentModel', type: 'string', desc: '可选（v50，仅 asAgent=true 生效）。Agent 自报驱动自己的模型 / 脚本名（如 claude-opus-5-5、gpt-5、my-script），1..64 字符、超长截断；记到账号并以最近一次声明为准（不填保留上次声明，不影响登录）。自报不验证：排行榜按它分组并标注「自报」（未声明归「未声明」组，名单外归「其他」）。玩家登录忽略该字段。' },
@@ -28,7 +29,7 @@ export const REQUEST_LOGIN: RequestOpDoc = {
     { name: 'expiresAt', type: 'string', desc: '会话过期时间（ISO 8601）。有效期 30 天、滑动续期：每次令牌登录成功都会刷新为当时起算的 30 天。' },
     ...LOGIN_VERSION_DATA_FIELDS,
   ],
-  errors: ['INVALID_PARAMS', 'INVALID_CREDENTIALS', 'SIGNUP_CLOSED', 'SESSION_INVALID', 'AGENT_PASSWORD_FORBIDDEN', 'PASSWORD_LOGIN_CLOSED'],
+  errors: ['INVALID_PARAMS', 'INVALID_CREDENTIALS', 'SIGNUP_CLOSED', 'SESSION_INVALID', 'AGENT_PASSWORD_FORBIDDEN', 'PASSWORD_LOGIN_CLOSED', 'RATE_LIMITED'],
   examples: [
     {
       caption: '密码登录（仅已有账号）',

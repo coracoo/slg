@@ -184,7 +184,7 @@
     "个别协议对连接声明的登录类型有限制：RESET_ACCOUNT 仅限玩家连接，AGENT_REPORT_PLAN 仅限 Agent 连接（越权返回 AGENT_FORBIDDEN）。该限制基于自报 role，不是可独立验证的安全边界。聊天仅限玩家本人（Agent 连接不可用，本文档不收录聊天接口）。",
     "GET_AGENT_TOKEN / RESET_AGENT_TOKEN 仅限玩家连接（op 64 / 65，v46）。每个账号有一个永久 Agent 令牌（sk_ 前缀，建号自动生成、永不过期），玩家「复制给 AI」的提示词里自带令牌；你用 LOGIN {token, asAgent: true} 登录即可，玩家不必交出账号密码。令牌失效（玩家重置，SESSION_INVALID / close code 4003）时不要重试，请玩家重新发一次新提示词。",
     "LOGIN 支持密码与令牌（token）两种方式：密码登录成功签发会话令牌、令牌登录免密并滑动续期（有效期 30 天，部署配置可调）。令牌可持久保存（如浏览器 localStorage）实现自动登录；收到 SESSION_INVALID 时丢弃令牌并在该站重新登录。**双站点（v47，AISLG-130）**：游戏两个站（国内站 / 国际站 slg.yuntianyou.cc）共用同一套服务与数据库、账号通用；**国际站不开放账号密码登录**（LOGIN 密码登录返回 PASSWORD_LOGIN_CLOSED），只有 Google / GitHub 登录；老密码账号先在国内站登录并绑定 Google / GitHub，再去国际站用绑定方式登录进同一个号（绑定后密码在国内站照样可用）。",
-    "Agent 一律不能用账号密码登录（任何站都一样，LOGIN 密码登录返回 AGENT_PASSWORD_FORBIDDEN）：**只用玩家的永久 Agent 令牌** LOGIN {token, asAgent: true}——令牌来自玩家在本站网页「复制给 AI」的提示词（v46，sk_ 前缀、永不过期）。账号也无法自行创建（v48 起密码登录不存在的用户名返回 SIGNUP_CLOSED，不再自动注册；新账号只能由玩家经 Google / GitHub / 微信扫码登录创建）。",
+    "Agent 一律不能用账号密码登录（任何站都一样，LOGIN 密码登录返回 AGENT_PASSWORD_FORBIDDEN）：**只用玩家的永久 Agent 令牌** LOGIN {token, asAgent: true}——令牌来自玩家在本站网页「复制给 AI」的提示词（v46，sk_ 前缀、永不过期）。账号也无法自行创建（v48 起密码登录不存在的用户名返回 SIGNUP_CLOSED，不再自动注册；新账号默认由玩家经 Google / GitHub / 微信扫码登录创建；启用 LOCAL_PASSWORD_SIGNUP_ENABLED 的自托管站可由玩家显式注册，见 LOGIN 的 register 字段）。",
     "LOGOUT 吊销本连接登录所用的令牌并关闭连接（close code 1000）；使用同一令牌的其他连接在下次登录时会收到 SESSION_INVALID。",
     "服务端不补发断线期间错过的推送。重连后重新 LOGIN，再用 GET_STATE / GET_EVENTS / GET_AGENT_INFO 按需查询现状与历史。",
     "服务端主动断开的情形：登录超时（close code 4001）、服务端关闭（1001）、单帧超过 64KB（1009）。",
@@ -520,8 +520,13 @@
       "name": "LOGIN",
       "title": "登录",
       "preAuth": true,
-      "summary": "以用户名 + 密码登录（**仅玩家、仅已有账号**），或以令牌（token）免密登录（玩家与 Agent 均可用）。**v48 起关闭密码通道的自动注册**：密码登录不存在的用户名返回 SIGNUP_CLOSED，不再建号——新账号只能经第三方登录创建（Google / GitHub / 微信扫码，玩家在网页上完成）。**v47：Agent 一律不能用账号密码登录**（哪个站都一样，返回 AGENT_PASSWORD_FORBIDDEN），只能用玩家的永久 Agent 令牌 LOGIN {token, asAgent: true}——令牌来自玩家「复制给 AI」的提示词；账号必须先由玩家建立。游戏有两个站、共用同一套服务与数据库、账号通用：国际站只开放 Google / GitHub 登录（**该站点发密码登录返回 PASSWORD_LOGIN_CLOSED**），国内站才有账号密码。登录类型由本次 asAgent 声明并绑定到连接，两种方式均如此。",
+      "summary": "以用户名 + 密码登录（**仅玩家、仅已有账号**），或以令牌（token）免密登录（玩家与 Agent 均可用）。**v48 起关闭密码通道的自动注册**：密码登录不存在的用户名返回 SIGNUP_CLOSED，不再建号——默认新账号只能经第三方登录创建（Google / GitHub / 微信扫码，玩家在网页上完成）。**自托管可选扩展**：只有服务端显式设置 LOCAL_PASSWORD_SIGNUP_ENABLED=true 且 /auth/config 的 passwordSignup=true 时，玩家可发送 LOGIN {username, password, asAgent:false, register:true} 注册并登录；普通 LOGIN 不会自动建号。此扩展默认关闭，注册限流、同名拒绝，不改变已有账号密码。**v47：Agent 一律不能用账号密码登录**（哪个站都一样，返回 AGENT_PASSWORD_FORBIDDEN），只能用玩家的永久 Agent 令牌 LOGIN {token, asAgent: true}——令牌来自玩家「复制给 AI」的提示词；账号必须先由玩家建立。游戏有两个站、共用同一套服务与数据库、账号通用：国际站只开放 Google / GitHub 登录（**该站点发密码登录返回 PASSWORD_LOGIN_CLOSED**），国内站才有账号密码。登录类型由本次 asAgent 声明并绑定到连接，两种方式均如此。",
       "requestFields": [
+        {
+          "name": "register",
+          "type": "boolean",
+          "desc": "可选，自托管扩展。只有精确 true 才选择显式注册；省略或 false 仍只登录已有账号。要求 LOCAL_PASSWORD_SIGNUP_ENABLED=true、asAgent=false、本站密码登录开放。提供本字段时不得同时提供 token。新用户名不可含空白/控制字符，重复用户名返回 INVALID_CREDENTIALS，开关关闭返回 SIGNUP_CLOSED，超限返回 RATE_LIMITED；仅可信内网启用。"
+        },
         {
           "name": "username",
           "type": "string",
@@ -530,7 +535,7 @@
         {
           "name": "password",
           "type": "string",
-          "desc": "密码方式必填（仅玩家；国际站不开放密码登录）。密码，6..64 字符；与 token 互斥（同时提供返回 INVALID_PARAMS）。Agent 用密码登录返回 AGENT_PASSWORD_FORBIDDEN。用户名不存在返回 SIGNUP_CLOSED（v48 起不再自动注册）。"
+          "desc": "密码方式必填（仅玩家；国际站不开放密码登录）。密码，6..64 字符；与 token 互斥（同时提供返回 INVALID_PARAMS）。Agent 用密码登录返回 AGENT_PASSWORD_FORBIDDEN。普通登录时用户名不存在返回 SIGNUP_CLOSED（v48 起不再自动注册；显式注册见 register）。"
         },
         {
           "name": "asAgent",
@@ -596,7 +601,8 @@
         "SIGNUP_CLOSED",
         "SESSION_INVALID",
         "AGENT_PASSWORD_FORBIDDEN",
-        "PASSWORD_LOGIN_CLOSED"
+        "PASSWORD_LOGIN_CLOSED",
+        "RATE_LIMITED"
       ],
       "examples": [
         {
@@ -13606,7 +13612,7 @@
     },
     {
       "title": "2. 玩家密码登录（仅已有账号，v48 起新用户名不再自动注册）",
-      "explain": "玩家身份用用户名 + 密码登录已有账号。不存在的用户名返回 SIGNUP_CLOSED——密码通道已关闭自动注册，新账号只能经第三方登录（Google / GitHub / 微信扫码）在网页上创建。成功响应签发会话令牌（sessionToken），持久保存后可用于免密自动登录。",
+      "explain": "玩家身份用用户名 + 密码登录已有账号。不存在的用户名返回 SIGNUP_CLOSED——密码通道已关闭自动注册，新账号默认经第三方登录（Google / GitHub / 微信扫码）在网页上创建；自托管站仅在开启 LOCAL_PASSWORD_SIGNUP_ENABLED 时支持玩家另行发送 register:true 显式注册。成功响应签发会话令牌（sessionToken），持久保存后可用于免密自动登录。",
       "frames": [
         {
           "kind": "request",

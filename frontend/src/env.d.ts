@@ -3,6 +3,8 @@ declare module '*.css';
 
 /** Rsbuild 在构建时注入的 PUBLIC_ 前缀环境变量（读取 frontend/.env、.env.local 等）。 */
 interface ImportMetaEnv {
+  /** Opt-in same-origin WebSocket gateway for self-hosted reverse proxies. */
+  readonly PUBLIC_SAME_ORIGIN?: string;
   /** 额外的站点 → WebSocket 网关映射（JSON），见 api/client.ts */
   readonly PUBLIC_WS_BY_HOST?: string;
 }

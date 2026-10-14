@@ -4,6 +4,7 @@
 import type { ClientFrame, PushFrame, ResponseFrame } from './protocol';
 import { withActiveCity } from './cityScope';
 import { getCopy } from '../i18n/bundle';
+import { resolveWsUrl } from './wsUrl';
 
 /** 构建时追加的站点 → 网关映射：环境变量 PUBLIC_WS_BY_HOST（JSON，如 `{"slg.example.cn":"wss://slgws.example.cn/ws"}`），
  *  放在 frontend/.env.local（已被 .gitignore 忽略）；格式不对时忽略并告警。 */
@@ -41,15 +42,15 @@ function localWsOverride(): string | null {
 declare const __SLG_API_PORT__: number | undefined;
 const LOCAL_API_PORT = typeof __SLG_API_PORT__ === 'number' ? __SLG_API_PORT__ : 8080;
 
-/** API 连接地址：已知生产站点按上表走 wss；其余环境默认 ws://127.0.0.1:<API_PORT，缺省 8080>/ws
- *  （可被 localStorage `slg.wsUrl` 覆盖）。调整入口在此。 */
-export const WS_URL = ((): string => {
-  const mapped = typeof window !== 'undefined' ? PRODUCTION_WS_BY_HOST[window.location.hostname] : undefined;
-  if (mapped) {
-    return mapped;
-  }
-  return (typeof window !== 'undefined' ? localWsOverride() : null) ?? `ws://127.0.0.1:${LOCAL_API_PORT}/ws`;
-})();
+/** PUBLIC_SAME_ORIGIN=true 时始终连接当前页面的 /ws；否则保留生产域名映射与开发 API_PORT。
+ *  同域模式显式优先于域名映射和 localStorage，避免自建部署误连其他游戏服。 */
+export const WS_URL = resolveWsUrl({
+  sameOrigin: import.meta.env.PUBLIC_SAME_ORIGIN === 'true',
+  location: typeof window !== 'undefined' ? window.location : undefined,
+  byHost: PRODUCTION_WS_BY_HOST,
+  localOverride: typeof window !== 'undefined' ? localWsOverride() : null,
+  apiPort: LOCAL_API_PORT,
+});
 
 /**
  * Agent API 文档（Markdown）的运行时地址：由 WS_URL 推导（ws→http / wss→https，

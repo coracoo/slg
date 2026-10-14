@@ -1,0 +1,11 @@
+{
+  "extends": "../backend/tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": "../backend",
+    "outDir": "../backend/dist",
+    "sourceMap": false,
+    "typeRoots": ["../backend/node_modules/@types"]
+  },
+  "include": ["../backend/api/**/*.ts", "../backend/worker/**/*.ts", "../backend/common/**/*.ts", "../backend/scripts/set-time-scale.ts"]
+}

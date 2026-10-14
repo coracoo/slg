@@ -92,7 +92,7 @@ export default function App() {
                       loginBusy={session.loginBusy}
                       loginError={session.loginError}
                       lastUsername={session.lastUsername}
-                      onLogin={(username, password) => void session.login(username, password)}
+                      onLogin={(username, password, register) => void session.login(username, password, register)}
                       connectForWechat={session.connectForWechat}
                       onWechatToken={(token) => void session.loginWithWechatToken(token)}
                       onGoogleToken={(token) => void session.loginWithGoogleToken(token)}

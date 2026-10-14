@@ -13,6 +13,8 @@ export interface AuthConfigDeps {
   googleClientId: string | null;
   /** 微信扫码登录是否可用（配置了 WX_APPID / WX_APPSECRET） */
   wechatEnabled: boolean;
+  /** 自托管显式密码注册开关；默认关闭，仍受当前站点密码策略约束。 */
+  passwordSignupEnabled?: boolean;
   /** 是否信任代理头（与 fastify trustProxy 同值；Host 取法与 /ws 一致：优先 X-Forwarded-Host） */
   trustProxy: boolean;
   /** 请求站点是否关闭了密码登录（PASSWORD_LOGIN_DISABLED_HOSTS） */
@@ -36,6 +38,7 @@ export function registerAuthConfigRoute(app: FastifyInstance, deps: AuthConfigDe
       wechatEnabled: passwordLogin ? deps.wechatEnabled : false,
       // v47：国际站不显示用户名密码表单（旧后端没有该字段时前端按 true 处理）
       passwordLogin,
+      passwordSignup: passwordLogin && deps.passwordSignupEnabled === true,
       githubEnabled: deps.githubSiteForHost(host) !== null,
     };
   });

@@ -1,0 +1,87 @@
+name: slg
+x-backend: &backend
+  image: slg-backend:local
+  build:
+    context: .
+    target: backend
+    args:
+      NODE_IMAGE: ${NODE_IMAGE:-node:24-bookworm-slim}
+      NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
+      SLG_SOURCE_REF: ${SLG_SOURCE_REF:-REPLACE_WITH_PUBLISHED_SELFHOST_COMMIT_SHA}
+  restart: unless-stopped
+  init: true
+  environment: &backend-env
+    PGHOST: db
+    PGPORT: '5432'
+    PGDATABASE: slg
+    PGUSER: slg
+    PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    HOST: 0.0.0.0
+    PORT: '8080'
+    LOG_LEVEL: ${LOG_LEVEL:-info}
+  depends_on:
+    db:
+      condition: service_healthy
+  networks: [private]
+services:
+  db:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: slg
+      POSTGRES_USER: slg
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U slg -d slg']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [private]
+  api:
+    <<: *backend
+    environment:
+      <<: *backend-env
+      TRUST_PROXY: 'true'
+      LOCAL_PASSWORD_SIGNUP_ENABLED: ${LOCAL_PASSWORD_SIGNUP_ENABLED:-false}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:-}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8424}
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:8080/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10m
+  worker:
+    <<: *backend
+    command: ['node', 'dist/worker/src/index.js']
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+  frontend:
+    image: slg-frontend:local
+    build:
+      context: .
+      target: frontend
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:24-bookworm-slim}
+        NGINX_IMAGE: ${NGINX_IMAGE:-nginx:1.28-alpine}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
+        SLG_SOURCE_REF: ${SLG_SOURCE_REF:-REPLACE_WITH_PUBLISHED_SELFHOST_COMMIT_SHA}
+    restart: unless-stopped
+    ports:
+      - '${SLG_BIND_IP:-0.0.0.0}:${SLG_PORT:-8424}:80'
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [private]
+volumes:
+  postgres-data:
+networks:
+  private:

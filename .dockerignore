@@ -1,0 +1,17 @@
+.git
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+.env
+.env.*
+!docker.env.example
+**/*.log
+**/evidence
+**/test-results
+**/playwright-report
+**/.DS_Store
+frontend/prototypes
+docs/screenshots*
+*.zip
+*.tar.gz

@@ -65,7 +65,7 @@ export const WALKTHROUGH: WalkthroughStep[] = [
   },
   {
     title: '2. 玩家密码登录（仅已有账号，v48 起新用户名不再自动注册）',
-    explain: '玩家身份用用户名 + 密码登录已有账号。不存在的用户名返回 SIGNUP_CLOSED——密码通道已关闭自动注册，新账号只能经第三方登录（Google / GitHub / 微信扫码）在网页上创建。成功响应签发会话令牌（sessionToken），持久保存后可用于免密自动登录。',
+    explain: '玩家身份用用户名 + 密码登录已有账号。不存在的用户名返回 SIGNUP_CLOSED——密码通道已关闭自动注册，新账号默认经第三方登录（Google / GitHub / 微信扫码）在网页上创建；自托管站仅在开启 LOCAL_PASSWORD_SIGNUP_ENABLED 时支持玩家另行发送 register:true 显式注册。成功响应签发会话令牌（sessionToken），持久保存后可用于免密自动登录。',
     frames: [
       {
         kind: 'request',

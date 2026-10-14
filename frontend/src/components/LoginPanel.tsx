@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useCopy } from '../i18n/bundle';
 import type { ApiClient } from '../api/client';
 import { useAuthConfig } from '../state/useAuthConfig';
+import { validatePasswordSignup, type PasswordSignupValidationError } from '../api/passwordLogin';
 import { WechatLoginTab } from './wechat/WechatLoginTab';
 import { GoogleLoginSection } from './google/GoogleLoginSection';
 import { GithubLoginButton } from './github/GithubLoginButton';
@@ -15,7 +16,7 @@ interface LoginPanelProps {
   loginBusy: boolean;
   loginError: string | null;
   lastUsername: string;
-  onLogin: (username: string, password: string) => void;
+  onLogin: (username: string, password: string, register?: boolean) => void;
   /** 微信扫码登录（v43）：建立（未登录）连接 / 拿到会话令牌后走令牌登录 */
   connectForWechat: () => Promise<ApiClient>;
   onWechatToken: (sessionToken: string) => void;
@@ -27,18 +28,34 @@ type LoginTab = 'password' | 'wechat';
 
 export function LoginPanel({ booting, loginBusy, loginError, lastUsername, onLogin, connectForWechat, onWechatToken, onGoogleToken }: LoginPanelProps) {
   const copy = useCopy();
-  const { COPY, WECHAT_COPY } = copy;
+  const { COPY, WECHAT_COPY, PASSWORD_SIGNUP_COPY } = copy;
   const { config } = useAuthConfig();
   const wechatEnabled = config?.wechatEnabled ?? false;
   const googleClientId = config?.googleClientId ?? null;
   // v47：国际站（服务端 /auth/config 的 passwordLogin=false）不显示用户名密码表单，
   // 登录页只剩 Google / GitHub 入口
   const passwordLoginEnabled = config?.passwordLogin ?? true;
+  const passwordSignupEnabled = passwordLoginEnabled && config?.passwordSignup === true;
   const githubEnabled = config?.githubEnabled ?? false;
   const thirdPartyEnabled = googleClientId !== null || githubEnabled;
   const [tab, setTab] = useState<LoginTab>('password');
   const [username, setUsername] = useState(lastUsername);
   const [password, setPassword] = useState('');
+  const [registerMode, setRegisterMode] = useState(false);
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [validationError, setValidationError] = useState<PasswordSignupValidationError | null>(null);
+  const registering = registerMode && passwordSignupEnabled;
+
+  function changeMode(register: boolean) {
+    setRegisterMode(register);
+    setPassword('');
+    setConfirmPassword('');
+    setValidationError(null);
+  }
+
+  useEffect(() => {
+    if (registerMode && !passwordSignupEnabled) changeMode(false);
+  }, [registerMode, passwordSignupEnabled]);
 
   // 入口按配置收起：正在的分页不再可用时回落到还开着的分页
   useEffect(() => {
@@ -53,9 +70,18 @@ export function LoginPanel({ booting, loginBusy, loginError, lastUsername, onLog
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!username.trim() || !password || loginBusy) return;
-    onLogin(username.trim(), password);
+    if (loginBusy) return;
+    if (registering) {
+      const error = validatePasswordSignup(username, password, confirmPassword);
+      setValidationError(error);
+      if (error) return;
+      onLogin(username.trim(), password, true);
+    } else {
+      if (!username.trim() || !password) return;
+      onLogin(username.trim(), password);
+    }
     setPassword('');
+    setConfirmPassword('');
   }
 
   const tabs: Array<[LoginTab, string, string]> = [];
@@ -96,7 +122,8 @@ export function LoginPanel({ booting, loginBusy, loginError, lastUsername, onLog
               type="button"
               role={role}
               aria-pressed={tab === key}
-              onClick={() => setTab(key)}
+              onClick={() => { changeMode(false); setTab(key); }}
+              disabled={loginBusy}
               className={`-mb-px cursor-pointer border-b-2 px-3 py-1.5 text-[13px] ${
                 tab === key ? 'border-accent text-accent' : 'border-transparent text-dim hover:text-fg'
               }`}
@@ -113,7 +140,8 @@ export function LoginPanel({ booting, loginBusy, loginError, lastUsername, onLog
 
       {!booting && tab === 'password' && passwordLoginEnabled ? (
         <>
-          <form className="flex flex-wrap items-end gap-2" role="账号面板-登录表单" onSubmit={handleSubmit}>
+          {registering ? <h3 className="mb-2 text-[14px] text-fg" role="账号面板-注册标题">{PASSWORD_SIGNUP_COPY.title}</h3> : null}
+          <form className="flex flex-wrap items-end gap-2" role={registering ? '账号面板-注册表单' : '账号面板-登录表单'} onSubmit={handleSubmit}>
             <label className="flex flex-1 flex-col gap-1">
               <span className="text-[12px] text-faint">{COPY.login.username}</span>
               <input
@@ -130,18 +158,45 @@ export function LoginPanel({ booting, loginBusy, loginError, lastUsername, onLog
               <input
                 className="rounded border border-line-soft bg-panel-2 px-2 py-1.5 text-[14px] outline-none focus:border-accent-dim"
                 name="password"
-                autoComplete="current-password"
+                autoComplete={registering ? 'new-password' : 'current-password'}
                 placeholder={COPY.login.passwordPlaceholder}
                 type="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
               />
             </label>
-            <button type="submit" className="btn px-3 py-1.5" role="账号面板-登录按钮" disabled={loginBusy}>
-              {loginBusy ? COPY.login.busy : COPY.login.submit}
+            {registering ? (
+              <label className="flex flex-1 flex-col gap-1" role="账号面板-确认密码">
+                <span className="text-[12px] text-faint">{PASSWORD_SIGNUP_COPY.confirmPassword}</span>
+                <input
+                  className="rounded border border-line-soft bg-panel-2 px-2 py-1.5 text-[14px] outline-none focus:border-accent-dim"
+                  name="confirmPassword"
+                  autoComplete="new-password"
+                  placeholder={PASSWORD_SIGNUP_COPY.confirmPlaceholder}
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                />
+              </label>
+            ) : null}
+            <button type="submit" className="btn px-3 py-1.5" role={registering ? '账号面板-注册按钮' : '账号面板-登录按钮'} disabled={loginBusy}>
+              {registering ? (loginBusy ? PASSWORD_SIGNUP_COPY.busy : PASSWORD_SIGNUP_COPY.submit) : (loginBusy ? COPY.login.busy : COPY.login.submit)}
             </button>
+            {registering ? (
+              <button type="button" className="btn px-3 py-1.5" role="账号面板-取消注册" disabled={loginBusy} onClick={() => changeMode(false)}>
+                {PASSWORD_SIGNUP_COPY.cancel}
+              </button>
+            ) : null}
           </form>
-          {thirdPartyBlock}
+          {registering && validationError ? (
+            <p className="mt-2 text-[12px] text-dim" role="账号面板-注册校验错误" aria-live="polite">{PASSWORD_SIGNUP_COPY[validationError]}</p>
+          ) : null}
+          {!registering && passwordSignupEnabled ? (
+            <button type="button" className="btn mt-2 px-3 py-1.5" role="账号面板-注册入口" disabled={loginBusy} onClick={() => changeMode(true)}>
+              {PASSWORD_SIGNUP_COPY.open}
+            </button>
+          ) : null}
+          {!registering ? thirdPartyBlock : null}
         </>
       ) : null}
 
@@ -160,7 +215,7 @@ export function LoginPanel({ booting, loginBusy, loginError, lastUsername, onLog
       ) : null}
 
       <p className="mt-2 text-[12px] text-faint" role="账号面板-说明">
-        {passwordLoginEnabled ? COPY.login.note : COPY.login.noteInternational}
+        {passwordSignupEnabled ? PASSWORD_SIGNUP_COPY.note : (passwordLoginEnabled ? COPY.login.note : COPY.login.noteInternational)}
       </p>
 
       {/* 开源仓库入口（AISLG-137 海外推广）：未登录访客第一眼能看到；新标签打开避免断开游戏会话 */}

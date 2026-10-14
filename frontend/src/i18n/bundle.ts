@@ -52,6 +52,8 @@ import { QUEST_COPY } from '../copy-quest';
 import { QUEST_COPY_EN } from '../copy-quest-en';
 import { ANNOUNCEMENT_COPY } from '../copy-announcement';
 import { ANNOUNCEMENT_COPY_EN } from '../copy-announcement-en';
+import { PASSWORD_SIGNUP_COPY } from '../copy-password-signup';
+import { PASSWORD_SIGNUP_COPY_EN } from '../copy-password-signup-en';
 
 /** 中文文案全集（结构基准）：英文 Bundle 必须与之同构 */
 const ZH = {
@@ -97,6 +99,7 @@ const ZH = {
   CHAT_COPY,
   QUEST_COPY,
   ANNOUNCEMENT_COPY,
+  PASSWORD_SIGNUP_COPY,
 };
 
 export type Bundle = typeof ZH;
@@ -145,6 +148,7 @@ const EN: Bundle = {
   CHAT_COPY: CHAT_COPY_EN,
   QUEST_COPY: QUEST_COPY_EN,
   ANNOUNCEMENT_COPY: ANNOUNCEMENT_COPY_EN,
+  PASSWORD_SIGNUP_COPY: PASSWORD_SIGNUP_COPY_EN,
 };
 
 const BUNDLES: Record<Lang, Bundle> = { zh: ZH, en: EN };

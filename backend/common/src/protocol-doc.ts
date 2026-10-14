@@ -552,7 +552,7 @@ export const CONNECTION_RULES: string[] = [
   '个别协议对连接声明的登录类型有限制：RESET_ACCOUNT 仅限玩家连接，AGENT_REPORT_PLAN 仅限 Agent 连接（越权返回 AGENT_FORBIDDEN）。该限制基于自报 role，不是可独立验证的安全边界。聊天仅限玩家本人（Agent 连接不可用，本文档不收录聊天接口）。',
   'GET_AGENT_TOKEN / RESET_AGENT_TOKEN 仅限玩家连接（op 64 / 65，v46）。每个账号有一个永久 Agent 令牌（sk_ 前缀，建号自动生成、永不过期），玩家「复制给 AI」的提示词里自带令牌；你用 LOGIN {token, asAgent: true} 登录即可，玩家不必交出账号密码。令牌失效（玩家重置，SESSION_INVALID / close code 4003）时不要重试，请玩家重新发一次新提示词。',
   'LOGIN 支持密码与令牌（token）两种方式：密码登录成功签发会话令牌、令牌登录免密并滑动续期（有效期 30 天，部署配置可调）。令牌可持久保存（如浏览器 localStorage）实现自动登录；收到 SESSION_INVALID 时丢弃令牌并在该站重新登录。**双站点（v47，AISLG-130）**：游戏两个站（国内站 / 国际站 slg.yuntianyou.cc）共用同一套服务与数据库、账号通用；**国际站不开放账号密码登录**（LOGIN 密码登录返回 PASSWORD_LOGIN_CLOSED），只有 Google / GitHub 登录；老密码账号先在国内站登录并绑定 Google / GitHub，再去国际站用绑定方式登录进同一个号（绑定后密码在国内站照样可用）。',
-  'Agent 一律不能用账号密码登录（任何站都一样，LOGIN 密码登录返回 AGENT_PASSWORD_FORBIDDEN）：**只用玩家的永久 Agent 令牌** LOGIN {token, asAgent: true}——令牌来自玩家在本站网页「复制给 AI」的提示词（v46，sk_ 前缀、永不过期）。账号也无法自行创建（v48 起密码登录不存在的用户名返回 SIGNUP_CLOSED，不再自动注册；新账号只能由玩家经 Google / GitHub / 微信扫码登录创建）。',
+  'Agent 一律不能用账号密码登录（任何站都一样，LOGIN 密码登录返回 AGENT_PASSWORD_FORBIDDEN）：**只用玩家的永久 Agent 令牌** LOGIN {token, asAgent: true}——令牌来自玩家在本站网页「复制给 AI」的提示词（v46，sk_ 前缀、永不过期）。账号也无法自行创建（v48 起密码登录不存在的用户名返回 SIGNUP_CLOSED，不再自动注册；新账号默认由玩家经 Google / GitHub / 微信扫码登录创建；启用 LOCAL_PASSWORD_SIGNUP_ENABLED 的自托管站可由玩家显式注册，见 LOGIN 的 register 字段）。',
   'LOGOUT 吊销本连接登录所用的令牌并关闭连接（close code 1000）；使用同一令牌的其他连接在下次登录时会收到 SESSION_INVALID。',
   '服务端不补发断线期间错过的推送。重连后重新 LOGIN，再用 GET_STATE / GET_EVENTS / GET_AGENT_INFO 按需查询现状与历史。',
   '服务端主动断开的情形：登录超时（close code 4001）、服务端关闭（1001）、单帧超过 64KB（1009）。',

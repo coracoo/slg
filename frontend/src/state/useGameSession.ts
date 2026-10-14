@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiClient } from '../api/client';
+import { passwordLoginData, passwordSignupErrorText } from '../api/passwordLogin';
 import {
   Op,
   type AccountStatePushData,
@@ -105,7 +106,7 @@ export interface GameSession {
   /** 「加载更早」分页进行中 */
   eventsLoadingOlder: boolean;
   lastUsername: string;
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string, register?: boolean) => Promise<void>;
   logout: () => Promise<void>;
   /** 按建筑类型发起建造（一期九种建筑） */
   startBuild: (kind: BuildingKind) => Promise<void>;
@@ -215,6 +216,8 @@ export function useGameSession(): GameSession {
   const [eventsLoadingOlder, setEventsLoadingOlder] = useState(false);
   const [lastUsername, setLastUsername] = useState(readLastUsername);
 
+  // State updates render asynchronously; reject duplicate submits in the same event frame.
+  const passwordLoginBusyRef = useRef(false);
   const clientRef = useRef<ApiClient | null>(null);
   const accountRef = useRef<AccountInfo | null>(null);
   const lastEventIdRef = useRef(0);
@@ -659,7 +662,9 @@ export function useGameSession(): GameSession {
   }, [worldClear, techClear, arenaClear, starTowerClear, heroClear, movingClear, ytClear, questClear, resetNpcWarnings, resetAnnouncements]);
 
   const login = useCallback(
-    async (username: string, password: string) => {
+    async (username: string, password: string, register = false) => {
+      if (passwordLoginBusyRef.current) return;
+      passwordLoginBusyRef.current = true;
       setLoginBusy(true);
       setLoginError(null);
       const { COPY } = getCopy();
@@ -667,10 +672,10 @@ export function useGameSession(): GameSession {
         setConnection('connecting');
         const client = ensureClient();
         await client.connect();
-        const res = await client.request(Op.LOGIN, { username, password, asAgent: false });
+        const res = await client.request(Op.LOGIN, passwordLoginData(username, password, register));
         if (!res.ok) {
           setConnection('idle');
-          setLoginError(loginErrorText(res.error?.code, res.error?.message));
+          setLoginError((register === true ? passwordSignupErrorText : loginErrorText)(res.error?.code, res.error?.message));
           return;
         }
         const data = res.data as unknown as LoginResultData;
@@ -687,6 +692,7 @@ export function useGameSession(): GameSession {
         setConnection('idle');
         setLoginError(err instanceof Error ? err.message : COPY.errors.login.fallback);
       } finally {
+        passwordLoginBusyRef.current = false;
         setLoginBusy(false);
       }
     },

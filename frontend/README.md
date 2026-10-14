@@ -14,6 +14,19 @@ npm run typecheck  # tsc --noEmit
 
 包管理器当前用 npm（本机唯一已安装的）。此项在 `docs/phase-1-mvp.md` 里仍属未定，改用 pnpm 只需删掉 `package-lock.json` 后重新安装。
 
+## 自建同域部署与测试
+
+反向代理同时转发页面、`/ws`、`/auth/config` 和 `/agent-api.md` 时，在构建环境或 `frontend/.env.local` 设置 `PUBLIC_SAME_ORIGIN=true`，然后重新构建。客户端使用当前页面的域名和端口，HTTPS 页面连接 `wss`，HTTP 页面连接 `ws`。同域模式优先于内置生产域名映射、`PUBLIC_WS_BY_HOST` 和浏览器 `slg.wsUrl` 覆盖。默认不启用，开发环境继续使用 `API_PORT`（默认 8080），原有生产域名映射保持有效。
+
+注册与连接地址回归测试（从仓库根目录运行，先安装根目录、backend、frontend 依赖）：
+
+```bash
+backend/node_modules/.bin/tsx --test frontend/test/password-auth.test.ts frontend/test/ws-url.test.ts
+node_modules/.bin/playwright test --config frontend/test/password-signup.config.ts
+```
+
+浏览器测试仅模拟配置和 WebSocket，不创建真实账号。默认使用 Playwright Chromium；已有 Chromium 时可设置 `PLAYWRIGHT_CHROMIUM_EXECUTABLE` 指向其路径。
+
 ## 目录
 
 | 路径 | 职责 |
@@ -38,7 +51,7 @@ npm run typecheck  # tsc --noEmit
 
 连接真实后端的第一期闭环界面。启动后端（PostgreSQL + `backend` 的 `npm run api` / `npm run worker`）后运行 `npm run dev`：
 
-- **登录与自动登录**：用户名 + 密码走 WebSocket LOGIN（不存在的用户名以玩家身份首登即注册）。登录成功后浏览器只保存服务端签发的会话令牌（localStorage），下次打开页面自动用它免密登录；令牌过期时自动回落登录表单。登录后账号面板不再显示，账号信息与「切换账号」入口在顶栏：点用户名旁的切换图标 → 确认弹框 → 确认后调用服务端 LOGOUT 吊销令牌并回到登录页。弹框里另有「重置」入口（v9）：点击进入二次确认，确认后调用 RESET_ACCOUNT 把账号全部游戏数据重置为开号初始状态（建筑、队列、资源、人口与事件记录全部复原，城名回「主城」，会话保持在线）；其他在线连接通过 PUSH_CITY_STATE（account_reset）收到通知并全量重拉。
+- **登录与自动登录**：用户名 + 密码走 WebSocket LOGIN，普通登录不会创建账号。自建服务显式开放注册后，登录页从 `/auth/config` 收到 `passwordSignup: true` 才显示「注册新账号」：填写用户名、密码和确认密码，校验后以 `register: true` 发起注册并自动登录；旧后端、配置拉取失败或密码登录关闭时不显示注册入口。登录成功后浏览器只保存服务端签发的会话令牌（localStorage），下次打开页面自动用它免密登录；令牌过期时自动回落登录表单。登录后账号面板不再显示，账号信息与「切换账号」入口在顶栏：点用户名旁的切换图标 → 确认弹框 → 确认后调用服务端 LOGOUT 吊销令牌并回到登录页。弹框里另有「重置」入口（v9）：点击进入二次确认，确认后调用 RESET_ACCOUNT 把账号全部游戏数据重置为开号初始状态（建筑、队列、资源、人口与事件记录全部复原，城名回「主城」，会话保持在线）；其他在线连接通过 PUSH_CITY_STATE（account_reset）收到通知并全量重拉。
 - **微信扫码登录与账号设置（v43）**：登录面板有「用户名密码」「微信扫码登录」两个分页（`账号面板-分页-*`）。进入微信分页就发 `WX_QR_CREATE` 显示码和倒计时，收到 `scanned` 提示在手机上确认，`confirmed` 带回会话令牌后走原有令牌登录；`canceled` / `expired` 自动换码，连续自动重试 3 次后显示「刷新二维码」。码的状态机在 `state/useWechatQr.ts`（登录与绑定共用），展示在 `components/wechat/`。侧栏账号菜单的「账号设置」弹窗（`账号设置弹窗`）有两块：**绑定微信**（未绑定时点按钮弹出 bind 码，扫码确认后状态变「已绑定」）与 **Agent 令牌**（生成令牌——明文只在弹窗里显示一次并带复制按钮、令牌列表、吊销），令牌清单与绑定状态随 `GET_AGENT_INFO` 下发，动作在 `state/useAccountSecurity.ts`。需要服务端配置了微信小游戏凭证，否则提示「微信扫码登录暂不可用」。
 - **城池与改名**：顶栏账号区显示城名与城池等级，点旁边的 ✎ 打开改名弹窗（RENAME_CITY，trim 后 1..24 字符）；其他连接的改名通过 PUSH_CITY_STATE 同步过来。
 - **九种建筑与建造队列**：城内视图九格建筑（农田 / 伐木场 / 采石场 / 铁矿 / 民房 / 官府 / 军营 / 仓库 / 城墙，每种同城唯一，等级上限 10）。建造与升级入口在建筑格的详情弹窗里：点击建筑格弹出该建筑的说明 / 等级 / 效果（生产建筑为小时产量，民房为人口，其余为后续玩法占位）/ 下一步动作消耗（服务端随 GET_STATE 下发，资源不足的项标「缺」）/ 队列状态；未建时弹窗提供「建造」，已建提供「升级至下一等级」——无在建立即开工，有在建立即入队，队满（1 在建 + 2 排队）或已达等级上限时按钮禁用。格子按 Lv 展示等级；非生产建筑格的第三行显示功能标签（人口 / 征兵 / 保护 / 守城）。

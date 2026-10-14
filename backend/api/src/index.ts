@@ -30,6 +30,7 @@ import { registerAgentApiRoutes } from './agent-api-routes';
 import { registerAuthConfigRoute } from './auth-config-routes';
 import { ConnectionRegistry, type ConnInfo } from './connections';
 import { CompletionNotifier } from './notify';
+import { createPasswordSignupService, readPasswordSignupEnabled } from './password-signup';
 
 const PORT = Number(process.env.PORT || 8080);
 const HOST = process.env.HOST || '127.0.0.1';
@@ -81,7 +82,10 @@ async function main(): Promise<void> {
   const wechatConfig = readWechatConfig();
   const wxTtl = Number(process.env.WX_TICKET_TTL_SECONDS || 180);
   const wx = createWxService(wechatConfig ? createWechatClient(wechatConfig) : null, Number.isFinite(wxTtl) && wxTtl > 0 ? wxTtl : 180);
-  const ctx: HandlerContext = { pool, registry, wx, passwordDisabledHosts: readPasswordDisabledHosts() };
+  const ctx: HandlerContext = {
+    pool, registry, wx, passwordDisabledHosts: readPasswordDisabledHosts(),
+    passwordSignup: createPasswordSignupService(readPasswordSignupEnabled()),
+  };
   console.log(
     wechatConfig
       ? `slg-api wechat qr login enabled (env=${wechatConfig.envVersion}, ticket ttl=${wxTtl}s)`
@@ -140,6 +144,7 @@ async function main(): Promise<void> {
   // Host 下发 passwordLogin / githubEnabled（双站点，国际站无密码表单）
   registerAuthConfigRoute(app, {
     googleClientId: google.clientId,
+    passwordSignupEnabled: ctx.passwordSignup?.enabled === true,
     wechatEnabled: wechatConfig !== null,
     trustProxy: TRUST_PROXY !== false,
     isPasswordLoginDisabled: (host) => isPasswordLoginDisabled(host, passwordDisabledHosts),

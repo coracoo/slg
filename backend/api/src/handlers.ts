@@ -4,6 +4,7 @@
 // - 城池操作的校验在事务内加行锁后按最新状态重新校验（玩家 / Agent 同时提交按先后生效）。
 
 import pg from 'pg';
+import type { PasswordSignupService } from './password-signup';
 import {
   Op,
   EventType,
@@ -79,6 +80,8 @@ export interface HandlerContext {
   /** 关闭密码登录的站点 Host（v47，AISLG-130：PASSWORD_LOGIN_DISABLED_HOSTS，如国际站
    *  slg.yuntianyou.cc）；这些 Host 上的连接发 LOGIN 密码登录返回 PASSWORD_LOGIN_DISABLED */
   passwordDisabledHosts: ReadonlySet<string>;
+  /** 自托管显式密码注册；不提供或 enabled=false 时关闭，不改变普通登录行为。 */
+  passwordSignup?: PasswordSignupService;
 }
 
 /** 登录前即可发送的协议：LOGIN、微信扫码登录一组（WX_QR_CREATE 的 bind 用途在处理器内要求已登录）、

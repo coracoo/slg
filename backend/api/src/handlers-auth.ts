@@ -3,6 +3,7 @@
 // - 登录成功即绑定连接、写 Agent 上下线事件并推送，随后关闭流程；
 // - 登出吊销本连接所用的会话令牌并关闭连接。
 
+import { registerPasswordAccount, validPasswordSignupInput } from './password-signup';
 import { EventType, Op, type InitiatorRole } from '../../common/src/protocol';
 import { sanitizeAgentModelInput } from '../../common/src/agent-models';
 import { findAgentTokenByToken, touchAgentToken } from './agent-token';
@@ -22,6 +23,15 @@ export async function handleLogin(
   op: number,
   seq: number | undefined,
 ): Promise<void> {
+  if (data?.register !== undefined && typeof data.register !== 'boolean') {
+    respondError(ctx.registry, conn, op, seq, 'INVALID_PARAMS');
+    return;
+  }
+  // Registration cannot contain a token, including a malformed token value.
+  if (data?.register !== undefined && data?.token !== undefined) {
+    respondError(ctx.registry, conn, op, seq, 'INVALID_PARAMS');
+    return;
+  }
   const docVersion = readDocVersion(data);
   // v50（AISLG-133）：Agent 可自报驱动模型；玩家登录忽略该字段（密码分支 asAgent 恒为 false）
   const agentModel = data?.asAgent === true ? sanitizeAgentModelInput(data?.agentModel) : null;
@@ -92,11 +102,25 @@ export async function handleLogin(
     respondError(ctx.registry, conn, op, seq, 'PASSWORD_LOGIN_CLOSED');
     return;
   }
-  const result = await loginWithPassword(ctx.pool, {
-    username,
-    password,
-    signupIp: conn.ip,
-  });
+  const registering = data?.register === true;
+  if (registering) {
+    if (!ctx.passwordSignup?.enabled) {
+      respondError(ctx.registry, conn, op, seq, 'SIGNUP_CLOSED');
+      return;
+    }
+    if (!validPasswordSignupInput(username, password)) {
+      respondError(ctx.registry, conn, op, seq, 'INVALID_PARAMS');
+      return;
+    }
+    if (!ctx.passwordSignup.limiter.allow(conn.ip)) {
+      respondError(ctx.registry, conn, op, seq, 'RATE_LIMITED');
+      return;
+    }
+  }
+  const input = { username, password, signupIp: conn.ip };
+  const result = registering
+    ? await registerPasswordAccount(ctx.pool, input)
+    : await loginWithPassword(ctx.pool, input);
   if (!result.ok || !result.account) {
     respondError(ctx.registry, conn, op, seq, result.code ?? 'INVALID_CREDENTIALS');
     return;

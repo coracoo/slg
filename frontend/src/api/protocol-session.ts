@@ -112,6 +112,8 @@ export interface LoginPasswordData {
   username: string;
   password: string;
   asAgent: boolean;
+  /** Only explicit player registration sends true; ordinary login never creates an account. */
+  register?: boolean;
 }
 
 export interface LoginTokenData {
