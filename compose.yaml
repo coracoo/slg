@@ -7,7 +7,7 @@ x-backend: &backend
     args:
       NODE_IMAGE: ${NODE_IMAGE:-node:24-bookworm-slim}
       NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
-      SLG_SOURCE_REF: ${SLG_SOURCE_REF:-REPLACE_WITH_PUBLISHED_SELFHOST_COMMIT_SHA}
+      SLG_SOURCE_REF: ${SLG_SOURCE_REF:-404c0bb6a681e49ff0b74ed3129996e2426d22d1}
   restart: unless-stopped
   init: true
   environment: &backend-env
@@ -73,7 +73,7 @@ services:
         NODE_IMAGE: ${NODE_IMAGE:-node:24-bookworm-slim}
         NGINX_IMAGE: ${NGINX_IMAGE:-nginx:1.28-alpine}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
-        SLG_SOURCE_REF: ${SLG_SOURCE_REF:-REPLACE_WITH_PUBLISHED_SELFHOST_COMMIT_SHA}
+        SLG_SOURCE_REF: ${SLG_SOURCE_REF:-404c0bb6a681e49ff0b74ed3129996e2426d22d1}
     restart: unless-stopped
     ports:
       - '${SLG_BIND_IP:-0.0.0.0}:${SLG_PORT:-8424}:80'
