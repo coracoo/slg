@@ -6,6 +6,7 @@ export interface AccountRecord {
   id: string;
   username: string;
   password_hash: string | null;
+  season_id?: number | null;
 }
 export interface SqlCall { sql: string; params: unknown[] }
 export interface TransactionRecord {
@@ -18,6 +19,9 @@ export interface TransactionRecord {
 export function signupPool(options: { failAt?: string; failure?: Error; noTile?: boolean; seed?: AccountRecord } = {}) {
   const accounts = new Map<string, AccountRecord>();
   if (options.seed) accounts.set(options.seed.username, options.seed);
+  const season = { id: 1, name: 'Season 1', status: 'active',
+    start_at: new Date('2026-10-25T00:00:00Z'), end_at: new Date('2026-11-22T00:00:00Z'),
+    seed: 20260927, time_scale: 1, ended_at: null };
   const pendingNames = new Set<string>();
   const reads: SqlCall[] = [];
   const transactions: TransactionRecord[] = [];
@@ -31,6 +35,7 @@ export function signupPool(options: { failAt?: string; failure?: Error; noTile?:
         const account = accounts.get(String(params[0]));
         return rows(account ? [account] : []);
       }
+      if (sql.startsWith('UPDATE accounts SET last_active_at =')) return rows([]);
       if (sql === 'DELETE FROM sessions WHERE expires_at < now()') return rows([]);
       if (sql.startsWith('INSERT INTO sessions')) {
         sessions.push(String(params[0]));
@@ -43,6 +48,7 @@ export function signupPool(options: { failAt?: string; failure?: Error; noTile?:
       transactions.push(tx);
       const id = `account-${transactions.length}`;
       let begun = false;
+      let checkedSeasonMembership = false;
       let account: AccountRecord | undefined;
       let cityPosition: { x: number | null; y: number | null } = { x: null, y: null };
       return {
@@ -58,9 +64,11 @@ export function signupPool(options: { failAt?: string; failure?: Error; noTile?:
             return rows([]);
           }
           if (sql === 'COMMIT') {
-            if (!account) throw new Error('Cannot commit without an account');
-            accounts.set(account.username, account);
-            pendingNames.delete(account.username);
+            if (!account && !checkedSeasonMembership) throw new Error('Cannot commit without an account or season membership check');
+            if (account) {
+              accounts.set(account.username, account);
+              pendingNames.delete(account.username);
+            }
             tx.committed = true;
             return rows([]);
           }
@@ -70,8 +78,15 @@ export function signupPool(options: { failAt?: string; failure?: Error; noTile?:
               throw Object.assign(new Error('duplicate username'), { code: '23505', constraint: 'accounts_username_key' });
             }
             pendingNames.add(username);
-            account = { id, username, password_hash: String(params[1]) };
+            const hasSeason = sql.includes('newbie_until, season_id)') && sql.includes("SELECT id FROM seasons WHERE status = 'active' ORDER BY id DESC LIMIT 1");
+            account = { id, username, password_hash: String(params[1]), season_id: hasSeason ? season.id : null };
             return rows([{ id, username }]);
+          }
+          if (sql === "SELECT id, name, status, start_at, end_at, seed, time_scale, ended_at FROM seasons WHERE status = 'active' ORDER BY id DESC LIMIT 1") return rows([season]);
+          if (sql === 'SELECT season_id FROM accounts WHERE id = $1 FOR UPDATE') {
+            const existing = [...accounts.values()].find((item) => item.id === params[0]);
+            checkedSeasonMembership = !!existing;
+            return rows(existing ? [{ season_id: existing.season_id ?? null }] : []);
           }
           if (sql.startsWith('INSERT INTO cities ')) return rows([{ id: `city-${id}` }]);
           if (sql.startsWith('INSERT INTO city_buildings ')) return rows([]);

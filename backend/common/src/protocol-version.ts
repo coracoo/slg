@@ -503,5 +503,41 @@
  * v59（普通将特长与阵型，只加不改）：HeroView 加 specialty / specialtyBonus，竞技场与将星塔加 formations 与阵型目录。
  * v60（公告，AISLG-162）：新增 GET_ANNOUNCEMENTS（op 96）/ GET_ANNOUNCEMENT（op 97）/ READ_ANNOUNCEMENT（op 98，玩家与 Agent 通用）与推送 PUSH_ANNOUNCEMENT（op 2022，只带标题与分类，本站在线连接收到）；
  *   服务端过滤正文（受限 Markdown：分段、加粗、https 链接）；生效中 / 往期、置顶、强提醒、站点定向与中英双语。新增错误码 ANNOUNCEMENT_NOT_FOUND；server_broadcasts 新增播报类型 announcement。
+ * v61（野地储量，AISLG-165，只加不改）：每块野地有储量（基准 1500 + 3500 × 等级，±20% 固定哈希，金矿 ×0.4），采集上限 10%/h、恢复 2%/h；
+ *   TileView / TerritoryView 新增 reserve（档位对所有人，数值与预计时刻仅归属方与侦察过的账号可见）；采空新增事件 wilderness_depleted 与推送 reason=reserve_depleted；
+ *   掠夺与流寇的地形资源受储量约束。无新增协议号与错误码。
+ * v62（名城独有效果，AISLG-166，只加不改）：8 座名城各一项只有占领者享受的效果，跟着城走（cities.famous_name）：
+ *   洛阳守城城墙减伤 +5 个百分点、长安箭塔伤害 +20%、官渡 / 成都 / 建业 / 邺城辖下野地的粮 / 铁石 / 木 / 金产出 +25%（占领加成与采集同口径，不扣储量）、
+ *   许昌自己城池之间的调兵 / 运输行军速度 +20%、襄阳仓库防掠夺保护额 +50%。TileView.famous 与 CityView 新增 effect / famousEffect
+ *   （{ kind, percent, resources }）。无新增协议号与错误码。
+ * v63（名城主题建筑等级上限，AISLG-167，只加不改）：占有名城时其主题建筑等级上限由 20 提到 25（洛阳城墙、长安箭塔、官渡农田、成都铁矿、建业伐木场、邺城官府、许昌驿站、襄阳仓库）；
+ *   CityView 新增 levelMax（各建筑等级上限）；UPGRADE 的上限与连升 toLevel 上限按该城判定。城墙 21~25 级每级 +1（仅主题城墙可达）。无新增协议号与错误码。
+ * v64（名城专属兵种，AISLG-168，只加不改）：8 座名城各一种专属精锐兵（羽林卫 / 丹阳兵 / 白毦兵 / 虎卫军 / 诸葛连弩兵 / 先登死士 / 虎豹骑 / 西凉铁骑），
+ *   TroopKind / city.army / MARCH.troops 键集新增 8 种；只能在占领对应名城的分城军营征募，否则返回新错误码 ELITE_TROOP_LOCKED（失守后原主人同样拒绝，已练出的兵留在原主人手里）。
+ *   数值为占位（同类普通兵 ×1.3 属性、×2 成本与人口、×1.5 时长与耗粮）。
+ * v65（赛季系统，AISLG-134，只加不改）：新增 GET_SEASON（op 99，维护期间仍可用）查当前赛季 / 维护态 / 我的荣誉 / 是否已加入本赛季，
+ *   GET_HALL_OF_FAME（op 100）查名人堂（某赛季各榜前列与模型榜，分页）；推送 PUSH_SEASON（op 2023，phase = warning 预告 / resetting 换季中 / started 新赛季开始，
+ *   全部在线连接收到，started 后服务端断开全部连接）。换季期间游戏类请求返回新错误码 MAINTENANCE（附 retryAfterSec）。
+ *   三条登录成功响应（密码 / 令牌 / Agent 令牌，第三方登录经 LOGIN 令牌登录）新增 season = { id, endsAt }；
+ *   账号在新赛季第一次登录时惰性加入（自动获得新主城与新手保护）。
+ * v66（联盟 · 建盟与成员管理，AISLG-181 / AISLG-143，只加不改）：新增 CREATE_ALLIANCE（op 101）/ ALLIANCE_APPLY（104）/ ALLIANCE_INVITE（105）/ ALLIANCE_RESPOND（106）/
+ *   ALLIANCE_LEAVE（107）/ ALLIANCE_DISBAND（108）/ ALLIANCE_KICK（109）/ ALLIANCE_SET_ROLE（110）/ ALLIANCE_SET_NOTICE（111），仅玩家连接（Agent 一律 AGENT_FORBIDDEN）；
+ *   查询类 GET_ALLIANCE（102）/ LIST_ALLIANCES（103）玩家与 Agent 通用；推送 PUSH_ALLIANCE_STATE（op 2024）。新增错误码 ALLIANCE_*（12 个）。
+ *   新表 alliances / alliance_members / alliance_requests / alliance_invites；accounts 新增 last_active_at / alliance_cooldown_until。
+ * v67（联盟 · 盟友互不攻击，AISLG-182 / AISLG-143，只加不改）：同一联盟的成员之间 MARCH 掠夺城池 / 抢占野地 / 占领分城、SCOUT 侦察都返回新错误码 ALLY_NOT_ATTACKABLE（运输、增援、调兵不受限）；
+ *   出发后目标才成为盟友的，Worker 到达结算不开战、原路返回（事件 outcome=aborted、cause=ALLY_NOT_ATTACKABLE）；TileView.owner 新增 ally，GET_MAP_OVERVIEW 的 side 新增 'ally'。
+ * v68（联盟 · 联盟频道与系统消息，AISLG-183 / AISLG-143，只加不改）：CHAT_HISTORY / CHAT_SEND 的 channel 新增 'alliance'（联盟频道，仅本联盟成员，无官府门槛；
+ *   无联盟返回 ALLIANCE_NOT_IN；历史只给入盟之后的消息；屏蔽与限频规则同世界频道）。消息视图 type 新增 'system'（盟内大事的系统消息：入盟 / 退出 / 被踢 / 盟主变更，
+ *   内容为 system 字段的 { kind, ...参数 }，文案由客户端拼接）；系统消息没有发送人，sender 由恒有值变为可为 null，新增字段 system。
+ *   解散联盟不写系统消息（联盟频道随联盟删除）。占下名城、成员拿到名将两类事件留待后续子单。无新增协议号与错误码。
+ * v69（联盟 · 地图标记，AISLG-184 / AISLG-143，只加不改）：新增 ALLIANCE_MARK_ADD（op 112，玩家与 Agent 通用）在地图格子上打标记（集结 / 敌人 / 资源 / 危险，可附 20 字内的一句话，过屏蔽词即拒绝）、
+ *   ALLIANCE_MARK_REMOVE（113，成员只能删自己打的，盟主 / 副盟主可删任何人的；Agent 连接只能删自己打的）、GET_ALLIANCE_MARKS（114，查本联盟有效标记）与推送 PUSH_ALLIANCE_MARK（op 2025，reason = added / removed）。
+ *   同一联盟最多 20 个有效标记（满了返回新错误码 ALLIANCE_MARK_LIMIT，附最早一个的到期时刻），同一格子不能重复（ALLIANCE_MARK_EXISTS）；每个标记保留 24 小时。
+ *   创建标记时联盟频道写一条系统消息（system.kind = alliance_mark_created）。新表 alliance_marks（换季清空）。
+ * v70（联盟榜与联盟信息，AISLG-185 / AISLG-143，只加不改）：GET_LEADERBOARD 的 kind 新增 alliance（联盟榜，条目经 allianceEntries 下发：rank / allianceId / name / leader / memberCount / value）；
+ *   联盟势力 = 全体成员占领的野地数 × 1 + 名城数 × 10 + 成员主城官府等级之和 × 1（权重为占位常量 ALLIANCE_POWER_*）；成员不足 5 人不上榜（ALLIANCE_RANK_MIN_MEMBERS）。
+ *   榜单走 Worker 定期快照（alliance_leaderboard_snapshots，换季清空）。GET_ALLIANCE 的 alliance 详情新增 power（势力，现算）与 rank（榜单名次，取最近快照，未上榜为 null）。
+ *   GET_HALL_OF_FAME 的 kind 新增 alliance：换季时联盟榜前三进名人堂，条目 accountId / username 为当时的盟主，value 为势力，并带 allianceId / allianceName / memberCount（个人榜这三项为 null）。
+ *   无新增协议号与错误码。
  */
-export const PROTOCOL_VERSION = 60;
+export const PROTOCOL_VERSION = 70;

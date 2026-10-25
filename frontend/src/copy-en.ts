@@ -64,6 +64,14 @@ export const TROOP_LABEL_EN = {
   supply_wagon: { name: 'Supply Wagon', short: 'Sg' },
   ballista: { name: 'Ballista', short: 'Bl' },
   siege_ram: { name: 'Battering Ram', short: 'Br' },
+  yulin_guard: { name: 'Yulin Guard', short: 'Yg' },
+  danyang_soldier: { name: 'Danyang Infantry', short: 'Dy' },
+  baimao_soldier: { name: 'White-Plume Spearmen', short: 'Bm' },
+  huwei_guard: { name: 'Tiger Guard', short: 'Hg' },
+  zhuge_crossbow: { name: 'Zhuge Crossbowmen', short: 'Zc' },
+  xiandeng_warrior: { name: 'Vanguard Warriors', short: 'Xd' },
+  hubao_cavalry: { name: 'Tiger-Leopard Cavalry', short: 'Hb' },
+  xiliang_cavalry: { name: 'Xiliang Cavalry', short: 'Xl' },
 } satisfies typeof TROOP_LABEL;
 
 /** 资源名 */
@@ -147,6 +155,11 @@ export const TOPBAR_EN = {
   shieldButton: 'Enable Truce Shield',
   shieldButtonBusy: 'Enabling…',
   shieldNextHint: (left: string) => `Truce Shield cooldown · ${left} left (once per week)`,
+  shieldConfirmTitle: 'Enable Truce Shield?',
+  shieldConfirmBody:
+    'Once enabled, no one can attack you for the next 12 hours, and you cannot march against players (wilderness / NPC targets are unaffected). You can enable it only once per week, and it cannot be cancelled once started.',
+  shieldConfirmSubmit: 'Confirm Enable',
+  shieldConfirmCancel: 'Cancel',
   // 仓库快满提醒：≥80% 的资源警示行与悬浮提示（金币不参与，与离线日报同口径）
   storageFullLine: (detail: string) => `⚠ Storage almost full: ${detail}, production beyond the cap will be wasted`,
   storageFullItem: (label: string, percent: number, cap: number) =>
@@ -284,6 +297,8 @@ export const RECRUIT_PANEL_EN = {
   // 本批入伍后的持续耗粮：单兵 foodUse × 数量，每小时持续扣减
   foodUseLine: (perHour: number) => `Upkeep ${perHour}/h afterwards`,
   hintNeedBarracks: (level: number) => `Requires Barracks Lv ${level}`,
+  /** Famous City exclusive troop (v64): row tag, recruitable only in a branch city of that Famous City */
+  eliteOnly: (city: string) => `${city} only`,
   hintNoBarracks: 'No Barracks built yet (build one in the city view to unlock recruitment)',
   hintQueueFull: 'Recruit queue is full (1 recruiting + 2 queued)',
   hintUnlocked: 'Unlocked',

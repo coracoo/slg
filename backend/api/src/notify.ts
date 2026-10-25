@@ -10,6 +10,8 @@ import { loadBattleReport } from '../../common/src/battle-db';
 import type { ConnectionRegistry } from './connections';
 import { buildView, marchView, recruitView, type BuildRow, type MarchRow, type RecruitRow } from './views';
 import { loadWorldWindow } from './views-world';
+import { handleSeasonNotice } from './notify-season';
+import { pushAllianceMessage } from './handlers-chat-send';
 
 /** 兜底轮询周期；第一期望延迟与 DB 压力的折中，未做负载评估 */
 const POLL_FALLBACK_MS = 5000;
@@ -92,11 +94,20 @@ export class CompletionNotifier {
         host?: string | null;
         /** reason='npc_warning'（v23 AISLG-57）时的预警载荷（完整推送 data） */
         data?: Record<string, unknown>;
+        /** reason='alliance_state'（v66 AISLG-181，Worker 自动转让盟主）时的收件账号 */
+        accountIds?: string[];
+        /** reason='alliance_chat'（v68 AISLG-183）时的联盟与消息编号：联盟大事的系统消息落库后推给本联盟在线成员 */
+        allianceId?: string;
+        messageId?: number;
       } = {};
       try {
         payload = msg.payload ? JSON.parse(msg.payload) : {};
       } catch {
         // 兼容非 JSON 载荷：按完成通知处理
+      }
+      // 赛季 / 维护态（v65，AISLG-134）：见 notify-season.ts
+      if (handleSeasonNotice(payload as Record<string, unknown>, this.registry, this.pool)) {
+        return;
       }
       if (payload.reason === 'server_broadcast' && payload.broadcast) {
         // 全服播报（v23 AISLG-60）：广而告之所有在线连接
@@ -113,6 +124,20 @@ export class CompletionNotifier {
         this.registry.broadcastAllWhere(
           { op: Op.PUSH_ANNOUNCEMENT, push: true, data: payload.announcement },
           (conn) => host === null || conn.host === host,
+        );
+        return;
+      }
+      if (payload.reason === 'alliance_state' && Array.isArray(payload.accountIds) && payload.data) {
+        // 联盟状态变化（v66 AISLG-181）：Worker 自动转让盟主后推给该联盟的成员（含 Agent 连接）
+        for (const accountId of payload.accountIds) {
+          this.registry.broadcast(accountId, { op: Op.PUSH_ALLIANCE_STATE, push: true, data: payload.data });
+        }
+        return;
+      }
+      if (payload.reason === 'alliance_chat' && payload.allianceId && typeof payload.messageId === 'number') {
+        // 联盟频道新消息（v68 AISLG-183）：只推给本联盟在线的玩家连接
+        pushAllianceMessage(this.pool, this.registry, payload.allianceId, payload.messageId).catch((err) =>
+          console.error('alliance chat push failed:', err),
         );
         return;
       }

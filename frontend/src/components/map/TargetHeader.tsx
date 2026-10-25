@@ -3,6 +3,7 @@
  */
 
 import { useState } from 'react';
+import { formatClock } from '../../api/format';
 import { TROOP_KINDS, type BranchInfoView, type CityView, type TileDetailView } from '../../api/protocol';
 import { getCopy, useCopy } from '../../i18n/bundle';
 import { tName } from '../../i18n/names';
@@ -51,7 +52,7 @@ function iconOf(detail: TileDetailView, mover: 'caravan' | 'bandit' | null, isOw
 
 export function TargetHeader({ world, city, x, y, detail, origin, branch, now, mover, isOwnCity, onClose }: TargetHeaderProps) {
   const copy = useCopy();
-  const { COPY, CITY_COPY, RESOURCE_LABEL, TERRAIN_LABEL, TILE_KIND_LABEL, TARGET_COPY, TECH_COPY, HERO_COPY } = copy;
+  const { COPY, CITY_COPY, RESOURCE_LABEL, TERRAIN_LABEL, TILE_KIND_LABEL, TARGET_COPY, TECH_COPY, HERO_COPY, ALLIANCE_COPY } = copy;
   const { openScoutReport } = useScoutReportModal();
   const [lookup, setLookup] = useState<'idle' | 'loading' | 'missing'>('idle');
 
@@ -155,6 +156,11 @@ export function TargetHeader({ world, city, x, y, detail, origin, branch, now, m
                 {detail.owner ? COPY.worldMap.ownerRow(`${detail.owner.username} · ${tName(detail.owner.cityName)}`) : COPY.worldMap.ownerNone}
               </p>
             ) : null}
+            {detail.owner?.ally ? (
+              <p role="选中详情-盟友" className="truncate font-semibold text-st-online">
+                {ALLIANCE_COPY.ally.tag}
+              </p>
+            ) : null}
             {branch && !isOwnCity && (detail.kind === 'npc_city' || (detail.kind === 'city' && detail.durability != null)) ? (
               <p role="世界地图详情区-分城名额" className="truncate text-dim" title={CITY_COPY.worldMap.branchQuotaRow(branch.count, branch.limit)}>
                 {CITY_COPY.worldMap.branchQuotaRow(branch.count, branch.limit)}
@@ -179,6 +185,12 @@ export function TargetHeader({ world, city, x, y, detail, origin, branch, now, m
               <p className="truncate text-dim">
                 {COPY.worldMap.wildernessBonusRow(RESOURCE_LABEL[detail.wilderness.resource], detail.wilderness.bonusRate)}
                 {detail.wilderness.gatherRate > 0 ? ` · ${COPY.worldMap.wildernessGatherRow(RESOURCE_LABEL[detail.wilderness.resource], detail.wilderness.gatherRate)}` : ''}
+              </p>
+            ) : null}
+            {detail.reserve ? (
+              <p role="世界地图详情区-野地储量" className="truncate text-dim">
+                {COPY.worldMap.reserveRow(COPY.worldMap.reserveTier[detail.reserve.tier], detail.reserve.current, detail.reserve.cap)}
+                {detail.reserve.eta ? ` · ${COPY.worldMap.reserveEta(detail.reserve.eta.kind, formatClock(detail.reserve.eta.at))}` : ''}
               </p>
             ) : null}
             {detail.kind === 'npc_city' ? (

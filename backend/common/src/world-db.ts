@@ -11,6 +11,8 @@ import {
   type TileKind,
   type TroopKind,
 } from './protocol';
+import { currentWorldSeed } from './world-seed';
+import { SCHEMA_LOCK_ID } from './db';
 import {
   WORLD_SIZE,
   generateWorldTiles,
@@ -38,16 +40,28 @@ export async function ensureWorld(pool: pg.Pool): Promise<void> {
     const count = await client.query(`SELECT count(*)::int AS n FROM world_tiles`);
     const expected = WORLD_SIZE * WORLD_SIZE;
     if (count.rows[0].n !== expected) {
-      await client.query('BEGIN');
-      try {
-        if (count.rows[0].n > 0) {
-          await wipeWorldForRebuild(client);
+      // 整段重建在一个事务里，可安全重试：另一进程的 ensureSchema 正在 ALTER TABLE（ACCESS EXCLUSIVE）时，
+      // 本事务的外键检查会与其互等，PostgreSQL 判死锁（40P01）时回滚后短暂退避重试，不能让 API/Worker 因此退出
+      for (let attempt = 1; ; attempt += 1) {
+        await client.query('BEGIN');
+        try {
+          // 先取 ensureSchema 的咨询锁（事务级）：对方正在 ALTER TABLE 时本事务等它做完，而不是拿着表锁与它互等。
+          // 锁序固定为 世界锁 → 建表锁；ensureSchema 只取建表锁，不会成环
+          await client.query(`SELECT pg_advisory_xact_lock(${SCHEMA_LOCK_ID})`);
+          if (count.rows[0].n > 0) {
+            await wipeWorldForRebuild(client);
+          }
+          // 种子取当前赛季的（第 1 季为 WORLD_SEED，之后各季为换季时随机生成的种子；重启不换图）
+          await insertWorldTiles(client, generateWorldTiles(await currentWorldSeed(client)));
+          await client.query('COMMIT');
+          break;
+        } catch (err) {
+          await client.query('ROLLBACK').catch(() => undefined);
+          if ((err as { code?: string }).code !== '40P01' || attempt >= 5) {
+            throw err;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
         }
-        await insertWorldTiles(client, generateWorldTiles());
-        await client.query('COMMIT');
-      } catch (err) {
-        await client.query('ROLLBACK').catch(() => undefined);
-        throw err;
       }
     }
     // 名城升格（v24 AISLG-56）：8 座，幂等；世界重建后登记已清空，会重新挑选
@@ -113,7 +127,7 @@ async function wipeWorldForRebuild(client: pg.PoolClient): Promise<void> {
 }
 
 /** 批量写入世界地块：分块多值插入（单语句参数上限 65535，大世界必须分块） */
-async function insertWorldTiles(client: pg.PoolClient, tiles: WorldTileSeed[]): Promise<void> {
+export async function insertWorldTiles(client: pg.PoolClient, tiles: WorldTileSeed[]): Promise<void> {
   const CHUNK = 500;
   for (let start = 0; start < tiles.length; start += CHUNK) {
     const slice = tiles.slice(start, start + CHUNK);
@@ -261,6 +275,9 @@ export interface TileRow {
   npc: NpcCitySnapshot | null;
   /** 最近一次成功掠夺的时间（v16；冷却判定见 plunder.ts）；从未被掠为 null */
   plundered_at: Date | null;
+  /** 野地储量（v61，AISLG-165；基准单位，无值 = 满储量）与落库时刻，推进规则见 wilderness-reserve.ts */
+  reserve?: number | null;
+  reserve_at?: Date | null;
   /** 换主保护截止（v39，AISLG-123）：野地被玩家抢占后的一小段保护期内谁都不能再抢；其余为 null */
   owner_changed_until?: Date | null;
   /** 在野名将落位（v54，AISLG-144）：该野地隐居着此名将；其余为 null */
@@ -320,10 +337,11 @@ export async function clearTileOccupation(client: pg.PoolClient, x: number, y: n
   );
 }
 
-/** 某城占领的全部野地（含驻军总数；CityView.territory 与产量加成计算共用） */
+/** 某城占领的全部野地（含驻军总数与所属城的名城标记；CityView.territory 与产量加成计算共用） */
 export async function loadTerritory(q: pg.Pool | pg.PoolClient, cityId: string): Promise<TerritoryRow[]> {
   const res = await q.query(
-    `SELECT wt.x, wt.y, wt.terrain, wt.level, COALESCE(ta.total, 0)::int AS garrison
+    `SELECT wt.x, wt.y, wt.terrain, wt.level, wt.reserve, wt.reserve_at, COALESCE(ta.total, 0)::int AS garrison,
+            (SELECT c.famous_name FROM cities c WHERE c.id = wt.owner_city_id) AS famous_name
      FROM world_tiles wt
      LEFT JOIN (SELECT x, y, sum(count) AS total FROM tile_army GROUP BY x, y) ta
        ON ta.x = wt.x AND ta.y = wt.y

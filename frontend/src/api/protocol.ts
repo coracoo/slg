@@ -3,7 +3,7 @@
 
 import type { CityGuardView } from './protocol-hero';
 
-export const PROTOCOL_VERSION = 59;
+export const PROTOCOL_VERSION = 70;
 
 /** 协议号（请求与响应用同一值，推送以 op 区分类型） */
 export const Op = {
@@ -78,6 +78,12 @@ export const Op = {
   TRUCE: 53,
   /** 生成微信扫码二维码（v43）：data.purpose = login | bind；login 登录前即可发，bind 需玩家已登录 */
   WX_QR_CREATE: 54,
+  /** 微信小游戏扫码上报（v43）：data.ticket + data.code；登录前即可发，仅供微信小游戏 */
+  WX_SCAN: 55,
+  /** 微信小游戏确认登录 / 绑定（v43）：data.ticket；只接受扫码的那条连接，仅供微信小游戏 */
+  WX_CONFIRM: 56,
+  /** 微信小游戏取消登录 / 绑定（v43）：data.ticket；只接受扫码的那条连接，仅供微信小游戏 */
+  WX_CANCEL: 57,
   /** 查看本账号永久 Agent 令牌（v46）：仅玩家连接，没有时自动补生成 */
   GET_AGENT_TOKEN: 64,
   /** 重置永久 Agent 令牌（v46）：仅玩家连接，旧令牌立即失效、用它在线的连接被断开 */
@@ -131,9 +137,41 @@ export const Op = {
   DISCARD_CITY: 94,
   /** 世界小地图总览（v58，AISLG-160）：全图城池点位，玩家与 Agent 通用 */
   GET_MAP_OVERVIEW: 95,
+  /** 查询赛季（v65，AISLG-134）：当前赛季 / 维护态 / 我的荣誉 / 是否已加入本赛季；维护期间仍可用 */
+  GET_SEASON: 99,
+  /** 查询名人堂（v65，AISLG-134）：某赛季各榜前列与模型榜，分页；缺省最近一个已结束赛季 */
+  GET_HALL_OF_FAME: 100,
   GET_ANNOUNCEMENTS: 96,
   GET_ANNOUNCEMENT: 97,
   READ_ANNOUNCEMENT: 98,
+  /** 创建联盟（v66，AISLG-181）：data.name；官府 ≥ 5 级、扣 10 万金币；仅玩家连接 */
+  CREATE_ALLIANCE: 101,
+  /** 查询联盟（v66）：缺省 = 我的联盟（含我的申请 / 邀请，盟主 / 副盟主另带待审批申请）；给 allianceId = 公开信息 */
+  GET_ALLIANCE: 102,
+  /** 联盟列表（v66）：按成员数降序分页 */
+  LIST_ALLIANCES: 103,
+  /** 申请加入联盟 / 撤回申请（v66，仅玩家连接） */
+  ALLIANCE_APPLY: 104,
+  /** 邀请玩家入盟 / 撤回邀请（v66，盟主或副盟主；仅玩家连接） */
+  ALLIANCE_INVITE: 105,
+  /** 答复申请或邀请（v66；仅玩家连接） */
+  ALLIANCE_RESPOND: 106,
+  /** 退出联盟（v66；盟主有其他成员时须先转让；仅玩家连接） */
+  ALLIANCE_LEAVE: 107,
+  /** 解散联盟（v66；仅盟主） */
+  ALLIANCE_DISBAND: 108,
+  /** 踢出成员（v66；立即生效；副盟主只能踢普通成员） */
+  ALLIANCE_KICK: 109,
+  /** 任免副盟主 / 转让盟主（v66；仅盟主） */
+  ALLIANCE_SET_ROLE: 110,
+  /** 修改联盟公告（v66；盟主或副盟主） */
+  ALLIANCE_SET_NOTICE: 111,
+  /** 放置联盟地图标记（v69，AISLG-184）：data.x / y / kind，可选 text；同联盟同格不可重复、最多 20 个；玩家与 Agent 通用 */
+  ALLIANCE_MARK_ADD: 112,
+  /** 删除联盟地图标记（v69，AISLG-184）：data.id；成员只能删自己的，盟主 / 副盟主可删任何人的（仅玩家连接） */
+  ALLIANCE_MARK_REMOVE: 113,
+  /** 查询本联盟的有效地图标记（v69，AISLG-184） */
+  GET_ALLIANCE_MARKS: 114,
   /** 用 Google ID Token 换会话令牌（v44）：data.credential；登录前可发，仅供网页；第一次自动建号 */
   GOOGLE_LOGIN: 60,
   /** 给当前账号绑定 Google（v44）：data.credential；仅玩家连接，仅供网页 */
@@ -184,6 +222,12 @@ export const Op = {
   /** 竞技场状态变化推送（v53，AISLG-145）：challenged / daily_reward / milestone，账号全部在线连接收到 */
   PUSH_ARENA_STATE: 2021,
   PUSH_ANNOUNCEMENT: 2022,
+  /** 联盟状态变化推送（v66，AISLG-181）：reason = joined / left / kicked / role_changed / disbanded / notice / request_received / request_resolved / invited；收到后重新 GET_ALLIANCE */
+  PUSH_ALLIANCE_STATE: 2024,
+  /** 联盟地图标记变化推送（v69，AISLG-184）：reason = added / removed */
+  PUSH_ALLIANCE_MARK: 2025,
+  /** 赛季预告 / 换季中 / 新赛季开始（v65，AISLG-134）：全部在线连接收到，含 Agent；started 后服务端断开全部连接 */
+  PUSH_SEASON: 2023,
   /** 查询将星塔（v55，AISLG-146） */
   GET_STAR_TOWER: 83,
   /** 挑战将星塔下一层（v55，AISLG-146）：无参数，三局两胜，赢了首通发奖励 */
@@ -200,6 +244,18 @@ export type InitiatorRole = 'player' | 'agent';
 export type ErrorCode =
   | 'INVALID_MESSAGE'
   | 'ANNOUNCEMENT_NOT_FOUND'
+  | 'ALLIANCE_NAME_INVALID'
+  | 'ALLIANCE_NAME_TAKEN'
+  | 'ALLIANCE_GOVERNMENT_TOO_LOW'
+  | 'ALLIANCE_ALREADY_IN'
+  | 'ALLIANCE_NOT_IN'
+  | 'ALLIANCE_NOT_FOUND'
+  | 'ALLIANCE_COOLDOWN'
+  | 'ALLIANCE_FULL'
+  | 'ALLIANCE_FORBIDDEN'
+  | 'ALLIANCE_ROLE_FULL'
+  | 'ALLIANCE_LEADER_MUST_TRANSFER'
+  | 'ALLIANCE_REQUEST_EXISTS'
   | 'UNKNOWN_OP'
   | 'NOT_LOGGED_IN'
   | 'ALREADY_LOGGED_IN'
@@ -216,6 +272,7 @@ export type ErrorCode =
   | 'BUILD_NOT_CANCELLABLE'
   | 'AGENT_FORBIDDEN'
   | 'TROOP_NOT_AVAILABLE'
+  | 'ELITE_TROOP_LOCKED'
   | 'INSUFFICIENT_POPULATION'
   | 'RECRUIT_QUEUE_FULL'
   | 'RECRUIT_NOT_CANCELLABLE'
@@ -260,6 +317,9 @@ export type ErrorCode =
   | 'TRUCE_ALREADY_ACTIVE'
   | 'TRUCE_WEEKLY_USED'
   | 'TILE_PROTECTED'
+  | 'ALLY_NOT_ATTACKABLE'
+  | 'ALLIANCE_MARK_LIMIT'
+  | 'ALLIANCE_MARK_EXISTS'
   | 'WX_TICKET_INVALID'
   | 'WX_CODE_INVALID'
   | 'WX_ALREADY_BOUND'
@@ -278,7 +338,26 @@ export type ErrorCode =
   | 'CHAT_BLOCKED'
   | 'CHAT_RATE_LIMITED'
   | 'NICKNAME_TAKEN'
+  | 'DISCARD_COOLDOWN'
+  | 'DISCARD_MAIN_CITY'
+  | 'CITY_IN_BATTLE'
+  | 'ARMY_OUTSIDE'
+  | 'WILDERNESS_GARRISONED'
+  | 'ARENA_NOT_JOINED'
+  | 'ARENA_TARGET_INVALID'
+  | 'ARENA_NO_CHALLENGES'
+  | 'ARENA_TARGET_BUSY'
+  | 'ARENA_PAIR_COOLDOWN'
+  | 'STAR_TOWER_CLEARED'
+  | 'STAR_TOWER_NO_CITY'
+  | 'STAR_TOWER_NO_LINEUP'
+  /** 换季维护中（v65）：除 GET_SEASON 与登录相关协议外一律返回，响应附 retryAfterSec（秒） */
+  | 'MAINTENANCE'
   | 'INTERNAL';
+
+// 协议载荷补齐（v65）：请求 / 响应类型、枚举常量与守卫，以及赛季协议（GET_SEASON / GET_HALL_OF_FAME / PUSH_SEASON）
+export * from './protocol-wire';
+export * from './protocol-season';
 
 export interface Resources {
   gold: number;
@@ -291,7 +370,7 @@ export interface Resources {
 /** 建造排队上限（不含在建，占位）：镜像 rules.ts 的 BUILD_QUEUE_CAPACITY，仅用于界面禁用；权威判定在服务端（QUEUE_FULL）。 */
 export const BUILD_QUEUE_CAPACITY = 2;
 
-/** 建筑等级上限：镜像 rules.ts 的 MAX_BUILDING_LEVEL，仅用于界面禁用；权威判定在服务端（BUILDING_LEVEL_MAX）。 */
+/** 建筑等级上限（普通建筑）：镜像 rules.ts 的 MAX_BUILDING_LEVEL。界面按建筑取值请用 CityView.levelMax（名城主题建筑为 25）；权威判定在服务端（BUILDING_LEVEL_MAX）。 */
 export const BUILDING_LEVEL_MAX = 20;
 
 /**
@@ -387,6 +466,15 @@ export const TROOP_KINDS = [
   'supply_wagon',
   'ballista',
   'siege_ram',
+  // v64 名城专属八种（AISLG-168）：占领对应名城的分城才能征募
+  'yulin_guard',
+  'danyang_soldier',
+  'baimao_soldier',
+  'huwei_guard',
+  'zhuge_crossbow',
+  'xiandeng_warrior',
+  'hubao_cavalry',
+  'xiliang_cavalry',
 ] as const;
 
 export type TroopKind = (typeof TROOP_KINDS)[number];
@@ -445,6 +533,65 @@ export type {
   ReadAnnouncementResponseData,
 } from './protocol-announcement';
 
+export {
+  ALLIANCE_COOLDOWN_MS,
+  ALLIANCE_CREATE_COST_GOLD,
+  ALLIANCE_CREATE_MIN_GOVERNMENT,
+  ALLIANCE_INVITE_TTL_MS,
+  ALLIANCE_LEADER_INACTIVE_MS,
+  ALLIANCE_LIST_PAGE_SIZE,
+  ALLIANCE_MAX_MEMBERS,
+  ALLIANCE_MAX_VICES,
+  ALLIANCE_NAME_MAX_CHARS,
+  ALLIANCE_NAME_MIN_CHARS,
+  ALLIANCE_NOTICE_MAX_CHARS,
+  ALLIANCE_POWER_FAMOUS_WEIGHT,
+  ALLIANCE_POWER_GOVERNMENT_WEIGHT,
+  ALLIANCE_POWER_TERRITORY_WEIGHT,
+  ALLIANCE_RANK_MIN_MEMBERS,
+  ALLIANCE_MARK_KINDS,
+  ALLIANCE_MARK_MAX,
+  ALLIANCE_MARK_PUSH_REASONS,
+  ALLIANCE_MARK_TEXT_MAX_CHARS,
+  ALLIANCE_MARK_TTL_MS,
+  ALLIANCE_PUSH_REASONS,
+  ALLIANCE_REQUEST_TTL_MS,
+  ALLIANCE_ROLES,
+} from './protocol-alliance';
+export type {
+  AllianceApplyRequestData,
+  AllianceBriefView,
+  AllianceDetailView,
+  AllianceLeaderboardEntryView,
+  AllianceInviteRequestData,
+  AllianceKickRequestData,
+  AllianceMemberView,
+  AlliancePlayerView,
+  AlliancePushReason,
+  AllianceReceivedInviteView,
+  AllianceRequestView,
+  AllianceRespondRequestData,
+  AllianceRole,
+  AllianceSentInviteView,
+  AllianceSetNoticeRequestData,
+  AllianceSetRoleRequestData,
+  CreateAllianceRequestData,
+  GetAllianceRequestData,
+  GetAllianceResponseData,
+  ListAlliancesRequestData,
+  ListAlliancesResponseData,
+  PushAllianceStateData,
+  AllianceMarkAddRequestData,
+  AllianceMarkAddResponseData,
+  AllianceMarkKind,
+  AllianceMarkPushReason,
+  AllianceMarkRemoveRequestData,
+  AllianceMarkRemoveResponseData,
+  AllianceMarkView,
+  GetAllianceMarksResponseData,
+  PushAllianceMarkData,
+} from './protocol-alliance';
+
 export type {
   TerrainKind,
   TerrainResource,
@@ -460,6 +607,7 @@ export type {
   BranchInfoView,
   CityRefView,
   FamousTileView,
+  FamousEffectView,
   WorldMapResponseData,
   MapOverviewResponseData,
   MapOverviewSide,
@@ -530,7 +678,7 @@ export type {
   YellowTurbanPushData,
 } from './protocol-yt';
 import type { TechLevels } from './protocol-tech';
-import type { MarchView, TerritoryView } from './protocol-world';
+import type { FamousEffectView, MarchView, TerritoryView } from './protocol-world';
 
 /**
  * 单兵征募数值（v11，占位）：镜像 backend/common/src/troops.ts 的 TROOP_INFO，
@@ -553,7 +701,32 @@ export const TROOP_INFO: Record<
   supply_wagon: { cost: { gold: 200, wood: 300, food: 60, stone: 0, iron: 40 }, population: 6, unitSeconds: 30, barracksLevel: 3, foodUse: 10, carry: 5000 },
   ballista: { cost: { gold: 350, wood: 300, food: 80, stone: 0, iron: 120 }, population: 3, unitSeconds: 45, barracksLevel: 7, foodUse: 8, carry: 0 },
   siege_ram: { cost: { gold: 400, wood: 400, food: 80, stone: 100, iron: 100 }, population: 5, unitSeconds: 60, barracksLevel: 8, foodUse: 10, carry: 0 },
+  yulin_guard: { cost: { gold: 360, wood: 120, food: 240, stone: 0, iron: 160 }, population: 2, unitSeconds: 38, barracksLevel: 7, foodUse: 9, carry: 80 },
+  danyang_soldier: { cost: { gold: 360, wood: 120, food: 240, stone: 0, iron: 160 }, population: 2, unitSeconds: 38, barracksLevel: 7, foodUse: 9, carry: 80 },
+  baimao_soldier: { cost: { gold: 300, wood: 160, food: 200, stone: 0, iron: 100 }, population: 2, unitSeconds: 30, barracksLevel: 6, foodUse: 8, carry: 60 },
+  huwei_guard: { cost: { gold: 300, wood: 160, food: 200, stone: 0, iron: 100 }, population: 2, unitSeconds: 30, barracksLevel: 6, foodUse: 8, carry: 60 },
+  zhuge_crossbow: { cost: { gold: 400, wood: 240, food: 200, stone: 0, iron: 120 }, population: 2, unitSeconds: 45, barracksLevel: 8, foodUse: 9, carry: 50 },
+  xiandeng_warrior: { cost: { gold: 400, wood: 240, food: 200, stone: 0, iron: 120 }, population: 2, unitSeconds: 45, barracksLevel: 8, foodUse: 9, carry: 50 },
+  hubao_cavalry: { cost: { gold: 600, wood: 160, food: 300, stone: 0, iron: 200 }, population: 2, unitSeconds: 60, barracksLevel: 9, foodUse: 18, carry: 100 },
+  xiliang_cavalry: { cost: { gold: 600, wood: 160, food: 300, stone: 0, iron: 200 }, population: 2, unitSeconds: 60, barracksLevel: 9, foodUse: 18, carry: 100 },
 };
+
+/** 名城 → 专属兵种（v64，AISLG-168）：镜像 backend/common/src/famous-effects.ts 的 FAMOUS_ELITE_TROOP */
+export const FAMOUS_ELITE_TROOP: Record<string, TroopKind> = {
+  洛阳: 'yulin_guard',
+  建业: 'danyang_soldier',
+  襄阳: 'baimao_soldier',
+  许昌: 'huwei_guard',
+  成都: 'zhuge_crossbow',
+  邺城: 'xiandeng_warrior',
+  官渡: 'hubao_cavalry',
+  长安: 'xiliang_cavalry',
+};
+
+/** 专属兵对应的名城（普通兵为 undefined）：镜像 famousCityOfEliteTroop */
+export function famousCityOfEliteTroop(troop: TroopKind): string | undefined {
+  return Object.keys(FAMOUS_ELITE_TROOP).find((name) => FAMOUS_ELITE_TROOP[name] === troop);
+}
 
 /** 单次征募数量上限（占位）：镜像 backend/common/src/troops.ts 的 RECRUIT_COUNT_MAX */
 export const RECRUIT_COUNT_MAX = 100;
@@ -584,6 +757,14 @@ export const TROOP_POWER: Record<TroopKind, number> = {
   supply_wagon: 1,
   ballista: 8,
   siege_ram: 3,
+  yulin_guard: 7,
+  danyang_soldier: 7,
+  baimao_soldier: 5,
+  huwei_guard: 5,
+  zhuge_crossbow: 7,
+  xiandeng_warrior: 7,
+  hubao_cavalry: 10,
+  xiliang_cavalry: 10,
 };
 
 /** 征兵排队上限（不含征募中，占位）：镜像 backend/common/src/troops.ts 的 RECRUIT_QUEUE_CAPACITY，
@@ -625,6 +806,8 @@ export interface CityView {
   famousName: string | null;
   /** 该城的独占产量加成百分数（v24 AISLG-56：名城分城 +20%，已计入 production）；普通城为 0 */
   productionBonusPercent: number;
+  /** 名城独有效果（v62，AISLG-166）：只有占领者享受、跟着城走；普通城为 null */
+  famousEffect: FamousEffectView | null;
   /** 城池等级（v24 起 = 该城官府等级） */
   level: number;
   resources: Resources;
@@ -634,6 +817,8 @@ export interface CityView {
   levels: BuildingCounts;
   /** 各建筑「下一步动作」成本：build=建造（未建时），upgrade=升级（已建未满级时），null=不可用 */
   costs: Record<BuildingKind, KindActionCosts>;
+  /** 各建筑的等级上限（v63）：普通 20；占有对应名城时其主题建筑为 25 */
+  levelMax: Record<BuildingKind, number>;
   /** 兼容字段：已建成的农田数量（= buildings.farm） */
   farms: number;
   production: ProductionRates;

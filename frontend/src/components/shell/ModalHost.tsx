@@ -1,5 +1,5 @@
 /** 全局弹窗宿主：离线日报（上线自动弹出 / 手动打开）、NPC 来袭提醒（推送立即弹出，逐条确认；顶栏胶囊可重新打开）、
- *  排行榜、黄巾之乱详情、公告列表与强提醒公告（AISLG-162）。战报 / 侦察报告弹窗由各自的 Provider 宿主（state/battleReportModal、scoutReportModal）。
+ *  排行榜（含名人堂，v65）、换季预告（v65）、黄巾之乱详情、公告列表与强提醒公告（AISLG-162）、联盟面板（AISLG-186）。战报 / 侦察报告弹窗由各自的 Provider 宿主（state/battleReportModal、scoutReportModal）。
  */
 
 import type { LeaderboardKind } from '../../api/protocol';
@@ -7,8 +7,10 @@ import { useGame } from '../../state/GameContext';
 import { useNav } from '../../state/NavContext';
 import { LeaderboardModal } from '../LeaderboardModal';
 import { AnnouncementModal } from '../announcement/AnnouncementModal';
+import { AllianceModal } from '../alliance/AllianceModal';
 import { StrongRemindModal } from '../announcement/StrongRemindModal';
 import { NpcWarningModal } from '../NpcWarningModal';
+import { SeasonWarningModal } from '../season/SeasonWarningModal';
 import { OfflineReportModal } from '../OfflineReportModal';
 import { YellowTurbanModal } from '../YellowTurbanModal';
 
@@ -61,10 +63,29 @@ export function ModalHost(props: ModalHostProps) {
         />
       ) : null}
       {props.leaderboardOpen ? (
-        <LeaderboardModal view={session.leaderboard} loading={session.leaderboardLoading} onClose={props.onCloseLeaderboard} onSelectKind={props.onSelectLeaderboardKind} />
+        <LeaderboardModal
+          view={session.leaderboard}
+          loading={session.leaderboardLoading}
+          onClose={props.onCloseLeaderboard}
+          onSelectKind={props.onSelectLeaderboardKind}
+          hall={session.hallOfFame}
+          honors={session.season.honors}
+          alliance={session.alliance}
+        />
       ) : null}
       {props.ytOpen ? <YellowTurbanModal state={session.yellowTurban.state} world={world} onClose={props.onCloseYt} /> : null}
+      {session.season.warning ? <SeasonWarningModal warning={session.season.warning} onConfirm={session.season.dismissWarning} /> : null}
       {announcements.open ? <AnnouncementModal slice={announcements} onClose={announcements.closeList} /> : null}
+      {session.alliance.open ? (
+        <AllianceModal
+          alliance={session.alliance}
+          marks={session.allianceMarks}
+          myId={session.account?.accountId ?? null}
+          city={session.city}
+          cityList={session.cityList}
+          onClose={session.alliance.closePanel}
+        />
+      ) : null}
       {/* 强提醒与公告弹窗同为 z-50，按 DOM 顺序叠放：强提醒必须最后渲染，才盖在公告弹窗之上 */}
       {announcements.strongQueue.length > 0 ? (
         <StrongRemindModal queue={announcements.strongQueue} onConfirm={() => void announcements.confirmStrong()} onHide={announcements.hideStrong} />

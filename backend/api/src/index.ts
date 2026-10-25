@@ -18,6 +18,7 @@ import { readGoogleConfig } from './google';
 import { createGithubService, sweepGithubOauth } from './handlers-github';
 import { createGithubClient } from './github';
 import { initBannedWordFilter } from './chat-words';
+import { startActiveHeartbeat } from './active-heartbeat';
 import {
   githubSiteFor,
   hostFromHeaders,
@@ -26,6 +27,8 @@ import {
   readPasswordDisabledHosts,
 } from './site-config';
 import { registerGithubCallbackRoute } from './github-callback';
+import { requestLogSerializer } from './request-log';
+import { startDbProbe, startLoopLagMonitor } from '../../common/src/diag-probe';
 import { registerAgentApiRoutes } from './agent-api-routes';
 import { registerAuthConfigRoute } from './auth-config-routes';
 import { ConnectionRegistry, type ConnInfo } from './connections';
@@ -59,12 +62,14 @@ async function main(): Promise<void> {
   const { host, port, database } = readDbConfig();
   console.log(`slg-api connecting to PostgreSQL ${host}:${port}/${database} ...`);
   const pool = createPool('slg-api', 8);
-  await ensureSchema(pool);
+  // 启动迁移与世界生成可能跑十几秒的整表语句，走维护池（超时放宽），运行期请求仍走上面的 pool
+  const maintenancePool = createPool('slg-api-maint', 2, { maintenance: true });
+  await ensureSchema(maintenancePool);
   console.log('slg-api database schema ready');
   // v53（AISLG-145）：竞技场系统守擂者启动时补齐（只读路径不再为补种抢锁；幂等，咨询锁串行化）
   await seedArenaNpcs(pool);
   // v12：首次启动生成世界并回填存量城池坐标（幂等；与 Worker 并发由咨询锁串行化）
-  await ensureWorld(pool);
+  await ensureWorld(maintenancePool);
   console.log('slg-api world ready');
   // v51（AISLG-138）：聊天屏蔽词表在启动时读入（配置了 CHAT_BANNED_WORDS_FILE 却读不到则启动失败）
   initBannedWordFilter();
@@ -95,6 +100,8 @@ async function main(): Promise<void> {
     sweepWxTickets(ctx);
     sweepGithubOauth(ctx.github);
   }, 5_000);
+  // v66（AISLG-181）：玩家在线心跳，刷新 last_active_at（联盟盟主不活跃判断）
+  const activeHeartbeat = startActiveHeartbeat(ctx);
 
   // Google 一键登录（v44）：没配 GOOGLE_CLIENT_ID 时整体关闭，GOOGLE_LOGIN 返回 GOOGLE_UNAVAILABLE
   const googleConfig = readGoogleConfig();
@@ -124,13 +131,23 @@ async function main(): Promise<void> {
 
   // 推送 eventId 起点下限 = 事件表当前最大 id（v21 AISLG-37）：API 重启后 eventId
   // 不回退，客户端「已见最大 eventId」的幂等去重在重启后依然成立
-  const seed = await pool.query('SELECT COALESCE(MAX(id), 0) AS m FROM events');
+  // 换季（AISLG-134）会清空 events 表，因此起点同时取 events 序列的当前值（序列不随 DELETE / TRUNCATE 回退）
+  const seed = await pool.query(
+    `SELECT GREATEST(
+       COALESCE((SELECT MAX(id) FROM events), 0),
+       COALESCE((SELECT last_value FROM pg_sequences WHERE schemaname = current_schema() AND sequencename = 'events_id_seq'), 0)
+     ) AS m`,
+  );
   registry.setEventIdFloor(Number(seed.rows[0].m));
 
   const notifier = new CompletionNotifier(pool, registry);
   await notifier.start();
 
-  const app = fastify({ logger: { level: process.env.LOG_LEVEL || 'info' }, trustProxy: TRUST_PROXY });
+  // 请求日志对 /auth/github/callback 的查询串脱敏（code / state 替换为 [redacted]，见 request-log.ts）
+  const app = fastify({
+    logger: { level: process.env.LOG_LEVEL || 'info', serializers: { req: requestLogSerializer } },
+    trustProxy: TRUST_PROXY,
+  });
   // 跨域：生产站点（slg.example.cn）与 API 网关不同源，HTTP 路由放开跨域读
   // （来源策略见 cors.ts；WebSocket /ws 不受同源策略约束）
   await registerCors(app);
@@ -207,10 +224,16 @@ async function main(): Promise<void> {
 
   await app.listen({ port: PORT, host: HOST });
   app.log.info(`slg-api listening on ${HOST}:${PORT}`);
+  // 诊断（AISLG-173）：数据库链路探针（独立连接，不占池位）与事件循环卡顿监测；DIAG_LOG=0 时整体关闭
+  const stopProbe = startDbProbe('slg-api');
+  const stopLoopLag = startLoopLagMonitor('slg-api');
 
   const shutdown = async (signal: string): Promise<void> => {
     app.log.info(`received ${signal}, shutting down`);
     clearInterval(wxSweeper);
+    clearInterval(activeHeartbeat);
+    stopProbe.stop();
+    stopLoopLag();
     await notifier.stop();
     registry.closeAll(1001, 'server shutdown');
     await app.close();

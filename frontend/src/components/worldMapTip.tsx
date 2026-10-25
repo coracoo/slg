@@ -4,8 +4,9 @@
 
 import { getCopy, useCopy } from '../i18n/bundle';
 import { tName } from '../i18n/names';
-import type { NpcStockTier, TileView } from '../api/protocol';
+import type { AllianceMarkView, NpcStockTier, TileView } from '../api/protocol';
 import type { CitySide } from './worldMapMarks';
+import { famousEffectText } from './famousEffectText';
 
 /** NPC 城库存档位的文案与色调（v23 AISLG-55）：已空变暗、见底警示、丰厚金色；文案随语言在函数体内取 */
 export function npcTierLabel(tier: NpcStockTier): string {
@@ -31,11 +32,16 @@ export interface TileTip {
   tile: TileView;
   isOwn: boolean;
   style: { left?: number; right?: number; top?: number; bottom?: number };
+  /** 本格的联盟标记（无则 null） */
+  mark: AllianceMarkView | null;
 }
 
 export function citySide(tile: TileView, isOwn: boolean): CitySide {
   if (tile.kind === 'npc_city') {
     return tile.famous ? 'famous' : 'npc';
+  }
+  if (!isOwn && tile.owner?.ally) {
+    return 'ally';
   }
   return isOwn ? 'own' : 'enemy';
 }
@@ -54,13 +60,17 @@ export function tileTitle(tile: TileView, isOwn: boolean): string {
 
 /** 归属说明：城池写城主，野地写占领者 */
 export function tileOwnerText(tile: TileView, isOwn: boolean): string {
-  const { COPY, EXTRA_MAP } = getCopy();
+  const { COPY, EXTRA_MAP, ALLIANCE_COPY } = getCopy();
   const tip = EXTRA_MAP.tileTip;
   if (!tile.owner) {
     return tile.kind === 'npc_city' ? tip.npcGuard : COPY.worldMap.ownerNone;
   }
   if (isOwn) {
     return tile.kind === 'city' ? tip.yourCity : tip.ownOccupied;
+  }
+  if (tile.owner.ally) {
+    // 盟友的地块：归属行带「盟友」，不写成敌方
+    return ALLIANCE_COPY.ally.ownerRow(tile.owner.username);
   }
   return tile.kind === 'city' ? tip.owner(tile.owner.username) : COPY.worldMap.ownerRow(tile.owner.username);
 }
@@ -78,8 +88,9 @@ interface WorldMapTooltipProps {
 /** 悬浮提示：名称 / 坐标 / 归属 / 驻军 + 操作提示 */
 export function WorldMapTooltip({ tip, clusters }: WorldMapTooltipProps) {
   const copy = useCopy();
-  const { COPY, CITY_COPY, YT_COPY } = copy;
+  const { COPY, CITY_COPY, YT_COPY, RESOURCE_LABEL } = copy;
   const cluster = tip ? clusters?.get(`${tip.tile.x},${tip.tile.y}`) : undefined;
+  const { ALLIANCE_COPY } = copy;
   return (
     <div
       role="世界地图视野-悬浮提示"
@@ -95,11 +106,25 @@ export function WorldMapTooltip({ tip, clusters }: WorldMapTooltipProps) {
               ({tip.tile.x},{tip.tile.y})
             </em>
           </div>
-          <div className={tip.isOwn ? 'text-accent' : tip.tile.owner ? 'text-warn' : 'text-dim'}>{tileOwnerText(tip.tile, tip.isOwn)}</div>
+          <div className={tip.isOwn ? 'text-accent' : tip.tile.owner?.ally ? 'text-st-online' : tip.tile.owner ? 'text-warn' : 'text-dim'}>
+            {tileOwnerText(tip.tile, tip.isOwn)}
+          </div>
+          {tip.mark ? (
+            <div role="世界地图视野-联盟标记提示" className="text-gold">
+              {ALLIANCE_COPY.marks.tileTitle(ALLIANCE_COPY.marks.kindLabel[tip.mark.kind])}
+              {' · '}
+              {tip.mark.text || ALLIANCE_COPY.marks.noText}
+              {' · '}
+              {ALLIANCE_COPY.marks.by(tip.mark.creator.username)}
+            </div>
+          ) : null}
           {tip.tile.famous ? (
             <div role="世界地图视野-名城提示" className="text-gold">
               <div>{tip.tile.famous.stage === 'outer' ? CITY_COPY.famous.stageOuter : CITY_COPY.famous.stageKeeper}</div>
               <div>{CITY_COPY.famous.bonus(tip.tile.famous.bonusPercent)}</div>
+              {tip.tile.famous.effect ? (
+                <div>{CITY_COPY.famous.effectRow(famousEffectText(tip.tile.famous.effect, CITY_COPY.famous.effect, RESOURCE_LABEL))}</div>
+              ) : null}
             </div>
           ) : null}
           {tip.tile.camp ? (

@@ -12,7 +12,7 @@ import { marchingPercent } from '../../common/src/tech';
 import { stationPercent } from '../../common/src/building-effects';
 import { loadTechLevels } from '../../common/src/tech-db';
 import { loadArmyFoodUsePerHour, loadBuildingLevels, settleCityProduction, type CityProductionRow } from '../../common/src/production';
-import { marchTravelSeconds, territoryRates } from '../../common/src/world';
+import { marchTravelSeconds } from '../../common/src/world';
 import { addTileArmy, loadTerritory } from '../../common/src/world-db';
 import type { BattleResult, BattleSideSummary } from '../../common/src/battle';
 import type { BattleHeroView, BattleSideView } from '../../common/src/protocol-battle';
@@ -145,7 +145,7 @@ export async function settleOwnerCity(
     settleTo = nowRes.rows[0].now as Date;
   }
   const anchor = settleTo > row.settled_at ? settleTo : row.settled_at;
-  await settleCityProduction(client, row, levels, anchor, territoryRates(territory), armyFoodUsePerHour);
+  await settleCityProduction(client, row, levels, anchor, territory, armyFoodUsePerHour);
   return { row, account: row.account_id };
 }
 
@@ -274,6 +274,23 @@ export async function abortMarchToReturn(
   }
   await markMarchArrived(client, march.id);
   await completeMarchEvent(client, march, 'aborted', { troops, returning: created, ...(cargo ? { cargo } : {}) });
+  notifies.push({ reason: 'march_resolved', accountId: march.account_id, marchId: march.id });
+}
+
+/**
+ * 到达时发现目标的主人已与出征者同属一个联盟（v67，AISLG-182：出发后才入盟的漏洞）：不开战，
+ * 部队原路返回，事件 outcome=aborted、cause=ALLY_NOT_ATTACKABLE。掠夺 / 抢野地 / 占分城 / 侦察共用。
+ */
+export async function abortForAlly(
+  client: pg.PoolClient,
+  march: MarchRow,
+  troops: Partial<Record<TroopKind, number>>,
+  settled: { row: { x: number | null; y: number | null } | null },
+  notifies: TileNotify[],
+): Promise<void> {
+  await markMarchArrived(client, march.id);
+  const returning = await createReturnMarch(client, march, troops, settled, march.initiator);
+  await completeMarchEvent(client, march, 'aborted', { troops, returning, cause: 'ALLY_NOT_ATTACKABLE' });
   notifies.push({ reason: 'march_resolved', accountId: march.account_id, marchId: march.id });
 }
 

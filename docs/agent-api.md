@@ -1,11 +1,11 @@
 # SLG Agent API 参考
 
-> 协议版本：**60** · 兼容策略：只加不改（见「版本与兼容」）
+> 协议版本：**70** · 兼容策略：只加不改（见「版本与兼容」）
 > 本文档由后端协议定义生成（`npm run gen:api-doc`），请勿手工编辑。
 > 运行中的服务提供同版本文档：`GET /agent-api.md`（本文件）与 `GET /agent-api.json`（机器可读清单）。
 > 给 Agent 的用法：把本文件（或 JSON 清单）连同服务器地址与你本账号的 Agent 令牌一起交给 Agent（你只给它令牌，不要给账号密码——Agent 不能密码登录）；它按第 1、2 节连接，用 LOGIN {token, asAgent: true} 登录（接入步骤见 op 1 的 Agent 提示），不要让它自行注册新账号。
 
-> **Agent 必读：保持文档最新（v32）**——服务端会持续更新。① 记住本文开头的协议版本号（当前 60）；② 每次 LOGIN 都在 data 里带上 `docVersion`（即该版本号），响应会返回服务端当前的 `protocolVersion`，文档落后时还会附 `docNotice`；③ 一旦落后，`GET /agent-api/changes/{你的版本号}` 获取此后每个版本的一句话变更（JSON），按需重新下载 `/agent-api.md` 全文，并更新你保存的版本号。每次服务端部署都会断开连接，重连登录时就能发现更新。协议只加不改，旧文档不会导致已有操作出错，只是用不上新功能。
+> **Agent 必读：保持文档最新（v32）**——服务端会持续更新。① 记住本文开头的协议版本号（当前 70）；② 每次 LOGIN 都在 data 里带上 `docVersion`（即该版本号），响应会返回服务端当前的 `protocolVersion`，文档落后时还会附 `docNotice`；③ 一旦落后，`GET /agent-api/changes/{你的版本号}` 获取此后每个版本的一句话变更（JSON），按需重新下载 `/agent-api.md` 全文，并更新你保存的版本号。每次服务端部署都会断开连接，重连登录时就能发现更新。协议只加不改，旧文档不会导致已有操作出错，只是用不上新功能。
 
 > **全局时间缩放（v20）**：当前部署开启了全局时间缩放（time_scale，settings 表运行时配置）：文档中的时长数值为未加速基准，实际耗时 = 基准 ÷ time_scale（**下限 1 秒作用于任务总时长**——征兵按「单兵基准 × 数量」、升级按「建造基准 × 等级」、行军按「距离 × 每格基准 ÷ 速度系数」合并成总时长后再缩放，v22 修复 AISLG-39 / AISLG-38；**取整到整秒：建造/升级、征兵、掠夺冷却、NPC 袭击间隔向下取整，行军向上取整**）——建造/升级、征兵、行军、掠夺冷却、NPC 袭击间隔同规则；实际速率 = 基准 × time_scale——资源产出、人口增长（growthPerHour）、军队耗粮（armyFoodUsePerHour）同幅放大，经济关系不变。只作用于新发起的任务与下一次结算（存量任务到期时间不变）。以响应内的 dueAt / production / growthPerHour 等实际下发值为准，不要按文档数值本地折算时长。
 
@@ -276,6 +276,23 @@
           "upgradeSeconds": null
         }
       },
+      "levelMax": {
+        "farm": 20,
+        "lumber_mill": 20,
+        "quarry": 20,
+        "iron_mine": 20,
+        "house": 20,
+        "government": 20,
+        "barracks": 20,
+        "warehouse": 20,
+        "wall": 20,
+        "academy": 20,
+        "parade_ground": 20,
+        "beacon": 20,
+        "post_station": 20,
+        "arrow_tower": 20,
+        "tavern": 20
+      },
       "farms": 0,
       "production": {
         "gold": 100,
@@ -307,7 +324,15 @@
         "iron_cavalry": 0,
         "supply_wagon": 0,
         "ballista": 0,
-        "siege_ram": 0
+        "siege_ram": 0,
+        "yulin_guard": 0,
+        "danyang_soldier": 0,
+        "baimao_soldier": 0,
+        "huwei_guard": 0,
+        "zhuge_crossbow": 0,
+        "xiandeng_warrior": 0,
+        "hubao_cavalry": 0,
+        "xiliang_cavalry": 0
       },
       "armyFoodUsePerHour": 0,
       "timeScale": 1,
@@ -318,6 +343,7 @@
       "durability": null,
       "famousName": null,
       "productionBonusPercent": 0,
+      "famousEffect": null,
       "starveAt": null,
       "mutinyNextAt": null,
       "guard": null,
@@ -403,6 +429,7 @@
 | role | 'player' \| 'agent' | 本次连接绑定的登录类型（即 asAgent 声明结果）。 |
 | sessionToken | string | 会话令牌。密码登录返回新签发的令牌；令牌登录原样返回。客户端可持久保存，下次用它免密登录。 |
 | expiresAt | string | 会话过期时间（ISO 8601）。有效期 30 天、滑动续期：每次令牌登录成功都会刷新为当时起算的 30 天。 |
+| season | { id: number; endsAt: string } | （v65，AISLG-134）当前赛季：id 为赛季编号，endsAt 为本季结束的现实时刻（ISO 8601）。账号若尚未加入本赛季，登录时会在服务端惰性加入（获得新主城与新手保护）。换季预告与开始通过 PUSH_SEASON 推送，详情用 GET_SEASON。 |
 | protocolVersion | number | 服务端当前协议版本（v32）。与你手上文档开头的版本号不一致时，说明文档已过期。 |
 | docNotice | string \| null | 文档更新提示（v32，仅 Agent 连接）：带了 docVersion 且落后时说明从哪版更新到哪版、去 GET /agent-api/changes/{你的版本} 看增量；没带 docVersion 时给一句通用提示；文档已是最新或玩家连接为 null。 |
 
@@ -441,8 +468,12 @@
     "role": "player",
     "sessionToken": "session-example-token-for-doc-0000000000000",
     "expiresAt": "2026-10-25T08:00:00.000Z",
-    "protocolVersion": 60,
-    "docNotice": null
+    "protocolVersion": 70,
+    "docNotice": null,
+    "season": {
+      "id": 2,
+      "endsAt": "2026-11-22T00:00:00.000Z"
+    }
   }
 }
 ```
@@ -503,8 +534,12 @@
     "role": "player",
     "sessionToken": "session-example-token-for-doc-0000000000000",
     "expiresAt": "2026-10-25T08:00:00.000Z",
-    "protocolVersion": 60,
-    "docNotice": null
+    "protocolVersion": 70,
+    "docNotice": null,
+    "season": {
+      "id": 2,
+      "endsAt": "2026-11-22T00:00:00.000Z"
+    }
   }
 }
 ```
@@ -523,7 +558,7 @@
 }
 ```
 
-**Agent 令牌登录并带上手上文档的版本（令牌永不过期、expiresAt 为 null；可顺带 agentModel 自报驱动模型，供模型榜分组；文档落后时响应附 docNotice，按提示 GET /agent-api/changes/57 补读增量）**
+**Agent 令牌登录并带上手上文档的版本（令牌永不过期、expiresAt 为 null；可顺带 agentModel 自报驱动模型，供模型榜分组；文档落后时响应附 docNotice，按提示 GET /agent-api/changes/67 补读增量）**
 
 请求：
 
@@ -534,7 +569,7 @@
   "data": {
     "token": "session-example-token-for-doc-0000000000000",
     "asAgent": true,
-    "docVersion": 57,
+    "docVersion": 67,
     "agentModel": "claude-opus-5-5"
   }
 }
@@ -553,8 +588,12 @@
     "role": "agent",
     "sessionToken": "session-example-token-for-doc-0000000000000",
     "expiresAt": null,
-    "protocolVersion": 60,
-    "docNotice": "接口文档已从 v57 更新到 v60：请 GET /agent-api/changes/57 查看增量变更，或重新下载 /agent-api.md（与本游戏服务同域名的 HTTPS 地址）。"
+    "protocolVersion": 70,
+    "docNotice": "接口文档已从 v67 更新到 v70：请 GET /agent-api/changes/67 查看增量变更，或重新下载 /agent-api.md（与本游戏服务同域名的 HTTPS 地址）。",
+    "season": {
+      "id": 2,
+      "endsAt": "2026-11-22T00:00:00.000Z"
+    }
   }
 }
 ```
@@ -687,10 +726,11 @@
 | city.buildings | object | **DEPRECATED（v3 遗留，勿用）**：按类型统计的已建数量，v5 单实例规则下恒为 0 或 1——切勿当作等级，解析城池建筑状态请一律读 city.levels。键集：{ farm, lumber_mill, quarry, iron_mine, house, government, barracks, warehouse, wall, academy, parade_ground, beacon, post_station, arrow_tower }（v7 起九种，v27 起加书院，v30 起再加校场 / 烽火台 / 驿站 / 箭塔共十四种）。 |
 | city.levels | object | 各建筑类型的当前等级（v5 新增）：0 = 未建造；产量、人口上限与仓储上限均按等级推导。 |
 | city.costs | object | 各建筑「下一步动作」成本（v6 新增，v25 起附时长）：{ build, upgrade, buildSeconds, upgradeSeconds }，按类型；未建时 build 为建造成本、upgrade 为 null，已建未满级时 upgrade 为升级成本（= 建造成本 × 当前等级）、build 为 null，满级成本均为 null；buildSeconds / upgradeSeconds（v25，AISLG-71）为对应动作的单级时长（秒，已按当前全局时间缩放折算），null 语义与对应成本字段一致。发起前可用它展示消耗与耗时并预判资源不足。 |
+| city.levelMax | object | 各建筑的等级上限（v63 新增，AISLG-167）：{ 建筑类型: 上限 }，普通建筑 20；占有对应名城（city.famousName）时其主题建筑为 25——洛阳城墙、长安箭塔、官渡农田、成都铁矿、建业伐木场、邺城官府、许昌驿站、襄阳仓库。等级上限随城池走（换主人归新主人，与名城效果同口径）。失守后超出上限的存量等级按当前上限生效（产出、守城减伤、箭塔、仓库、升级判定一律按上限计，levelMax 与 levels 一致；库存不改，重新占领即恢复）。city.costs 的 upgrade 与连升（UPGRADE toLevel）都按此上限判定。 |
 | city.farms | number | **DEPRECATED（v3 遗留，勿用）**：兼容字段，= buildings.farm（0/1 已建标记）；等级请读 city.levels.farm。 |
 | city.production | object | 当前小时产量（v3 新增，v7 起含 gold）：{ gold, food, wood, stone, iron }；四种生产资源各含 100/小时的基础产量（无对应建筑也产出），建筑产量按等级叠加；金币由官府（100×等级/小时，v19）与占领金矿生产（无基础产量）。产量随建筑建成即时生效。 |
 | city.population | object | 人口现状（v7 新增，v8 规则确认，v19 数值修订）：{ current 当前人口, cap 上限（= 50 + 100 × 民房等级 × (民房等级 + 1)，无民房即基线 50）, growthPerHour 每小时增长（基准 = 10 × 民房等级 × (等级 + 1)，无民房为 0；实际 × 全局时间缩放） }；current ≥ cap 时停止增长（新号即 50/50 满编、增速 0，建民房后恢复增长）；征兵将消耗人口。 |
-| city.army | object | 城内驻军（v11 新增）：{ porter, militia, scout, pikeman, swordsman, archer, cavalry, iron_cavalry, supply_wagon, ballista, siege_ram }（后四种为 v33 二期兵种），按兵种统计；征兵完成（recruit_completed）时累加。 |
+| city.army | object | 城内驻军（v11 新增）：{ porter, militia, scout, pikeman, swordsman, archer, cavalry, iron_cavalry, supply_wagon, ballista, siege_ram }（后四种为 v33 二期兵种），按兵种统计；征兵完成（recruit_completed）时累加。v64（AISLG-168）起键集再加 yulin_guard、danyang_soldier、baimao_soldier、huwei_guard、zhuge_crossbow、xiandeng_warrior、hubao_cavalry、xiliang_cavalry 八种名城专属兵（占领对应名城才能征募，失守后已练出的兵留在原主人手里）。 |
 | city.armyFoodUsePerHour | number | 全军小时耗粮（v14 新增，实际值 × 全局时间缩放，与产出同幅）：城内驻军 1 倍 + 行军中/野地驻军 2 倍（单兵耗粮见各兵种 foodUse）。production.food 为毛产量，净粮 = production.food − 本值，可为负；结算把粮食扣到 0 为止、不记负债；**v34（AISLG-107）起断粮不再只是停止增长**：粮食为 0 且净产量为负时，每小时（缩放后）城内驻军每兵种减 10%（见 city.starveAt / city.mutinyNextAt 与 PUSH_STARVATION_STATE）。 |
 | city.starveAt | string \| null | 预计断粮时间（v34，AISLG-107；ISO 8601）：按当前粮食与净产量（粮毛产量 production.food − armyFoodUsePerHour）推算，已断粮 = 当前时刻，净产量不为负（不会断粮）为 null。距断粮不足 1 小时（缩放后）推送一次预警。 |
 | city.mutinyNextAt | string \| null | 下一次断粮哗变时刻（v34）：已断粮（粮食 0 且净产量为负）时有值——到点本城城内驻军每个兵种减 10%（向上取整、至少 1 个，在外部队不受影响、不强制召回）；否则 null。 |
@@ -700,12 +740,13 @@
 | city.shieldUntil | string \| null | 主动免战截止（v38，AISLG-122，账号级）：TRUCE 开启后 12 小时基准随缩放；开着时别人打不了你（含 NPC 袭击目标池跳过）、你也不能出兵打玩家（SELF_TRUCE_ACTIVE，打野地 / NPC 不受限）。未开启为 null。 |
 | city.shieldNextAt | string \| null | 下一次可开启主动免战的时刻（v38，AISLG-122；每周一次，ISO 8601）；当前可开启为 null。 |
 | city.durability | number \| null | 分城城防值（v40，AISLG-124）：0..100，被「占领」打赢一击 −35（冲车加成最多再 −15）、归零一击换主；免战结束后每小时回涨 10 至满（免战内不回涨）。主城为 null（永不被占领）。 |
-| city.famousName / city.productionBonusPercent | string \| null / number | 名城分城标记（v24 新增，AISLG-56）：占领名城得到的分城带名城名（famousName）与独占产量加成百分数（productionBonusPercent，当前 20，已计入 production）；普通城为 null / 0。 |
+| city.famousName / city.productionBonusPercent | string \| null / number | 名城分城标记（v24 新增，AISLG-56）：占领名城得到的分城带名城名（famousName）与独占产量加成百分数（productionBonusPercent，当前 20，已计入 production）；普通城为 null / 0。v64（AISLG-168）：占领名城的分城可征募该名城的专属兵（名城 → 兵种对照见 RECRUIT 的 summary），失守即失去征募资格。 |
+| city.famousEffect | object \| null | 名城独有效果（v62 新增，AISLG-166）：{ kind, percent, resources }，只有占领者享受、跟着城走（换主人归新主人，放弃 / 被占即失效）。洛阳守城城墙减伤 +5 个百分点、长安箭塔伤害 +20%、官渡 / 成都 / 建业 / 邺城辖下对应资源的野地产出 +25%、许昌自己城池之间的调兵 / 运输行军速度 +20%、襄阳仓库防掠夺保护额 +50%。普通城为 null。 |
 | city.guard | object \| null | 城守（v36 新增，AISLG-115）：该城任命的武将 { heroId, name, famous, lead, force, wit, level, bonusPercent }；未任为 null。产量加成（四资源非金，智力 × 0.1% 封顶 5%）已计入 production；守城战另享攻防加成（见 ASSIGN_HERO）。 |
 | city.recruitQueue | array | 征兵队列（v11 新增）：第 1 项为征募中（status=recruiting，dueAt 非空），其余为排队（status=queued，dueAt 为 null）；已取消条目不在其中。 |
 | city.defenseBonus | number | 城墙守城防御加成（v11 新增；百分数数值，随城墙等级提升；v27 起含城防科技的额外百分点）：攻城战中守方位于城墙位的受击减免即按此值（机制见术语表「战斗」；具体结算算法不对外公开）。 |
 | city.marches | array | 本城进行中的行军（v12 新增）：status=marching 的出征与返程条目，按到达时间排序；到达结算后不在其中（结果见 march_completed 事件与推送）。 |
-| city.territory | array | 本城占领的野地（v12 新增）：{ x, y, terrain, level, resource, bonusRate 占领加成/小时, gatherRate 驻军采集/小时, garrison 驻军总数, clusterSize 连片块数（v23 新增，AISLG-59）, clusterBonusPercent 连片产量加成百分数（v23 新增：3–4 块 10 / ≥5 块 20，不足 3 块为 0） }；production 已计入 bonusRate、gatherRate 与连片加成——连片按同地形 + 上下左右相邻计算，占领 / 失守后按最新领地自动重算。 |
+| city.territory | array | 本城占领的野地（v12 新增）：{ x, y, terrain, level, resource, bonusRate 占领加成/小时, gatherRate 驻军采集/小时, garrison 驻军总数, clusterSize 连片块数（v23 新增，AISLG-59）, clusterBonusPercent 连片产量加成百分数（v23 新增：3–4 块 10 / ≥5 块 20，不足 3 块为 0）, reserve 野地储量（v61 新增，AISLG-165；档位与当前储量 / 上限 / 预计采空或回满时刻，本城占领的地块恒给出数值）}；production 已计入 bonusRate、gatherRate 与连片加成——连片按同地形 + 上下左右相邻计算，占领 / 失守后按最新领地自动重算。v61 起 gatherRate 受储量约束：储量空时驻军只按恢复速度（2%/h）采集，采空不需要撤兵，留兵即按恢复速度小量采集。 |
 | cities | array | v12 新增：账号全部城池 { id, name, level, x, y, isMain }，主城在前；v24 起 level = 各城官府等级。未占领 NPC 城池时只有主城一座。 |
 | branch | object | v24 新增（AISLG-58）：分城名额 { count 现有分城数（不含主城）, limit 上限 = floor(主城官府等级 ÷ 2)（v57 由 ÷3 放宽）, minGovernment 占领 NPC 城所需的主城官府最低等级（3） }。名城（AISLG-56）同样计入。 |
 | city.storage | object | 储量上限（v7 新增，v8 规则确认；v22 AISLG-41 随全局缩放）：{ gold, food, wood, stone, iron }；四资源各自 = （10000 + 对应资源**建筑产量**（各生产建筑等级 × 每级速率之和，**不含**无建筑的 100/h 基础产量）× 100）× timeScale，金币 = 100 万 × timeScale——上限与产出同幅缩放，填满时长不受缩放影响：四资源恒为基准 100 小时；金币随官府等级与金矿占领加成变化（仅有官府产金时 = 10000 ÷ 官府等级 小时，官府 Lv4 时才是 2500 小时），请用 storage[k] ÷ production[k] 现算。达到上限后停止对应生产；已有超限存量不扣减。仓库不改变储量上限（v21 起防掠夺保护消费方已接入：NPC 袭击主城攻破后可掠量 = max(0, 存量 − 保护额)，保护量 4000×等级、四资源固定均分各 1000×等级；金币不受仓库保护，但 NPC 单次最多抢走存量的 5%（v41 AISLG-125）、玩家互掠为存量的 10%）。 |
@@ -972,6 +1013,23 @@
           "upgradeSeconds": null
         }
       },
+      "levelMax": {
+        "farm": 20,
+        "lumber_mill": 20,
+        "quarry": 20,
+        "iron_mine": 20,
+        "house": 20,
+        "government": 20,
+        "barracks": 20,
+        "warehouse": 20,
+        "wall": 20,
+        "academy": 20,
+        "parade_ground": 20,
+        "beacon": 20,
+        "post_station": 20,
+        "arrow_tower": 20,
+        "tavern": 20
+      },
       "farms": 0,
       "production": {
         "gold": 100,
@@ -1003,7 +1061,15 @@
         "iron_cavalry": 0,
         "supply_wagon": 0,
         "ballista": 0,
-        "siege_ram": 0
+        "siege_ram": 0,
+        "yulin_guard": 0,
+        "danyang_soldier": 0,
+        "baimao_soldier": 0,
+        "huwei_guard": 0,
+        "zhuge_crossbow": 0,
+        "xiandeng_warrior": 0,
+        "hubao_cavalry": 0,
+        "xiliang_cavalry": 0
       },
       "armyFoodUsePerHour": 0,
       "timeScale": 1,
@@ -1014,6 +1080,7 @@
       "durability": null,
       "famousName": null,
       "productionBonusPercent": 0,
+      "famousEffect": null,
       "starveAt": null,
       "mutinyNextAt": null,
       "guard": null,
@@ -1287,6 +1354,23 @@
           "upgradeSeconds": null
         }
       },
+      "levelMax": {
+        "farm": 20,
+        "lumber_mill": 20,
+        "quarry": 20,
+        "iron_mine": 20,
+        "house": 20,
+        "government": 20,
+        "barracks": 20,
+        "warehouse": 20,
+        "wall": 20,
+        "academy": 20,
+        "parade_ground": 20,
+        "beacon": 20,
+        "post_station": 20,
+        "arrow_tower": 20,
+        "tavern": 20
+      },
       "farms": 0,
       "production": {
         "gold": 100,
@@ -1318,7 +1402,15 @@
         "iron_cavalry": 0,
         "supply_wagon": 0,
         "ballista": 0,
-        "siege_ram": 0
+        "siege_ram": 0,
+        "yulin_guard": 0,
+        "danyang_soldier": 0,
+        "baimao_soldier": 0,
+        "huwei_guard": 0,
+        "zhuge_crossbow": 0,
+        "xiandeng_warrior": 0,
+        "hubao_cavalry": 0,
+        "xiliang_cavalry": 0
       },
       "armyFoodUsePerHour": 0,
       "timeScale": 1,
@@ -1329,6 +1421,7 @@
       "durability": null,
       "famousName": null,
       "productionBonusPercent": 0,
+      "famousEffect": null,
       "starveAt": null,
       "mutinyNextAt": null,
       "guard": null,
@@ -1638,6 +1731,23 @@
           "upgradeSeconds": null
         }
       },
+      "levelMax": {
+        "farm": 20,
+        "lumber_mill": 20,
+        "quarry": 20,
+        "iron_mine": 20,
+        "house": 20,
+        "government": 20,
+        "barracks": 20,
+        "warehouse": 20,
+        "wall": 20,
+        "academy": 20,
+        "parade_ground": 20,
+        "beacon": 20,
+        "post_station": 20,
+        "arrow_tower": 20,
+        "tavern": 20
+      },
       "farms": 1,
       "production": {
         "gold": 100,
@@ -1669,7 +1779,15 @@
         "iron_cavalry": 0,
         "supply_wagon": 0,
         "ballista": 0,
-        "siege_ram": 0
+        "siege_ram": 0,
+        "yulin_guard": 0,
+        "danyang_soldier": 0,
+        "baimao_soldier": 0,
+        "huwei_guard": 0,
+        "zhuge_crossbow": 0,
+        "xiandeng_warrior": 0,
+        "hubao_cavalry": 0,
+        "xiliang_cavalry": 0
       },
       "armyFoodUsePerHour": 0,
       "timeScale": 1,
@@ -1680,6 +1798,7 @@
       "durability": null,
       "famousName": null,
       "productionBonusPercent": 0,
+      "famousEffect": null,
       "starveAt": null,
       "mutinyNextAt": null,
       "guard": null,
@@ -1727,7 +1846,7 @@
 | --- | --- | --- |
 | events | array | 事件数组，顺序见各游标说明。 |
 | events[].id | number | 事件自增 id，可作为 beforeId / sinceId 游标。 |
-| events[].type | string | 事件类型：'build_started' \| 'build_queued' \| 'build_completed' \| 'build_cancelled'（v7） \| 'recruit_started' \| 'recruit_queued' \| 'recruit_completed' \| 'recruit_cancelled'（v11） \| 'march_started' \| 'march_completed' \| 'wilderness_occupied' \| 'wilderness_lost' \| 'npc_city_occupied' \| 'npc_raid'（v12） \| 'city_renamed'（v7） \| 'account_reset'（v9，重置后事件流只剩这一条） \| 'agent_connected' \| 'agent_disconnected' \| 'resource_exchanged'（v22，集市兑换成交，detail = { resource, amount, gold, rate }） \| 'npc_attack_warning'（v23，NPC 袭击预警，detail = { x, y, target, terrain, level, armyMin, armyMax, arriveAt, attackId }） \| 'starvation_warning' / 'mutiny'（v34，断粮预警 / 哗变） \| 'hero_recruited' / 'hero_dismissed' / 'hero_arrears' / 'hero_wounded' / 'hero_level_up' / 'hero_granted' / 'guard_changed'（v36，AISLG-114/115/116，武将：招募 / 解雇 / 欠饷 / 重伤 / 升级 / 获得名将 / 城守任命）。 |
+| events[].type | string | 事件类型：'build_started' \| 'build_queued' \| 'build_completed' \| 'build_cancelled'（v7） \| 'recruit_started' \| 'recruit_queued' \| 'recruit_completed' \| 'recruit_cancelled'（v11） \| 'march_started' \| 'march_completed' \| 'wilderness_occupied' \| 'wilderness_lost' \| 'npc_city_occupied' \| 'npc_raid'（v12） \| 'city_renamed'（v7） \| 'account_reset'（v9，重置后事件流只剩这一条） \| 'agent_connected' \| 'agent_disconnected' \| 'resource_exchanged'（v22，集市兑换成交，detail = { resource, amount, gold, rate }） \| 'npc_attack_warning'（v23，NPC 袭击预警，detail = { x, y, target, terrain, level, armyMin, armyMax, arriveAt, attackId }） \| 'starvation_warning' / 'mutiny'（v34，断粮预警 / 哗变） \| 'hero_recruited' / 'hero_dismissed' / 'hero_arrears' / 'hero_wounded' / 'hero_level_up' / 'hero_granted' / 'guard_changed'（v36，AISLG-114/115/116，武将：招募 / 解雇 / 欠饷 / 重伤 / 升级 / 获得名将 / 城守任命）· 'wilderness_depleted'（v61，AISLG-165，名下野地储量采空，detail = { x, y, terrain, level, at }）。 |
 | events[].initiator | 'player' \| 'agent' \| null | 发起事件的连接声明的登录类型。 |
 | events[].cityId | string \| null | 关联城池 id，无关联时为 null。 |
 | events[].buildId | string \| null | 关联建造 / 征兵 / 行军条目 id，无关联时为 null。 |
@@ -2346,14 +2465,14 @@
 
 `C→S` 请求-响应 · 需登录后发送
 
-把指定类型的建筑升到下一等级（v5 新增；每种建筑同城唯一，成长走升级）。与 BUILD 共用建造队列：无在建时立即开工，有在建时入队（排队上限内），队满返回 QUEUE_FULL。该类型已在队列中（含首次建造进行中、等级仍为 0）返回 BUILDING_EXISTS（在队冲突先于未建成判定）；未建造且不在队列返回 BUILDING_NOT_BUILT；已达等级上限（20 级，v31 AISLG-85 由 10 级开放到 20 级；占位数值）返回 BUILDING_LEVEL_MAX。升级成本 = 建造成本 × 升级倍数，升级时长 = 建造时长 × 升级倍数（均为占位公式；全局时间缩放作用于该总时长，钳 1 秒）：第 L → L+1 级的倍数 1~9 级 = L（线性，即升到 10 级为止的前期成本与耗时不变），L ≥ 10 时 = 9 × 1.3^(L − 9)（10→11 ≈ ×11.7、14→15 ≈ ×33.4、19→20 ≈ ×124.1；10→20 合计约 499 倍基础成本），成本逐项四舍五入；CityView.costs 的 upgrade / upgradeSeconds 与 chain 都按此公式下发。城墙守城减伤前 10 级每级 +5%、11~20 级每级 +2%（20 级 70%），其他按等级线性增长的效果（人口 / 产金 / 占领上限 / 分城上限 / 仓库保护 / 校场 / 烽火台 / 驿站等）本期不改。完成后产量、人口上限或仓储上限按新等级计算。失败响应均附当前城池状态（**data 仅含 city，无 build 载荷**——客户端必须先判 ok 再取载荷；v22 起资源不足时另附 shortfall 缺口与 retryAfterSeconds，见下方错误说明）。**v22（AISLG-43）连续升级**：可选 `toLevel`（当前等级 +2 .. 20）一次把该建筑升到目标等级——中间每一级合成**一条**队列条目：整链按各级公式价在发起时**一次性预扣**（快照即全额，取消排队条目按快照全额返还）、只占 **1 个**队列位、Worker 到达一级推进一级（build.level 为当前推进中的目标等级、build.toLevel 为整链终点），每级完成各发一条 build_completed 事件；响应另附 chain 数组给出每级 { level, cost, seconds }。边界口径：toLevel > 20 返回 BUILDING_LEVEL_MAX；toLevel ≤ 当前 +1（含低于当前等级的取值）视同单级升级（等效于不带 toLevel，不报错）；发起时整链校验资源，**中间级不会出现资源不足**（资源不足整单回滚、不入队，不存在「只做到某一级」的部分完成）。
+把指定类型的建筑升到下一等级（v5 新增；每种建筑同城唯一，成长走升级）。与 BUILD 共用建造队列：无在建时立即开工，有在建时入队（排队上限内），队满返回 QUEUE_FULL。该类型已在队列中（含首次建造进行中、等级仍为 0）返回 BUILDING_EXISTS（在队冲突先于未建成判定）；未建造且不在队列返回 BUILDING_NOT_BUILT；已达等级上限（普通 20 级，v31 AISLG-85 由 10 级开放到 20 级；v63 AISLG-167 占有对应名城时其主题建筑可到 25 级，见 city.levelMax；占位数值）返回 BUILDING_LEVEL_MAX。升级成本 = 建造成本 × 升级倍数，升级时长 = 建造时长 × 升级倍数（均为占位公式；全局时间缩放作用于该总时长，钳 1 秒）：第 L → L+1 级的倍数 1~9 级 = L（线性，即升到 10 级为止的前期成本与耗时不变），L ≥ 10 时 = 9 × 1.3^(L − 9)（10→11 ≈ ×11.7、14→15 ≈ ×33.4、19→20 ≈ ×124.1；10→20 合计约 499 倍基础成本），成本逐项四舍五入；CityView.costs 的 upgrade / upgradeSeconds 与 chain 都按此公式下发。城墙守城减伤前 10 级每级 +5%、11~20 级每级 +2%（20 级 70%）、21~25 级每级 +1%（v63，仅名城洛阳的主题城墙可达，25 级 75%），其他按等级线性增长的效果（人口 / 产金 / 占领上限 / 分城上限 / 仓库保护 / 校场 / 烽火台 / 驿站等）本期不改。完成后产量、人口上限或仓储上限按新等级计算。失败响应均附当前城池状态（**data 仅含 city，无 build 载荷**——客户端必须先判 ok 再取载荷；v22 起资源不足时另附 shortfall 缺口与 retryAfterSeconds，见下方错误说明）。**v22（AISLG-43）连续升级**：可选 `toLevel`（当前等级 +2 .. 该城该建筑的等级上限，普通 20、名城主题建筑 25）一次把该建筑升到目标等级——中间每一级合成**一条**队列条目：整链按各级公式价在发起时**一次性预扣**（快照即全额，取消排队条目按快照全额返还）、只占 **1 个**队列位、Worker 到达一级推进一级（build.level 为当前推进中的目标等级、build.toLevel 为整链终点），每级完成各发一条 build_completed 事件；响应另附 chain 数组给出每级 { level, cost, seconds }。边界口径：toLevel 超过该建筑等级上限返回 BUILDING_LEVEL_MAX；toLevel ≤ 当前 +1（含低于当前等级的取值）视同单级升级（等效于不带 toLevel，不报错）；发起时整链校验资源，**中间级不会出现资源不足**（资源不足整单回滚、不入队，不存在「只做到某一级」的部分完成）。
 
 **请求字段**
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | kind | 'farm' \| 'lumber_mill' \| 'quarry' \| 'iron_mine' \| 'house' \| 'government' \| 'barracks' \| 'warehouse' \| 'wall' \| 'academy' \| 'parade_ground' \| 'beacon' \| 'post_station' \| 'arrow_tower' \| 'tavern' | 必填。要升级的建筑类型（九种一期建筑）；缺失或不是已知类型返回 INVALID_PARAMS。 |
-| toLevel | number | 可选（v22，AISLG-43）。连续升级的目标等级（整数，当前等级 +2 .. 10）：中间每一级合成一条队列条目、整链一次性预扣、逐级推进。缺省 = 单级升级（当前 +1）；非整数或 < 3 返回 INVALID_PARAMS；toLevel ≤ 当前 +1 视同单级升级（等效于不带 toLevel）；toLevel > 10 返回 BUILDING_LEVEL_MAX。 |
+| toLevel | number | 可选（v22，AISLG-43）。连续升级的目标等级（整数，当前等级 +2 .. 该建筑等级上限，普通 20、名城主题建筑 25 见 city.levelMax）：中间每一级合成一条队列条目、整链一次性预扣、逐级推进。缺省 = 单级升级（当前 +1）；非整数或 < 3 返回 INVALID_PARAMS；toLevel ≤ 当前 +1 视同单级升级（等效于不带 toLevel）；toLevel 超过等级上限返回 BUILDING_LEVEL_MAX。 |
 | cityId | string | 可选（v24，AISLG-58）。要操作的城池 id（GET_STATE 响应的 cities[].id）；缺省 = 主城（账号创建最早的城），旧客户端不受影响。非本账号名下的城或格式不对返回 INVALID_PARAMS。每座城的资源 / 人口 / 仓储 / 建造与征兵队列 / 驻军各自独立；出征、侦察从该城出发、扣减该城驻军。取消类协议（CANCEL_BUILD / CANCEL_RECRUIT）按条目所属城池定位，无需传 cityId。 |
 
 **响应 data 字段**
@@ -3010,6 +3129,23 @@
           "upgradeSeconds": null
         }
       },
+      "levelMax": {
+        "farm": 20,
+        "lumber_mill": 20,
+        "quarry": 20,
+        "iron_mine": 20,
+        "house": 20,
+        "government": 20,
+        "barracks": 20,
+        "warehouse": 20,
+        "wall": 20,
+        "academy": 20,
+        "parade_ground": 20,
+        "beacon": 20,
+        "post_station": 20,
+        "arrow_tower": 20,
+        "tavern": 20
+      },
       "farms": 0,
       "production": {
         "gold": 100,
@@ -3041,7 +3177,15 @@
         "iron_cavalry": 0,
         "supply_wagon": 0,
         "ballista": 0,
-        "siege_ram": 0
+        "siege_ram": 0,
+        "yulin_guard": 0,
+        "danyang_soldier": 0,
+        "baimao_soldier": 0,
+        "huwei_guard": 0,
+        "zhuge_crossbow": 0,
+        "xiandeng_warrior": 0,
+        "hubao_cavalry": 0,
+        "xiliang_cavalry": 0
       },
       "armyFoodUsePerHour": 0,
       "timeScale": 1,
@@ -3052,6 +3196,7 @@
       "durability": null,
       "famousName": null,
       "productionBonusPercent": 0,
+      "famousEffect": null,
       "starveAt": null,
       "mutinyNextAt": null,
       "guard": null,
@@ -3203,13 +3348,13 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
 
 `C→S` 请求-响应 · 需登录后发送
 
-在当前城池的军营征募士兵（v11）。每种兵有解锁所需的军营等级（未达返回 TROOP_NOT_AVAILABLE）与单兵成本；每次征募 1..100 人，成本 = 单兵成本 × 数量、人口 = 单兵人口 × 数量，**发起时立即扣减资源与人口**（取消排队条目时全额返还）。征兵队列独立于建造队列：无征募中时立即开始（status=recruiting，dueAt 为预计完成时间，时长 = max(1 秒, floor(单兵基准时长 × 数量 ÷ time_scale))——**1 秒下限作用于批次总时长**而非单兵，**结果向下取整到整秒**（v22 修复 AISLG-39，与建造/升级同模型；显式验证环境变量覆盖时不再缩放）），有征募中且排队未满（当前 2 条，占位）时入队，队满返回 RECRUIT_QUEUE_FULL。资源不足返回 INSUFFICIENT_RESOURCES（v22 起附 shortfall 缺口与 retryAfterSeconds——按当前净产量推导，等满后重发必然成功），人口不足返回 INSUFFICIENT_POPULATION（v22 起附 shortfall 与 retryAfterSeconds——按人口增速推导），失败响应附当前城池状态（**data 仅含 city，无 recruit 载荷**——客户端必须先判 ok 再取载荷）。玩家与 Agent 均可发起。当前兵种：民夫（porter，军营 Lv1）：金 50 / 木 30 / 粮 30，8s/人（基准，实际 ÷ 全局时间缩放），占 1 人口，负重 500，耗粮 2/h（基准，实际 × 缩放）；义兵（militia，军营 Lv1）：金 80 / 木 20 / 粮 50，10s/人（基准，实际 ÷ 全局时间缩放），占 1 人口，负重 60，耗粮 3/h（基准，实际 × 缩放）；斥候（scout，军营 Lv2）：金 100 / 木 50 / 粮 80，15s/人（基准，实际 ÷ 全局时间缩放），占 1 人口，负重 80，耗粮 4/h（基准，实际 × 缩放）；长枪兵（pikeman，军营 Lv3）：金 150 / 木 80 / 铁 50 / 粮 100，20s/人（基准，实际 ÷ 全局时间缩放），占 1 人口，负重 60，耗粮 5/h（基准，实际 × 缩放）；刀盾兵（swordsman，军营 Lv4）：金 180 / 木 60 / 铁 80 / 粮 120，25s/人（基准，实际 ÷ 全局时间缩放），占 1 人口，负重 80，耗粮 6/h（基准，实际 × 缩放）；弓箭兵（archer，军营 Lv5）：金 200 / 木 120 / 铁 60 / 粮 100，30s/人（基准，实际 ÷ 全局时间缩放），占 1 人口，负重 50，耗粮 6/h（基准，实际 × 缩放）；轻骑兵（cavalry，军营 Lv6）：金 300 / 木 80 / 铁 100 / 粮 150，40s/人（基准，实际 ÷ 全局时间缩放），占 1 人口，负重 100，耗粮 12/h（基准，实际 × 缩放）；铁骑兵（iron_cavalry，军营 Lv11）：金 600 / 木 100 / 铁 300 / 粮 200，60s/人（基准，实际 ÷ 全局时间缩放），占 3 人口，负重 100，耗粮 30/h（基准，实际 × 缩放）；辎重车（supply_wagon，军营 Lv3）：金 200 / 木 300 / 铁 40 / 粮 60，30s/人（基准，实际 ÷ 全局时间缩放），占 6 人口，负重 5000，耗粮 10/h（基准，实际 × 缩放）；床弩（ballista，军营 Lv7）：金 350 / 木 300 / 铁 120 / 粮 80，45s/人（基准，实际 ÷ 全局时间缩放），占 3 人口，负重 0，耗粮 8/h（基准，实际 × 缩放）；冲车（siege_ram，军营 Lv8）：金 400 / 木 400 / 铁 100 / 粮 80，60s/人（基准，实际 ÷ 全局时间缩放），占 5 人口，负重 0，耗粮 10/h（基准，实际 × 缩放）（均为占位数值）。军队耗粮已接入（v14）：单兵 foodUse 计入城池净产量，城内 1 倍、行军/野地驻军 2 倍（见 GET_STATE 的 armyFoodUsePerHour），断粮仅停止增长；战斗属性随战斗玩法设计。
+在当前城池的军营征募士兵（v11）。每种兵有解锁所需的军营等级（未达返回 TROOP_NOT_AVAILABLE）与单兵成本；专属兵种（v64，AISLG-168）另需城池为对应名城（cities.famous_name），否则返回 ELITE_TROOP_LOCKED；每次征募 1..100 人，成本 = 单兵成本 × 数量、人口 = 单兵人口 × 数量，**发起时立即扣减资源与人口**（取消排队条目时全额返还）。征兵队列独立于建造队列：无征募中时立即开始（status=recruiting，dueAt 为预计完成时间，时长 = max(1 秒, floor(单兵基准时长 × 数量 ÷ time_scale))——**1 秒下限作用于批次总时长**而非单兵，**结果向下取整到整秒**（v22 修复 AISLG-39，与建造/升级同模型；显式验证环境变量覆盖时不再缩放）），有征募中且排队未满（当前 2 条，占位）时入队，队满返回 RECRUIT_QUEUE_FULL。资源不足返回 INSUFFICIENT_RESOURCES（v22 起附 shortfall 缺口与 retryAfterSeconds——按当前净产量推导，等满后重发必然成功），人口不足返回 INSUFFICIENT_POPULATION（v22 起附 shortfall 与 retryAfterSeconds——按人口增速推导），失败响应附当前城池状态（**data 仅含 city，无 recruit 载荷**——客户端必须先判 ok 再取载荷）。玩家与 Agent 均可发起。当前兵种：民夫（porter，军营 Lv1）：金 50 / 木 30 / 粮 30，8s/人（基准，实际 ÷ 全局时间缩放），占 1 人口，负重 500，耗粮 2/h（基准，实际 × 缩放）；义兵（militia，军营 Lv1）：金 80 / 木 20 / 粮 50，10s/人（基准，实际 ÷ 全局时间缩放），占 1 人口，负重 60，耗粮 3/h（基准，实际 × 缩放）；斥候（scout，军营 Lv2）：金 100 / 木 50 / 粮 80，15s/人（基准，实际 ÷ 全局时间缩放），占 1 人口，负重 80，耗粮 4/h（基准，实际 × 缩放）；长枪兵（pikeman，军营 Lv3）：金 150 / 木 80 / 铁 50 / 粮 100，20s/人（基准，实际 ÷ 全局时间缩放），占 1 人口，负重 60，耗粮 5/h（基准，实际 × 缩放）；刀盾兵（swordsman，军营 Lv4）：金 180 / 木 60 / 铁 80 / 粮 120，25s/人（基准，实际 ÷ 全局时间缩放），占 1 人口，负重 80，耗粮 6/h（基准，实际 × 缩放）；弓箭兵（archer，军营 Lv5）：金 200 / 木 120 / 铁 60 / 粮 100，30s/人（基准，实际 ÷ 全局时间缩放），占 1 人口，负重 50，耗粮 6/h（基准，实际 × 缩放）；轻骑兵（cavalry，军营 Lv6）：金 300 / 木 80 / 铁 100 / 粮 150，40s/人（基准，实际 ÷ 全局时间缩放），占 1 人口，负重 100，耗粮 12/h（基准，实际 × 缩放）；铁骑兵（iron_cavalry，军营 Lv11）：金 600 / 木 100 / 铁 300 / 粮 200，60s/人（基准，实际 ÷ 全局时间缩放），占 3 人口，负重 100，耗粮 30/h（基准，实际 × 缩放）；辎重车（supply_wagon，军营 Lv3）：金 200 / 木 300 / 铁 40 / 粮 60，30s/人（基准，实际 ÷ 全局时间缩放），占 6 人口，负重 5000，耗粮 10/h（基准，实际 × 缩放）；床弩（ballista，军营 Lv7）：金 350 / 木 300 / 铁 120 / 粮 80，45s/人（基准，实际 ÷ 全局时间缩放），占 3 人口，负重 0，耗粮 8/h（基准，实际 × 缩放）；冲车（siege_ram，军营 Lv8）：金 400 / 木 400 / 铁 100 / 粮 80，60s/人（基准，实际 ÷ 全局时间缩放），占 5 人口，负重 0，耗粮 10/h（基准，实际 × 缩放）；羽林卫（yulin_guard，军营 Lv7）：金 360 / 木 120 / 铁 160 / 粮 240，38s/人（基准，实际 ÷ 全局时间缩放），占 2 人口，负重 80，耗粮 9/h（基准，实际 × 缩放）；丹阳兵（danyang_soldier，军营 Lv7）：金 360 / 木 120 / 铁 160 / 粮 240，38s/人（基准，实际 ÷ 全局时间缩放），占 2 人口，负重 80，耗粮 9/h（基准，实际 × 缩放）；白毦兵（baimao_soldier，军营 Lv6）：金 300 / 木 160 / 铁 100 / 粮 200，30s/人（基准，实际 ÷ 全局时间缩放），占 2 人口，负重 60，耗粮 8/h（基准，实际 × 缩放）；虎卫军（huwei_guard，军营 Lv6）：金 300 / 木 160 / 铁 100 / 粮 200，30s/人（基准，实际 ÷ 全局时间缩放），占 2 人口，负重 60，耗粮 8/h（基准，实际 × 缩放）；诸葛连弩兵（zhuge_crossbow，军营 Lv8）：金 400 / 木 240 / 铁 120 / 粮 200，45s/人（基准，实际 ÷ 全局时间缩放），占 2 人口，负重 50，耗粮 9/h（基准，实际 × 缩放）；先登死士（xiandeng_warrior，军营 Lv8）：金 400 / 木 240 / 铁 120 / 粮 200，45s/人（基准，实际 ÷ 全局时间缩放），占 2 人口，负重 50，耗粮 9/h（基准，实际 × 缩放）；虎豹骑（hubao_cavalry，军营 Lv9）：金 600 / 木 160 / 铁 200 / 粮 300，60s/人（基准，实际 ÷ 全局时间缩放），占 2 人口，负重 100，耗粮 18/h（基准，实际 × 缩放）；西凉铁骑（xiliang_cavalry，军营 Lv9）：金 600 / 木 160 / 铁 200 / 粮 300，60s/人（基准，实际 ÷ 全局时间缩放），占 2 人口，负重 100，耗粮 18/h（基准，实际 × 缩放）（均为占位数值）。专属兵（v64）：羽林卫（yulin_guard，仅占领洛阳的分城可征，军营 Lv7）；丹阳兵（danyang_soldier，仅占领建业的分城可征，军营 Lv7）；白毦兵（baimao_soldier，仅占领襄阳的分城可征，军营 Lv6）；虎卫军（huwei_guard，仅占领许昌的分城可征，军营 Lv6）；诸葛连弩兵（zhuge_crossbow，仅占领成都的分城可征，军营 Lv8）；先登死士（xiandeng_warrior，仅占领邺城的分城可征，军营 Lv8）；虎豹骑（hubao_cavalry，仅占领官渡的分城可征，军营 Lv9）；西凉铁骑（xiliang_cavalry，仅占领长安的分城可征，军营 Lv9）。军队耗粮已接入（v14）：单兵 foodUse 计入城池净产量，城内 1 倍、行军/野地驻军 2 倍（见 GET_STATE 的 armyFoodUsePerHour），断粮仅停止增长；战斗属性随战斗玩法设计。
 
 **请求字段**
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| troop | 'porter' \| 'militia' \| 'scout' \| 'pikeman' \| 'swordsman' \| 'archer' \| 'cavalry' \| 'iron_cavalry' \| 'supply_wagon' \| 'ballista' \| 'siege_ram' | 必填。兵种（一期七种 + v33 二期四种：铁骑兵 iron_cavalry 军营 11 级 / 辎重车 supply_wagon 军营 3 级 / 床弩 ballista 军营 7 级 / 冲车 siege_ram 军营 8 级）；缺失或不是已知兵种返回 INVALID_PARAMS。 |
+| troop | 'porter' \| 'militia' \| 'scout' \| 'pikeman' \| 'swordsman' \| 'archer' \| 'cavalry' \| 'iron_cavalry' \| 'supply_wagon' \| 'ballista' \| 'siege_ram' \| 'yulin_guard' \| 'danyang_soldier' \| 'baimao_soldier' \| 'huwei_guard' \| 'zhuge_crossbow' \| 'xiandeng_warrior' \| 'hubao_cavalry' \| 'xiliang_cavalry' | 必填。兵种（一期七种 + v33 二期四种：铁骑兵 iron_cavalry 军营 11 级 / 辎重车 supply_wagon 军营 3 级 / 床弩 ballista 军营 7 级 / 冲车 siege_ram 军营 8 级；v64 名城专属八种见 RECRUIT 的 summary）；缺失或不是已知兵种返回 INVALID_PARAMS。 |
 | count | number | 必填。征募数量，1..100 的整数（占位上限）；越界或非整数返回 INVALID_PARAMS。 |
 | cityId | string | 可选（v24，AISLG-58）。要操作的城池 id（GET_STATE 响应的 cities[].id）；缺省 = 主城（账号创建最早的城），旧客户端不受影响。非本账号名下的城或格式不对返回 INVALID_PARAMS。每座城的资源 / 人口 / 仓储 / 建造与征兵队列 / 驻军各自独立；出征、侦察从该城出发、扣减该城驻军。取消类协议（CANCEL_BUILD / CANCEL_RECRUIT）按条目所属城池定位，无需传 cityId。 |
 
@@ -3218,7 +3363,7 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | recruit.id | string | 本次征兵的 UUID（取消时用作 recruitId）。 |
-| recruit.troop | 'porter' \| 'militia' \| 'scout' \| 'pikeman' \| 'swordsman' \| 'archer' \| 'cavalry' \| 'iron_cavalry' \| 'supply_wagon' \| 'ballista' \| 'siege_ram' | 兵种，等于请求的 troop。 |
+| recruit.troop | 'porter' \| 'militia' \| 'scout' \| 'pikeman' \| 'swordsman' \| 'archer' \| 'cavalry' \| 'iron_cavalry' \| 'supply_wagon' \| 'ballista' \| 'siege_ram' \| 'yulin_guard' \| 'danyang_soldier' \| 'baimao_soldier' \| 'huwei_guard' \| 'zhuge_crossbow' \| 'xiandeng_warrior' \| 'hubao_cavalry' \| 'xiliang_cavalry' | 兵种，等于请求的 troop。 |
 | recruit.count | number | 征募数量。 |
 | recruit.status | 'recruiting' \| 'queued' \| 'completed' \| 'cancelled' | 发起时为 recruiting（立即开始）或 queued（排队）；完成推送为 completed；取消后为 cancelled。 |
 | recruit.initiator | 'player' \| 'agent' | 发起原始指令的连接声明的登录类型。 |
@@ -3226,7 +3371,7 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
 | recruit.dueAt | string \| null | 预计完成时间 = 开始时间 + max(1 秒, floor(单兵基准时长 × 数量 ÷ time_scale))（v22 修复 AISLG-39：下限作用于批次总时长、向下取整到整秒）；排队中为 null，队首激活时由服务端按当时缩放重算。 |
 | recruit.completedAt | string \| null | 实际完成时间；征募中为 null。 |
 
-**可能错误**：`INVALID_PARAMS`、`TROOP_NOT_AVAILABLE`、`INSUFFICIENT_RESOURCES`、`INSUFFICIENT_POPULATION`、`RECRUIT_QUEUE_FULL`（处置建议见第 4 节）
+**可能错误**：`INVALID_PARAMS`、`TROOP_NOT_AVAILABLE`、`ELITE_TROOP_LOCKED`、`INSUFFICIENT_RESOURCES`、`INSUFFICIENT_POPULATION`、`RECRUIT_QUEUE_FULL`（处置建议见第 4 节）
 
 **Agent 提示**：发起前用 GET_STATE 的 levels.barracks 对照兵种门槛、resources 与 population 预判；失败响应的 data 仅含 city（无 recruit 载荷）。征募中条目能否取消待定，当前只能取消排队条目。同账号其他在线连接会收到 PUSH_RECRUIT_STATE（recruit_started / recruit_queued）推送。
 
@@ -3462,12 +3607,13 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
 | tiles[].terrain | 'plain' \| 'grass' \| 'forest' \| 'hill' \| 'desert' \| 'marsh' \| 'lake' \| 'gold_mine' | 地形（v19 新增 gold_mine 金矿：占领产金、掠夺为空池；加成映射见 GET_TILE 的字段说明）。 |
 | tiles[].kind | 'wilderness' \| 'npc_city' \| 'city' | 地块类别：野地 / NPC 城池 / 玩家城池（主城与分城）。 |
 | tiles[].level | number | 野地等级（1..10）或 NPC 城池等级（1..3）；玩家城池为 0。 |
-| tiles[].owner | object \| null | 占领者（占领野地或城池地块归属的城池）：{ accountId, username, cityId, cityName }；无主为 null。 |
+| tiles[].owner | object \| null | 占领者（占领野地或城池地块归属的城池）：{ accountId, username, cityId, cityName, ally }；无主为 null。ally（v67，AISLG-182）= 占领者与你同属一个联盟（盟友，自己的地块为 false）：盟友的城池 / 野地不能掠夺、抢占、占领，也不能侦察（返回 ALLY_NOT_ATTACKABLE）。 |
 | tiles[].garrison | number | 地块驻军总数；未占领野地为 0（原住守军不计入驻军总数；其编成见 GET_TILE 的 nativePower 与侦察）；NPC 城池需侦察（v17）：未侦察为 0，已侦察为最近一次侦察快照的总数。 |
 | tiles[].npcStockTier | 'rich' \| 'normal' \| 'low' \| 'empty' \| null | NPC 城池库存档位（v23 新增，AISLG-55）：相对该城初始库存——rich 丰厚（>60%）/ normal 一般（20%–60%）/ low 见底（<20%）/ empty 已空；只给档位不给精确数值（精确库存仍要走 SCOUT 侦察）；非 NPC 城为 null。掠夺后档位随库存变化，全服看到的档位一致。 |
 | tiles[].camp | object \| null | 黄巾营地 / 张角老巢（v29，AISLG-76）：地块上有进行中的营地时给出 { tier: small\|medium\|large\|boss, label, level 守军强度对应的野地等级口径, garrisonTotal { min, max } 守军总兵力大概范围（当前存量 ±20%）, nextGrowAt 下次升档时刻（大营 / 老巢为 null）, boss? { stage: outer\|keeper, recoversAt } }；其余为 null。营地格不显示野地原住守军，出征用 MARCH 掠夺任务（占领被拒）。详见 GET_YELLOW_TURBAN。 |
 | tiles[].wildFamous | boolean | 在野名将标记（v54，AISLG-144）：该野地落有尚未被获得的在野名将（公开，名字与属性需侦察）。被获得后标记撤下，名将归属见 GET_HEROES 的 famousClaims。 |
-| tiles[].famous | object \| null | 名城信息（v24 新增，AISLG-56）：{ name 名城名, stage 当前阶段（outer 外围阶段须先清外围 / keeper 外围已清、可攻城守并占领）, bonusPercent 占领后的独占加成（该城产量 +N%）, recoversAt 城守阶段外围恢复满编的时刻（超时无人攻下城守则恢复；外围阶段为 null） }；全图 8 座名城，对全服可见；非名城为 null。 |
+| tiles[].reserve | object \| null | 野地储量（v61，AISLG-165）：{ tier 档位 ample 充足 >60% / normal 一般 20%–60% / depleted 枯竭 <20%（所有人可见）, current 当前储量, cap 上限, eta { kind empty 预计采空 / full 预计回满, at } }；current / cap / eta 仅归属方与侦察过该地块的账号可见，其余为 null。储量与上限为基准单位（bonusRate、gatherRate 同口径）；采集与恢复速率随 time_scale 放大，eta 为真实时刻（采空 / 回满随之缩短）。非野地为 null。 |
+| tiles[].famous | object \| null | 名城信息（v24 新增，AISLG-56）：{ name 名城名, stage 当前阶段（outer 外围阶段须先清外围 / keeper 外围已清、可攻城守并占领）, bonusPercent 占领后的独占加成（该城产量 +N%）, recoversAt 城守阶段外围恢复满编的时刻（超时无人攻下城守则恢复；外围阶段为 null）, effect 占领后的名城独有效果 { kind wall / tower / territory / march / warehouse, percent, resources 仅 territory 有：野地产出的资源列表，其余为 null }（v62，AISLG-166） }；全图 8 座名城，对全服可见；非名城为 null。 |
 
 **Agent 提示**：探索与选目标的基础：先用它看周边野地等级与 NPC 城池位置，再 GET_TILE 看驻军与收益预览，最后 MARCH 出征。窗口参数非法时按缺省处理，不会报错。
 
@@ -3575,17 +3721,18 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
 | tile | object | 地块详情；字段同 GET_WORLD_MAP 的 tiles[] ，另含以下字段。 |
 | tile.garrisonDetail | object | 地块驻军按兵种展开：未占领野地返回**空对象 {}**（无驻军）；已占领野地按实际驻军展开（仅含有的兵种）；NPC 城池为侦察快照的驻防（未侦察为全 0）；玩家城池为空对象。 |
 | tile.nativePower | number | 未占领野地的原住守军规模参考（v24：含该地块固定浮动与战后恢复进度的当前存量；v18 起定位为粗估，不构成胜负预测——它抹平了射程与速度克制；已占领野地、NPC 城池与玩家城池为 0）。 |
-| tile.wilderness | object \| null | 野地收益预览：{ resource 加成资源, bonusRate 占领加成/小时（= 基线 + 等级 × 每级增量，v21 加成保底：森林/草原/金矿 30+70×等级、平原/丘陵/荒漠 25+55×等级、沼泽 20+40×等级、湖泊 40+80×等级）, gatherRate 当前驻军采集/小时 }；非野地为 null。 |
+| tile.wilderness | object \| null | 野地收益预览：{ resource 加成资源, bonusRate 占领加成/小时（= 基线 + 等级 × 每级增量，v21 加成保底：森林/草原/金矿 30+70×等级、平原/丘陵/荒漠 25+55×等级、沼泽 20+40×等级、湖泊 40+80×等级）, gatherRate 当前驻军采集/小时（v61 起受储量约束：储量空时只按恢复速度采集）, reserve 野地储量（v61，同 tiles[].reserve）}；非野地为 null。 |
 | tile.npc | object \| null | NPC 城池情报（v13 需侦察）：{ garrison 驻防按兵种（快照）, stock 可掠夺库存（快照）, scoutDetail / garrisonTotal（v27）}；未侦察或非 NPC 城为 null。**v27 起驻防精度随侦察科技**：scoutDetail=rough（侦察科技 Lv0–2）时 garrison 全 0，只有 garrisonTotal { min, max } 给总兵力约数（真实 ±20%）；kinds（Lv3–5）给兵种明细、各兵种数量为近似值（真实 ±20%，同一地块固定不变）；exact（Lv6+）精确。历史情报无 scoutDetail 字段，视为 exact。 |
 | tile.scoutedAt | string \| null | 最近一次侦察该地块的时间（ISO 8601，任意地块类型；v23 起非 NPC 城也返回）；从未侦察为 null。 |
 | tile.durability | number \| null | 他人分城的当前城防值（v40，AISLG-124）：0..100，按「免战截止前不回涨、之后每小时 +10」惰性结算展示；非 null 即可被 task=occupy 攻打的分城，归零一击换主。主城 / 野地 / NPC 城 / 自己的城为 null。 |
 | tile.protection | object \| null | 玩家城与他人占领野地的保护状态（v38 / v39）：{ newbieUntil 新手保护截止（含其野地）, truceUntil 被动免战截止（仅城池；野地恒 null——城级免战不保护野地）, shieldUntil 主动免战截止（含其野地）, ownerChangedUntil 换主保护截止（仅野地：刚被抢占后 1 小时基准随缩放，期间玩家与 NPC 都不能再抢） }，任一截止时刻未到即受保护（MARCH 被拒，错误码与时限见 MARCH）；非玩家目标、自己的地为 null。到期自动失效，无事件。 |
+| tile.reserve | object \| null | 野地储量（v61，AISLG-165）：{ tier 档位 ample 充足 >60% / normal 一般 20%–60% / depleted 枯竭 <20%（所有人可见）, current 当前储量, cap 上限, eta { kind empty 预计采空 / full 预计回满, at } }；current / cap / eta 仅归属方与侦察过该地块的账号可见，其余为 null。储量与上限为基准单位（bonusRate、gatherRate 同口径）；采集与恢复速率随 time_scale 放大，eta 为真实时刻（采空 / 回满随之缩短）。非野地为 null。 |
 | tile.wildFamousIntel | object \| null | 在野名将情报（v54，AISLG-144）：未被获得的在野名将所在野地才有 { scouted, name, attrs { lead, force, wit } }；未侦察过时 scouted=false、name / attrs 为 null，侦察后（SCOUT 完成）给出名字与三项属性。其余为 null。 |
 | tile.plunderedAt | string \| null | 最近一次成功掠夺（攻方胜利）的时间（v16，ISO 8601）：距其 24 小时内该地块处于掠夺冷却（基准值，实际受全局时间缩放等比缩短；MARCH task='plunder' 被拒，PLUNDER_COOLDOWN）；从未被掠为 null。 |
 
 **可能错误**：`INVALID_PARAMS`（处置建议见第 4 节）
 
-**Agent 提示**：出征评估（v18 起改道）：参考战力只作规模粗估，不能用来预测胜负——它完全抹平了射程与速度克制（纯近战打守城远程可能全场 0 输出）。正确路径：① 对照「兵种与战斗属性」评估编队结构（前排承伤 + 远程输出 + 高速反远程，射程与速度见属性表）；② 野地守军编成按等级推导（见术语表「野地」），NPC 城池先 SCOUT 拿驻防快照（含 wallDefensePercent）；③ 战后用战报（GET_BATTLE_REPORTS）的逐回合统计复盘。参考战力数值：民夫 1 / 义兵·斥候 2 / 长枪兵 4 / 刀盾兵·弓箭兵 5 / 轻骑兵 8。
+**Agent 提示**：出征评估（v18 起改道）：参考战力只作规模粗估，不能用来预测胜负——它完全抹平了射程与速度克制（纯近战打守城远程可能全场 0 输出）。正确路径：① 对照「兵种与战斗属性」评估编队结构（前排承伤 + 远程输出 + 高速反远程，射程与速度见属性表）；② 野地守军编成按等级推导（见术语表「野地」），NPC 城池先 SCOUT 拿驻防快照（含 wallDefensePercent）；③ 战后用战报（GET_BATTLE_REPORTS）的逐回合统计复盘。参考战力数值（TROOP_POWER，含二期与 v64 名城专属兵）：民夫 1 / 义兵 2 / 斥候 2 / 长枪兵 4 / 刀盾兵 5 / 弓箭兵 5 / 轻骑兵 8 / 铁骑兵 14 / 辎重车 1 / 床弩 8 / 冲车 3 / 羽林卫 7 / 丹阳兵 7 / 白毦兵 5 / 虎卫军 5 / 诸葛连弩兵 7 / 先登死士 7 / 虎豹骑 10 / 西凉铁骑 10。
 
 **示例**
 
@@ -3668,7 +3815,7 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
 
 `C→S` 请求-响应 · 需登录后发送
 
-从账号主城派出部队前往目标地块，到达后由服务端自动结算。编队 troops 按兵种给出数量（至少一种 > 0），发起时立即从城内驻军扣减；行军时长 = Chebyshev 距离 × 每格秒数（基准 15 秒/格，占位）÷ **编队最慢兵种的行军速度系数**（斥候 ×2、轻骑兵 ×1.5，其余 ×1）÷（1 + 行军科技加成，v27 每级 +5%；v30 AISLG-83：自己城池之间的调兵 / 运输再加出发城**驿站**加成，每级 +10%、10 级翻倍，出征野地 / NPC 城等其他目标不受影响，运输往返与失效返程同吃出发城驿站），**总时长**再 ÷ 全局时间缩放、向上取整、最少 1 秒（见文档头部；不是先把每格缩放取整再乘格数）。以响应里的 arriveAt 为准。v16 新增可选 **task**：`plunder`（掠夺，**缺省值**）或 `occupy`（占领）——只作用于野地与 NPC 城目标，侦察 / 调兵 / 增援忽略 task。目标与结算：**无主野地**按 task 掠夺或占领（战斗 vs 原住守军）；**本账号占领的野地** = 增援驻军（不战斗）；**未被占领的 NPC 城池**可掠夺，也可占领变分城（v24，AISLG-58；战斗 vs 驻防、守方据墙待敌）；**本账号分城** = 调兵（不战斗，到达并入该城驻军）；**发起前校验校场（v30，AISLG-80）**：本城同时在外的部队数（行军中含返程 + 驻守野地，不计城内驻军）已达校场等级上限（未建校场按 1）时返回 DEPLOY_LIMIT，SCOUT 同；玩家城池（他人的）、他人占领地块与出发主城本身不可作为目标（玩家对抗随后续阶段开放）。**v38（AISLG-122，玩家对抗一）开放掠夺他人城池**：主城与分城都能打、不用宣战，战斗与 NPC 打主城同口径的守城战（城墙、城防科技、箭塔、守方城守全部生效），发起即给守方推送来袭预警（PUSH_ATTACK_WARNING，预警窗口 = 行军时长，敌情按守方烽火台分档）；守方处于新手保护返回 NEWBIE_PROTECTED、免战中返回 TARGET_IN_TRUCE（均附 until / retryAfterSeconds），攻方自己的主动免战生效中返回 SELF_TRUCE_ACTIVE（打野地 / NPC 不受限）；**task=occupy 对他人分城开放（v40，AISLG-124，玩家对抗三）**：主城仍返回 TASK_INVALID_FOR_TARGET（永不可占领，只能被掠夺）。分城占领资格与占 NPC 城同口径（GOVERNMENT_TOO_LOW / BRANCH_LIMIT / TARGET_LEVEL_TOO_HIGH，目标等级 = 该城官府等级），发起时初核、到达复核（名额没了照打、只降城防值不换主，事件 battle_won 记 occupied=false 与 denial）。守城战打赢一次（守军全灭）城防值 −35，攻方幸存冲车占比每 1% 再 +1.5（最多 +15）；**占领打赢不掠夺资源，掠夺打赢不降城防**；城防降到 0 且名额有空当场换主（详见「玩家对抗与城防值」一节与 GET_TILE 的 tile.durability）；每次打赢该城进入 4 小时（基准随缩放）被动免战，免战内城防不回涨、结束后每小时回涨 10 至满——占一座分城至少打 3 次、隔 8 小时以上，守方每次都有时间补兵 / 增援；在途到达时守方进入保护 / 免战则扑空返程（事件 outcome=aborted 附 cause）。**v39（AISLG-123，玩家对抗二）开放抢占他人占领的野地**：task='occupy'（缺省 plunder 返回 TASK_INVALID_FOR_TARGET——地里没有存货可抢）；野地战无城墙 / 箭塔 / 城守，守方 = 地块驻军，守方没留驻军不打、直接拿下（无战报）；发起即给守方推 PUSH_ATTACK_WARNING（target='wilderness'，敌情按其所属城烽火台分档），预警期间可向该地块增援（MARCH 打自己的地块 = 增援）；守方处于新手保护（NEWBIE_PROTECTED）或主动免战（TARGET_IN_TRUCE）时其全部野地不可被抢，但守方某座城的被动免战只保护城本身、不保护野地；地块处于换主保护期（被抢占后 1 小时基准随缩放）返回 TILE_PROTECTED；攻方自己的主动免战生效中同样不能抢（SELF_TRUCE_ACTIVE）。**抢占结算**：打赢且出发城占领名额（官府等级）有空 → 地块易主、幸存部队驻守并获得加成、地块进入换主保护（1 小时基准随缩放，玩家与 NPC 都不能再抢）；名额已满 → 守方照样失地（wilderness_lost cause=conquest）、地块变无主（不设保护）、攻方幸存返程（事件 battle_won 记 occupied=false / denial=TERRITORY_LIMIT）；打输 → 守方继续占领，攻方残部返程；战报 kind='pvp_wilderness' 攻守双方各一份。**到达复核口径（v39）**：到达时地块已无主（对方召回等）→ 扑空返程（aborted，cause=target_gone）；已易主第三人 → 扑空返程（aborted，cause=owner_changed）；已归本账号 → 转增援并入驻军。战斗为多回合推进结构（速度与射程影响接敌、城墙为守方提供受击减免；具体算法不对外公开，机制概览见术语表「战斗」、兵种数值见「兵种与战斗属性」）；攻方歼灭守方获胜、胜方幸存 ≥ 1，攻方战败（全灭或回合耗尽）时幸存部队撤回出发城。**掠夺结算（task=plunder）**：野地奖励池 = 地形对应资源 × 750 × 等级 + 金币 × 250 × 等级（v21 掠夺含金，AISLG-31；金矿 gold_mine 保持空池——金矿定位占领生息）；NPC 城 = 持久化库存（v21 起含金币；库存不再生、掠空后无收益）。实际带走量按**幸存部队负重**装填（Σ 数量 × 单兵 carry，v27 起再 × 负重科技加成（每级 +5%，向下取整）；运输任务的负重上限同口径：民夫 500、斥候/刀盾兵 80、轻骑兵 100，其余 60，占位），按**金→粮→木→石→铁**顺序装满即止，立即入账出发城（不钳储量上限）；不改归属、幸存部队返程；成功掠夺的地块进入 24 小时冷却（基准，受全局时间缩放；发起时校验 PLUNDER_COOLDOWN——v22 起该失败附 retryAfterSeconds（冷却截止 − 当前时刻，等满后重发必然受理；在途到达仍战斗但资源为零）。**掠夺玩家城（v38，AISLG-122）**：可抢池 = 城内资源先扣仓库保护（粮/木/石/铁 各保护 1000×仓库等级，金币不受保护），再乘单次比例上限（四资源 45%、金币 15%，v42 AISLG-126 校准拍板）与等级差衰减（出发城官府比目标城官府高 5 级起每多 1 级收益 −15%、最低 25%——大号打小号不禁止但收益递减），最后仍按幸存部队负重装填；攻破（守军全灭）后该城进入 4 小时（基准，随缩放）被动免战，玩家与 NPC 都不能再打它（GET_TILE 的 tile.protection 可查）；战报 kind='pvp_raid'，攻守双方各得一份；玩家城不受地块掠夺冷却限制（免战即冷却）。**名城（v24，AISLG-56，GET_TILE / 地图的 famous 字段标识，全图 8 座）分两阶段**：外围阶段对其出征（掠夺 / 占领都一样）打的是外围驻军（野战无城墙），打赢 = 外围清空、名城进入城守阶段（事件 battle_won 含 stage='outer'、outerCleared=true、recoversAt），无战利品；城守阶段（限时，超时外围恢复满编）再出征攻城守——task=plunder 掠夺其库存，task=occupy 占领并变分城（以名城命名、产量 +20%，名城计入分城上限）；外围未清时对其 task=occupy 返回 OUTER_NOT_CLEARED。名城守军 = 同等级普通 NPC 城 × 3（外围与城守各一半）。**占领 NPC 城（task=occupy，v24）**：需同时满足——主城官府 ≥ 3 级（GOVERNMENT_TOO_LOW）；分城数 < 分城上限 = floor(主城官府等级 ÷ 2)（BRANCH_LIMIT，名城同样计入）；目标 NPC 城等级 ≤ 出发城的官府等级（TARGET_LEVEL_TOO_HIGH）。发起时初核，Worker 到达时复核（不满足则胜利后不建分城、幸存部队返程，事件 battle_won 记录 occupied=false 与 denial）。打赢后该城成为分城：接收 NPC 城的建筑与**剩余库存**，幸存部队进城驻守，分城可独立建造 / 征兵 / 出征（城池类协议带 cityId）；占领不受掠夺冷却限制，不另行掠夺（库存随城移交）。**占领野地结算（task=occupy 目标为野地）**：无一次性战利品；该城占领野地数低于官府等级（上限 = 官府等级，随官府升级提高）时改归属、幸存部队驻守并获得持续加成；发起时初核 TERRITORY_LIMIT，到达复核（超限则胜利后不改归属、幸存部队返程，事件记录 occupied=false / denial=TERRITORY_LIMIT）。每场战斗生成一份战报（GET_BATTLE_REPORTS 可查、PUSH_BATTLE_REPORT 推送）。
+从账号主城派出部队前往目标地块，到达后由服务端自动结算。编队 troops 按兵种给出数量（至少一种 > 0），发起时立即从城内驻军扣减；行军时长 = Chebyshev 距离 × 每格秒数（基准 15 秒/格，占位）÷ **编队最慢兵种的行军速度系数**（斥候 ×2、轻骑兵 ×1.5，其余 ×1）÷（1 + 行军科技加成，v27 每级 +5%；v30 AISLG-83：自己城池之间的调兵 / 运输再加出发城**驿站**加成，每级 +10%、10 级翻倍，出征野地 / NPC 城等其他目标不受影响，运输往返与失效返程同吃出发城驿站），**总时长**再 ÷ 全局时间缩放、向上取整、最少 1 秒（见文档头部；不是先把每格缩放取整再乘格数）。以响应里的 arriveAt 为准。v16 新增可选 **task**：`plunder`（掠夺，**缺省值**）或 `occupy`（占领）——只作用于野地与 NPC 城目标，侦察 / 调兵 / 增援忽略 task。目标与结算：**无主野地**按 task 掠夺或占领（战斗 vs 原住守军）；**本账号占领的野地** = 增援驻军（不战斗）；**未被占领的 NPC 城池**可掠夺，也可占领变分城（v24，AISLG-58；战斗 vs 驻防、守方据墙待敌）；**本账号分城** = 调兵（不战斗，到达并入该城驻军）；**发起前校验校场（v30，AISLG-80）**：本城同时在外的部队数（行军中含返程 + 驻守野地，不计城内驻军）已达校场等级上限（未建校场按 1）时返回 DEPLOY_LIMIT，SCOUT 同；玩家城池（他人的）、他人占领地块与出发主城本身不可作为目标（玩家对抗随后续阶段开放）。**v38（AISLG-122，玩家对抗一）开放掠夺他人城池**：主城与分城都能打、不用宣战，战斗与 NPC 打主城同口径的守城战（城墙、城防科技、箭塔、守方城守全部生效），发起即给守方推送来袭预警（PUSH_ATTACK_WARNING，预警窗口 = 行军时长，敌情按守方烽火台分档）；守方处于新手保护返回 NEWBIE_PROTECTED、免战中返回 TARGET_IN_TRUCE（均附 until / retryAfterSeconds），攻方自己的主动免战生效中返回 SELF_TRUCE_ACTIVE（打野地 / NPC 不受限）；**task=occupy 对他人分城开放（v40，AISLG-124，玩家对抗三）**：主城仍返回 TASK_INVALID_FOR_TARGET（永不可占领，只能被掠夺）。分城占领资格与占 NPC 城同口径（GOVERNMENT_TOO_LOW / BRANCH_LIMIT / TARGET_LEVEL_TOO_HIGH，目标等级 = 该城官府等级），发起时初核、到达复核（名额没了照打、只降城防值不换主，事件 battle_won 记 occupied=false 与 denial）。守城战打赢一次（守军全灭）城防值 −35，攻方幸存冲车占比每 1% 再 +1.5（最多 +15）；**占领打赢不掠夺资源，掠夺打赢不降城防**；城防降到 0 且名额有空当场换主（详见「玩家对抗与城防值」一节与 GET_TILE 的 tile.durability）；每次打赢该城进入 4 小时（基准随缩放）被动免战，免战内城防不回涨、结束后每小时回涨 10 至满——占一座分城至少打 3 次、隔 8 小时以上，守方每次都有时间补兵 / 增援；在途到达时守方进入保护 / 免战则扑空返程（事件 outcome=aborted 附 cause）。**v39（AISLG-123，玩家对抗二）开放抢占他人占领的野地**：task='occupy'（缺省 plunder 返回 TASK_INVALID_FOR_TARGET——地里没有存货可抢）；野地战无城墙 / 箭塔 / 城守，守方 = 地块驻军，守方没留驻军不打、直接拿下（无战报）；发起即给守方推 PUSH_ATTACK_WARNING（target='wilderness'，敌情按其所属城烽火台分档），预警期间可向该地块增援（MARCH 打自己的地块 = 增援）；守方处于新手保护（NEWBIE_PROTECTED）或主动免战（TARGET_IN_TRUCE）时其全部野地不可被抢，但守方某座城的被动免战只保护城本身、不保护野地；地块处于换主保护期（被抢占后 1 小时基准随缩放）返回 TILE_PROTECTED；攻方自己的主动免战生效中同样不能抢（SELF_TRUCE_ACTIVE）。**抢占结算**：打赢且出发城占领名额（官府等级）有空 → 地块易主、幸存部队驻守并获得加成、地块进入换主保护（1 小时基准随缩放，玩家与 NPC 都不能再抢）；名额已满 → 守方照样失地（wilderness_lost cause=conquest）、地块变无主（不设保护）、攻方幸存返程（事件 battle_won 记 occupied=false / denial=TERRITORY_LIMIT）；打输 → 守方继续占领，攻方残部返程；战报 kind='pvp_wilderness' 攻守双方各一份。**到达复核口径（v39）**：到达时地块已无主（对方召回等）→ 扑空返程（aborted，cause=target_gone）；已易主第三人 → 扑空返程（aborted，cause=owner_changed）；已归本账号 → 转增援并入驻军。战斗为多回合推进结构（速度与射程影响接敌、城墙为守方提供受击减免；具体算法不对外公开，机制概览见术语表「战斗」、兵种数值见「兵种与战斗属性」）；攻方歼灭守方获胜、胜方幸存 ≥ 1，攻方战败（全灭或回合耗尽）时幸存部队撤回出发城。**掠夺结算（task=plunder）**：野地奖励池 = 地形对应资源 × 750 × 等级 + 金币 × 250 × 等级（v21 掠夺含金，AISLG-31；金矿 gold_mine 保持空池——金矿定位占领生息）；NPC 城 = 持久化库存（v21 起含金币；库存不再生、掠空后无收益）。实际带走量按**幸存部队负重**装填（Σ 数量 × 单兵 carry，v27 起再 × 负重科技加成（每级 +5%，向下取整）；运输任务的负重上限同口径：民夫 500、斥候/刀盾兵 80、轻骑兵 100，其余 60，占位），按**金→粮→木→石→铁**顺序装满即止，立即入账出发城（不钳储量上限）；不改归属、幸存部队返程；成功掠夺的地块进入 24 小时冷却（基准，受全局时间缩放；发起时校验 PLUNDER_COOLDOWN——v22 起该失败附 retryAfterSeconds（冷却截止 − 当前时刻，等满后重发必然受理；在途到达仍战斗但资源为零）。**掠夺玩家城（v38，AISLG-122）**：可抢池 = 城内资源先扣仓库保护（粮/木/石/铁 各保护 1000×仓库等级，金币不受保护），再乘单次比例上限（四资源 45%、金币 15%，v42 AISLG-126 校准拍板）与等级差衰减（出发城官府比目标城官府高 5 级起每多 1 级收益 −15%、最低 25%——大号打小号不禁止但收益递减），最后仍按幸存部队负重装填；攻破（守军全灭）后该城进入 4 小时（基准，随缩放）被动免战，玩家与 NPC 都不能再打它（GET_TILE 的 tile.protection 可查）；战报 kind='pvp_raid'，攻守双方各得一份；玩家城不受地块掠夺冷却限制（免战即冷却）。**名城（v24，AISLG-56，GET_TILE / 地图的 famous 字段标识，全图 8 座）分两阶段**：外围阶段对其出征（掠夺 / 占领都一样）打的是外围驻军（野战无城墙），打赢 = 外围清空、名城进入城守阶段（事件 battle_won 含 stage='outer'、outerCleared=true、recoversAt），无战利品；城守阶段（限时，超时外围恢复满编）再出征攻城守——task=plunder 掠夺其库存，task=occupy 占领并变分城（以名城命名、产量 +20%，名城计入分城上限）；外围未清时对其 task=occupy 返回 OUTER_NOT_CLEARED。名城守军 = 同等级普通 NPC 城 × 3（外围与城守各一半）。**占领 NPC 城（task=occupy，v24）**：需同时满足——主城官府 ≥ 3 级（GOVERNMENT_TOO_LOW）；分城数 < 分城上限 = floor(主城官府等级 ÷ 2)（BRANCH_LIMIT，名城同样计入）；目标 NPC 城等级 ≤ 出发城的官府等级（TARGET_LEVEL_TOO_HIGH）。发起时初核，Worker 到达时复核（不满足则胜利后不建分城、幸存部队返程，事件 battle_won 记录 occupied=false 与 denial）。打赢后该城成为分城：接收 NPC 城的建筑与**剩余库存**，幸存部队进城驻守，分城可独立建造 / 征兵 / 出征（城池类协议带 cityId）；占领不受掠夺冷却限制，不另行掠夺（库存随城移交）。**占领野地结算（task=occupy 目标为野地）**：无一次性战利品；该城占领野地数低于官府等级（上限 = 官府等级，随官府升级提高）时改归属、幸存部队驻守并获得持续加成；发起时初核 TERRITORY_LIMIT，到达复核（超限则胜利后不改归属、幸存部队返程，事件记录 occupied=false / denial=TERRITORY_LIMIT）。**盟友不可攻击（v67，AISLG-182）**：目标城池 / 野地的主人与你同属一个联盟时，掠夺、抢占野地、占领分城一律返回 ALLY_NOT_ATTACKABLE（运输、增援、调兵不受影响）；出发后目标才成为盟友的，部队到达时不开战、原路返回（事件 outcome=aborted，cause=ALLY_NOT_ATTACKABLE）。每场战斗生成一份战报（GET_BATTLE_REPORTS 可查、PUSH_BATTLE_REPORT 推送）。
 
 **请求字段**
 
@@ -3701,7 +3848,7 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
 | march.targetId | string \| null | 截击的移动目标 id（v28，AISLG-78）：purpose=intercept 及其撤回后的返程行军有值，其余为 null。 |
 | march.cargo | object \| null | 随行运送的资源（v26，Resources 形）：运输行军及其被撤回 / 目标失效后的返程行军携带，其余为 null。 |
 
-**可能错误**：`INVALID_PARAMS`、`INSUFFICIENT_RESOURCES`、`CARGO_OVER_CAPACITY`、`DEPLOY_LIMIT`、`MOVING_TARGET_GONE`、`TARGET_NOT_ATTACKABLE`、`INSUFFICIENT_TROOPS`、`PLUNDER_COOLDOWN`、`TASK_INVALID_FOR_TARGET`、`TERRITORY_LIMIT`、`GOVERNMENT_TOO_LOW`、`BRANCH_LIMIT`、`DISCARD_COOLDOWN`、`TARGET_LEVEL_TOO_HIGH`、`OUTER_NOT_CLEARED`、`NEWBIE_PROTECTED`、`TARGET_IN_TRUCE`、`SELF_TRUCE_ACTIVE`、`TILE_PROTECTED`（处置建议见第 4 节）
+**可能错误**：`INVALID_PARAMS`、`INSUFFICIENT_RESOURCES`、`CARGO_OVER_CAPACITY`、`DEPLOY_LIMIT`、`MOVING_TARGET_GONE`、`TARGET_NOT_ATTACKABLE`、`INSUFFICIENT_TROOPS`、`PLUNDER_COOLDOWN`、`TASK_INVALID_FOR_TARGET`、`TERRITORY_LIMIT`、`GOVERNMENT_TOO_LOW`、`BRANCH_LIMIT`、`DISCARD_COOLDOWN`、`TARGET_LEVEL_TOO_HIGH`、`OUTER_NOT_CLEARED`、`NEWBIE_PROTECTED`、`TARGET_IN_TRUCE`、`SELF_TRUCE_ACTIVE`、`TILE_PROTECTED`、`ALLY_NOT_ATTACKABLE`（处置建议见第 4 节）
 
 **Agent 提示**：到达结算产生 march_completed 事件（purpose=plunder 时 outcome=plunder_won：含 loot 战利品、carry 负重、returning 返程行军 id；purpose=occupy 时 outcome=battle_won：含 occupied（false 时附 denial：野地为 TERRITORY_LIMIT，NPC 城为 GOVERNMENT_TOO_LOW / BRANCH_LIMIT / TARGET_LEVEL_TOO_HIGH；NPC 城占领成功另含 cityId）），战斗另生成战报。掠夺量由幸存部队的负重封顶——想多带资源就多派民夫（单兵 carry 500，其余兵种 50–100）；同一地块 24 小时（基准）只能成功掠夺一次（GET_TILE 的 plunderedAt 可判冷却截止），占领不受冷却限制但受官府等级上限。**黄巾营地 / 老巢（v29，AISLG-76）**：目标格有进行中的营地（TileView.camp 非 null）时，MARCH 的掠夺任务即清剿营地——野战（无城墙）打营地当前守军（战后存量每小时恢复 25%），歼灭的黄巾单位数累计为贡献（输赢都算）；普通营地打赢消失并按幸存部队负重（含负重科技）装填掉落池（金 + 四资源）即时入账，清剿数 +1，达到 80% 出现老巢；老巢外围阶段打赢 = 外围清空（无战利品，限时内进入城守阶段），城守阶段打赢 = 老巢被击破（掉落 + 首杀播报 + 事件收场）；输方幸存部队撤回。task=occupy 返回 TASK_INVALID_FOR_TARGET，不受掠夺冷却限制。战报 kind='yellow_turban'，事件 march_completed 的 outcome=camp_won / camp_lost / boss_outer_cleared / boss_won（含 killed 歼敌数、campTier、stage）。**截击移动目标（带 targetId，v28，AISLG-78；v35 AISLG-112 改为「到了先埋伏」）**：目标路线与时刻表固定，发起时就把 arriveAt 定为预计接战时刻 = max(部队到达时刻, 目标进入选定格相邻范围（Chebyshev 距离 ≤ 1）的时刻)——部队提前到达则原地埋伏（MarchView.ambushAt 为埋伏开始时刻）等目标经过再开打，不必掐点；到达时目标已走出范围（太晚）→ 按到达时刻结算、「扑空」返程。接战为野战（无城墙，守军即目标守军，打赢目标消失，按幸存部队负重（含负重科技）装填其携带的资源即时入账，不钳储量上限；打输幸存部队撤回、目标原样留存）；目标已被他人击败或过时 → 「目标消失」，不接战、部队返程。埋伏期间部队照常占校场名额、按在外口径耗粮，可 RECALL_MARCH 撤回。三种结果都有战报（kind='intercept'，扑空 / 消失时 contact='missed' / 'gone'、endReason='no_contact'、rounds=0）与 march_completed 事件（outcome=intercepted / intercept_lost / intercept_missed / intercept_gone）。**运输（task=transport，v26，AISLG-79）**：目标必须是本账号的另一座城（出发城自身 / 野地 / NPC 城 / 他人城池返回 TASK_INVALID_FOR_TARGET）。发起即从出发城扣除 cargo 与派出部队；到达后货物**即时入账**目标城（与掠夺所得同规则：不钳储量上限），部队自动返程回出发城；运输队不会被 NPC 拦截（与「NPC 不攻击行军中的部队」同口径）；途中 RECALL_MARCH 撤回时货物随部队回到出发城，到达目标前目标城失效（如账号重置）同理带回。到达产生两条 march_completed 事件：出发城一条 outcome='transported'（含 cargo / cityId / cityName / returning），目标城一条 outcome='transport_received'（cityId 指向目标城，含 cargo / fromCityName）。同账号在线连接还会收到 PUSH_MARCH_STATE / PUSH_TILE_STATE / PUSH_BATTLE_REPORT。离线期间服务端照常结算，上线后用 GET_EVENTS（sinceId）补读。行军途中可 RECALL_MARCH 折返；城内驻军在 city.army，出征中的部队不在其中。
 
@@ -3751,7 +3898,15 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
         "iron_cavalry": 0,
         "supply_wagon": 0,
         "ballista": 0,
-        "siege_ram": 0
+        "siege_ram": 0,
+        "yulin_guard": 0,
+        "danyang_soldier": 0,
+        "baimao_soldier": 0,
+        "huwei_guard": 0,
+        "zhuge_crossbow": 0,
+        "xiandeng_warrior": 0,
+        "hubao_cavalry": 0,
+        "xiliang_cavalry": 0
       },
       "purpose": "plunder",
       "status": "marching",
@@ -3811,7 +3966,15 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
         "iron_cavalry": 0,
         "supply_wagon": 0,
         "ballista": 0,
-        "siege_ram": 0
+        "siege_ram": 0,
+        "yulin_guard": 0,
+        "danyang_soldier": 0,
+        "baimao_soldier": 0,
+        "huwei_guard": 0,
+        "zhuge_crossbow": 0,
+        "xiandeng_warrior": 0,
+        "hubao_cavalry": 0,
+        "xiliang_cavalry": 0
       },
       "purpose": "occupy",
       "status": "marching",
@@ -3871,7 +4034,15 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
         "iron_cavalry": 0,
         "supply_wagon": 0,
         "ballista": 0,
-        "siege_ram": 0
+        "siege_ram": 0,
+        "yulin_guard": 0,
+        "danyang_soldier": 0,
+        "baimao_soldier": 0,
+        "huwei_guard": 0,
+        "zhuge_crossbow": 0,
+        "xiandeng_warrior": 0,
+        "hubao_cavalry": 0,
+        "xiliang_cavalry": 0
       },
       "purpose": "intercept",
       "status": "marching",
@@ -3935,7 +4106,15 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
         "iron_cavalry": 0,
         "supply_wagon": 0,
         "ballista": 0,
-        "siege_ram": 0
+        "siege_ram": 0,
+        "yulin_guard": 0,
+        "danyang_soldier": 0,
+        "baimao_soldier": 0,
+        "huwei_guard": 0,
+        "zhuge_crossbow": 0,
+        "xiandeng_warrior": 0,
+        "hubao_cavalry": 0,
+        "xiliang_cavalry": 0
       },
       "purpose": "transport",
       "status": "marching",
@@ -4001,7 +4180,15 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
         "iron_cavalry": 0,
         "supply_wagon": 0,
         "ballista": 0,
-        "siege_ram": 0
+        "siege_ram": 0,
+        "yulin_guard": 0,
+        "danyang_soldier": 0,
+        "baimao_soldier": 0,
+        "huwei_guard": 0,
+        "zhuge_crossbow": 0,
+        "xiandeng_warrior": 0,
+        "hubao_cavalry": 0,
+        "xiliang_cavalry": 0
       },
       "marches": [],
       "territory": []
@@ -4107,7 +4294,15 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
         "iron_cavalry": 0,
         "supply_wagon": 0,
         "ballista": 0,
-        "siege_ram": 0
+        "siege_ram": 0,
+        "yulin_guard": 0,
+        "danyang_soldier": 0,
+        "baimao_soldier": 0,
+        "huwei_guard": 0,
+        "zhuge_crossbow": 0,
+        "xiandeng_warrior": 0,
+        "hubao_cavalry": 0,
+        "xiliang_cavalry": 0
       },
       "purpose": "return",
       "status": "marching",
@@ -4174,7 +4369,7 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
 | --- | --- | --- |
 | march | object | 侦察行军视图（purpose=scout；字段与 MARCH 响应相同）。 |
 
-**可能错误**：`INVALID_PARAMS`、`DEPLOY_LIMIT`、`INSUFFICIENT_TROOPS`、`NEWBIE_PROTECTED`（处置建议见第 4 节）
+**可能错误**：`INVALID_PARAMS`、`DEPLOY_LIMIT`、`INSUFFICIENT_TROOPS`、`NEWBIE_PROTECTED`、`ALLY_NOT_ATTACKABLE`（处置建议见第 4 节）
 
 **Agent 提示**：侦察不发生战斗、斥候全数返程（当前无侦察对抗判定，占位）。攻 NPC 城池前先侦察：GET_TILE 的 npc 字段（驻防 + 库存）只对侦察过的地块开放；野地原住守军（v24）：Lv1–2 义兵 8×等级，Lv3 起义兵 6×等级 + 弓箭兵 (等级−2)，每块在基准上固定 ±20% 浮动、被打残后每小时恢复 25%——侦察可看到该地块此刻的具体编成；推荐兵力见文档「野地进攻口径」。
 
@@ -4220,7 +4415,15 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
         "iron_cavalry": 0,
         "supply_wagon": 0,
         "ballista": 0,
-        "siege_ram": 0
+        "siege_ram": 0,
+        "yulin_guard": 0,
+        "danyang_soldier": 0,
+        "baimao_soldier": 0,
+        "huwei_guard": 0,
+        "zhuge_crossbow": 0,
+        "xiandeng_warrior": 0,
+        "hubao_cavalry": 0,
+        "xiliang_cavalry": 0
       },
       "purpose": "scout",
       "status": "marching",
@@ -4392,7 +4595,15 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
         "iron_cavalry": 0,
         "supply_wagon": 0,
         "ballista": 0,
-        "siege_ram": 0
+        "siege_ram": 0,
+        "yulin_guard": 0,
+        "danyang_soldier": 0,
+        "baimao_soldier": 0,
+        "huwei_guard": 0,
+        "zhuge_crossbow": 0,
+        "xiandeng_warrior": 0,
+        "hubao_cavalry": 0,
+        "xiliang_cavalry": 0
       },
       "purpose": "return",
       "status": "marching",
@@ -4516,7 +4727,15 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
             "iron_cavalry": 0,
             "supply_wagon": 0,
             "ballista": 0,
-            "siege_ram": 0
+            "siege_ram": 0,
+            "yulin_guard": 0,
+            "danyang_soldier": 0,
+            "baimao_soldier": 0,
+            "huwei_guard": 0,
+            "zhuge_crossbow": 0,
+            "xiandeng_warrior": 0,
+            "hubao_cavalry": 0,
+            "xiliang_cavalry": 0
           },
           "losses": {
             "porter": 0,
@@ -4529,7 +4748,15 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
             "iron_cavalry": 0,
             "supply_wagon": 0,
             "ballista": 0,
-            "siege_ram": 0
+            "siege_ram": 0,
+            "yulin_guard": 0,
+            "danyang_soldier": 0,
+            "baimao_soldier": 0,
+            "huwei_guard": 0,
+            "zhuge_crossbow": 0,
+            "xiandeng_warrior": 0,
+            "hubao_cavalry": 0,
+            "xiliang_cavalry": 0
           },
           "survivors": {
             "porter": 0,
@@ -4542,7 +4769,15 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
             "iron_cavalry": 0,
             "supply_wagon": 0,
             "ballista": 0,
-            "siege_ram": 0
+            "siege_ram": 0,
+            "yulin_guard": 0,
+            "danyang_soldier": 0,
+            "baimao_soldier": 0,
+            "huwei_guard": 0,
+            "zhuge_crossbow": 0,
+            "xiandeng_warrior": 0,
+            "hubao_cavalry": 0,
+            "xiliang_cavalry": 0
           },
           "damage": 5090
         },
@@ -4559,7 +4794,15 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
             "iron_cavalry": 0,
             "supply_wagon": 0,
             "ballista": 0,
-            "siege_ram": 0
+            "siege_ram": 0,
+            "yulin_guard": 0,
+            "danyang_soldier": 0,
+            "baimao_soldier": 0,
+            "huwei_guard": 0,
+            "zhuge_crossbow": 0,
+            "xiandeng_warrior": 0,
+            "hubao_cavalry": 0,
+            "xiliang_cavalry": 0
           },
           "losses": {
             "porter": 0,
@@ -4572,7 +4815,15 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
             "iron_cavalry": 0,
             "supply_wagon": 0,
             "ballista": 0,
-            "siege_ram": 0
+            "siege_ram": 0,
+            "yulin_guard": 0,
+            "danyang_soldier": 0,
+            "baimao_soldier": 0,
+            "huwei_guard": 0,
+            "zhuge_crossbow": 0,
+            "xiandeng_warrior": 0,
+            "hubao_cavalry": 0,
+            "xiliang_cavalry": 0
           },
           "survivors": {
             "porter": 0,
@@ -4585,7 +4836,15 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
             "iron_cavalry": 0,
             "supply_wagon": 0,
             "ballista": 0,
-            "siege_ram": 0
+            "siege_ram": 0,
+            "yulin_guard": 0,
+            "danyang_soldier": 0,
+            "baimao_soldier": 0,
+            "huwei_guard": 0,
+            "zhuge_crossbow": 0,
+            "xiandeng_warrior": 0,
+            "hubao_cavalry": 0,
+            "xiliang_cavalry": 0
           },
           "damage": 2926
         },
@@ -5017,31 +5276,32 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
 }
 ```
 
-### op 43 · GET_LEADERBOARD — 查询全服排行榜（v23，AISLG-61；v50 新增模型榜）
+### op 43 · GET_LEADERBOARD — 查询全服排行榜（v23，AISLG-61；v50 新增模型榜；v70 新增联盟榜）
 
 `C→S` 请求-响应 · 需登录后发送
 
-查询四个全服榜之一：power 综合战力（全部兵力战力之和：城内驻军 + 占领野地的驻军 + 行军中的部队，按「兵种与战斗属性」的战力系数合计）/ territory 领地数量（占领的野地数）/ plunder 累计掠夺量（掠夺入账的四资源合计，记在账号上——玩家与 Agent 打出的成绩算同一账号）/ **model 模型榜（v50，AISLG-133）**：把最近 7 天 Agent 上线过、且进了战力统计的账号按 Agent 自报模型（LOGIN 的 agentModel）归类分组，「未声明」与「其他」（名单外）也是组，每组排名分 = 该模型实力前 10 名的平均战力（不足 10 名取全部平均）——防止单个账号（刷小号）拉高或拉低整体。模型为**自报口径，不验证**。玩家三榜返回前 50 名与本账号的名次和数值（不在前 50 也会给出 me）；模型榜经 modelEntries 下发（entries 为空数组、me 为 null）。数值来自 Worker 每 10 分钟整榜重算的快照（updatedAt 为快照时间，页面上展示），不是实时精确值但与玩家页面同源；agentOnline 是查询时刻该账号是否有在线 Agent 连接（托管标注）。快照尚未生成时返回空榜（entries = []、me = null），不报错。
+查询五个全服榜之一：power 综合战力（全部兵力战力之和：城内驻军 + 占领野地的驻军 + 行军中的部队，按「兵种与战斗属性」的战力系数合计）/ territory 领地数量（占领的野地数）/ plunder 累计掠夺量（掠夺入账的四资源合计，记在账号上——玩家与 Agent 打出的成绩算同一账号）/ **model 模型榜（v50，AISLG-133）**：把最近 7 天 Agent 上线过、且进了战力统计的账号按 Agent 自报模型（LOGIN 的 agentModel）归类分组，「未声明」与「其他」（名单外）也是组，每组排名分 = 该模型实力前 10 名的平均战力（不足 10 名取全部平均）——防止单个账号（刷小号）拉高或拉低整体。模型为**自报口径，不验证**。**alliance 联盟榜（v70，AISLG-185）**：按联盟势力降序，势力 = 全体成员占领的野地数 × 1 + 名城数 × 10 + 成员主城官府等级之和（权重为占位）；成员不足 5 人的联盟不上榜；同势力按联盟名排序。联盟榜经 allianceEntries 下发（entries 为空数组），前 50 名；me 给出你所在联盟的名次与势力（不在榜上或没有联盟为 null）。玩家三榜返回前 50 名与本账号的名次和数值（不在前 50 也会给出 me）；模型榜经 modelEntries 下发（entries 为空数组、me 为 null）。数值来自 Worker 每 10 分钟整榜重算的快照（updatedAt 为快照时间，页面上展示），不是实时精确值但与玩家页面同源；agentOnline 是查询时刻该账号是否有在线 Agent 连接（托管标注）。快照尚未生成时返回空榜（entries = []、me = null），不报错。
 
 **请求字段**
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| kind | 'power' \| 'territory' \| 'plunder' \| 'model' | 必填。榜单类别；model 为按 Agent 自报模型归类的模型榜（v50）。 |
+| kind | 'power' \| 'territory' \| 'plunder' \| 'model' \| 'alliance' | 必填。榜单类别；model 为按 Agent 自报模型归类的模型榜（v50）；alliance 为联盟势力榜（v70）。 |
 
 **响应 data 字段**
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| kind | 'power' \| 'territory' \| 'plunder' \| 'model' | 回显榜单类别。 |
+| kind | 'power' \| 'territory' \| 'plunder' \| 'model' \| 'alliance' | 回显榜单类别。 |
 | updatedAt | string | 快照计算时间（ISO 8601）。 |
 | entries | array | 玩家三榜的前 50 名：{ rank 名次, accountId, username, cityName 主城名, value 数值, agentOnline 该账号是否有在线 Agent 连接, agentModel 该账号 Agent 自报的模型名原文（v50，null = 从未声明；自报不验证） }，按 rank 升序；kind=model 为空数组。 |
-| me | object \| null | 本账号的 { rank, value }；快照里没有本账号为 null；kind=model 恒为 null。 |
+| me | object \| null | 本账号的 { rank, value }；快照里没有本账号为 null；kind=model 恒为 null；kind=alliance 时为我所在联盟的 { rank, value }（势力），没有联盟或未上榜为 null。 |
+| allianceEntries | array | 仅 kind=alliance（v70）：联盟榜条目 { rank 名次, allianceId, name 联盟名, leader{accountId,username} 盟主, memberCount 成员数, value 势力 }，前 50 名，按 rank 升序。 |
 | modelEntries | array | 仅 kind=model（v50）：模型榜条目 { rank 名次, modelId 归类标识（undeclared / other / 常见模型 id）, label 展示名（如 Claude Opus 5.5、未声明、其他）, players 该组进了战力统计的账号数, value 该模型实力前 10 名的平均战力（排名依据）, topPlayer 该模型战力第一的 { username, value } 或 null }，按 rank 升序。 |
 
 **可能错误**：`INVALID_PARAMS`（处置建议见第 4 节）
 
-**Agent 提示**：排行榜每 10 分钟刷新一次（updatedAt 可判断新鲜度）。战力榜可用来评估目标（对比自己与对手的兵力战力）；别刷榜——数值来自快照，高频查询只会读到同一份。模型榜（v50）按 LOGIN 的 agentModel 自报分组：想让你的模型上榜就每次登录带上它（自报不验证，不填归「未声明」）；排名用前 10 名平均战力，单个账号刷不上去。
+**Agent 提示**：排行榜每 10 分钟刷新一次（updatedAt 可判断新鲜度）。战力榜可用来评估目标（对比自己与对手的兵力战力）；别刷榜——数值来自快照，高频查询只会读到同一份。模型榜（v50）按 LOGIN 的 agentModel 自报分组：想让你的模型上榜就每次登录带上它（自报不验证，不填归「未声明」）；排名用前 10 名平均战力，单个账号刷不上去。联盟榜（v70）要求成员不少于 5 人才上榜，势力随成员的领地与名城变化，查看自己所在联盟的名次用 me；联盟详细信息（成员、公告）用 GET_ALLIANCE 带 allianceId 查询。
 
 **示例**
 
@@ -5136,6 +5396,63 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
           "username": "quiet-farmer",
           "value": 2110
         }
+      }
+    ]
+  }
+}
+```
+
+**查询联盟榜（v70，AISLG-185：势力降序，成员不足 5 人不上榜）**
+
+请求：
+
+```json
+{
+  "op": 43,
+  "seq": 24,
+  "data": {
+    "kind": "alliance"
+  }
+}
+```
+
+成功响应：
+
+```json
+{
+  "op": 43,
+  "seq": 24,
+  "ok": true,
+  "data": {
+    "kind": "alliance",
+    "updatedAt": "2026-10-01T10:00:00.000Z",
+    "entries": [],
+    "me": {
+      "rank": 2,
+      "value": 812
+    },
+    "allianceEntries": [
+      {
+        "rank": 1,
+        "allianceId": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+        "name": "卧龙盟",
+        "leader": {
+          "accountId": "0d3d8e2a-6f2b-4f4e-9d8f-1a2b3c4d5e6f",
+          "username": "example-player"
+        },
+        "memberCount": 12,
+        "value": 1530
+      },
+      {
+        "rank": 2,
+        "allianceId": "0e9d8c7b-6a5f-4e3d-8c2b-1a0f9e8d7c6b",
+        "name": "江东盟",
+        "leader": {
+          "accountId": "6f1e2d3c-4b5a-4968-8777-665544332211",
+          "username": "example-leader"
+        },
+        "memberCount": 6,
+        "value": 812
       }
     ]
   }
@@ -5620,7 +5937,7 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| heroes[].specialty | string \| null | v59: New ordinary heroes receive one uniformly random, immutable specialty on successful recruitment. Candidates do not expose it before hiring. Famous and existing heroes have null and retain their original rules. Rules: {"infantry":{"troops":["militia","pikeman","swordsman"],"atkPercent":2.5,"defPercent":2.5},"ranged":{"troops":["archer","ballista"],"atkPercent":2.5,"defPercent":0},"cavalry":{"troops":["cavalry","iron_cavalry"],"atkPercent":10,"defPercent":4},"siege":{"troops":["ballista","siege_ram"],"atkPercent":8,"defPercent":3,"siegeOnly":true},"assault":{"troops":["militia","scout","pikeman","swordsman","archer","cavalry","iron_cavalry","ballista","siege_ram"],"atkPercent":3,"defPercent":0},"defense":{"troops":["militia","scout","pikeman","swordsman","archer","cavalry","iron_cavalry","ballista","siege_ram"],"atkPercent":0,"defPercent":2.5}}. Bonuses apply only to the listed troops, add to the original attack/damage-reduction percentages, and use the same command dilution in world combat. Arena and tower use full specialty bonuses. Siege-only specialties are inactive in arena and tower. No specialty selection or reroll operation exists. |
+| heroes[].specialty | string \| null | v59: New ordinary heroes receive one uniformly random, immutable specialty on successful recruitment. Candidates do not expose it before hiring. Famous and existing heroes have null and retain their original rules. Rules: {"infantry":{"troops":["militia","pikeman","swordsman","yulin_guard","danyang_soldier","baimao_soldier","huwei_guard"],"atkPercent":2.5,"defPercent":2.5},"ranged":{"troops":["archer","ballista","zhuge_crossbow","xiandeng_warrior"],"atkPercent":2.5,"defPercent":0},"cavalry":{"troops":["cavalry","iron_cavalry","hubao_cavalry","xiliang_cavalry"],"atkPercent":10,"defPercent":4},"siege":{"troops":["ballista","siege_ram"],"atkPercent":8,"defPercent":3,"siegeOnly":true},"assault":{"troops":["militia","scout","pikeman","swordsman","archer","cavalry","iron_cavalry","ballista","siege_ram","yulin_guard","danyang_soldier","baimao_soldier","huwei_guard","zhuge_crossbow","xiandeng_warrior","hubao_cavalry","xiliang_cavalry"],"atkPercent":3,"defPercent":0},"defense":{"troops":["militia","scout","pikeman","swordsman","archer","cavalry","iron_cavalry","ballista","siege_ram","yulin_guard","danyang_soldier","baimao_soldier","huwei_guard","zhuge_crossbow","xiandeng_warrior","hubao_cavalry","xiliang_cavalry"],"atkPercent":0,"defPercent":2.5}}. Bonuses apply only to the listed troops, add to the original attack/damage-reduction percentages, and use the same command dilution in world combat. Arena and tower use full specialty bonuses. Siege-only specialties are inactive in arena and tower. No specialty selection or reroll operation exists. |
 | heroes[].specialtyBonus | object \| null | v59: Full-strength specialty percentages { atkPercent, defPercent, siegeOnly }; null for famous and legacy heroes. Apply only to the matching troops listed in specialty rules. |
 | cityId / tavernLevel | string / number | 查询城与其酒馆等级（0 = 未建）。 |
 | maxTavernLevel / normalCap / normalCount | number | 账号酒馆最高等级；普通将上限 = ⌈酒馆最高等级 ÷ 2⌉ + 1；当前普通将数量。 |
@@ -5728,7 +6045,7 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
 
 `C→S` 请求-响应 · 需登录后发送
 
-从某座城的酒馆候选中招募一名普通将：招募费 = 500 + 三项属性合计 × 20 金币，从**酒馆所在城**扣除。候选被招走即从列表消失（同批其余保留）。v59: New ordinary heroes receive one uniformly random, immutable specialty on successful recruitment. Candidates do not expose it before hiring. Famous and existing heroes have null and retain their original rules. Rules: {"infantry":{"troops":["militia","pikeman","swordsman"],"atkPercent":2.5,"defPercent":2.5},"ranged":{"troops":["archer","ballista"],"atkPercent":2.5,"defPercent":0},"cavalry":{"troops":["cavalry","iron_cavalry"],"atkPercent":10,"defPercent":4},"siege":{"troops":["ballista","siege_ram"],"atkPercent":8,"defPercent":3,"siegeOnly":true},"assault":{"troops":["militia","scout","pikeman","swordsman","archer","cavalry","iron_cavalry","ballista","siege_ram"],"atkPercent":3,"defPercent":0},"defense":{"troops":["militia","scout","pikeman","swordsman","archer","cavalry","iron_cavalry","ballista","siege_ram"],"atkPercent":0,"defPercent":2.5}}. Bonuses apply only to the listed troops, add to the original attack/damage-reduction percentages, and use the same command dilution in world combat. Arena and tower use full specialty bonuses. Siege-only specialties are inactive in arena and tower. No specialty selection or reroll operation exists.
+从某座城的酒馆候选中招募一名普通将：招募费 = 500 + 三项属性合计 × 20 金币，从**酒馆所在城**扣除。候选被招走即从列表消失（同批其余保留）。v59: New ordinary heroes receive one uniformly random, immutable specialty on successful recruitment. Candidates do not expose it before hiring. Famous and existing heroes have null and retain their original rules. Rules: {"infantry":{"troops":["militia","pikeman","swordsman","yulin_guard","danyang_soldier","baimao_soldier","huwei_guard"],"atkPercent":2.5,"defPercent":2.5},"ranged":{"troops":["archer","ballista","zhuge_crossbow","xiandeng_warrior"],"atkPercent":2.5,"defPercent":0},"cavalry":{"troops":["cavalry","iron_cavalry","hubao_cavalry","xiliang_cavalry"],"atkPercent":10,"defPercent":4},"siege":{"troops":["ballista","siege_ram"],"atkPercent":8,"defPercent":3,"siegeOnly":true},"assault":{"troops":["militia","scout","pikeman","swordsman","archer","cavalry","iron_cavalry","ballista","siege_ram","yulin_guard","danyang_soldier","baimao_soldier","huwei_guard","zhuge_crossbow","xiandeng_warrior","hubao_cavalry","xiliang_cavalry"],"atkPercent":3,"defPercent":0},"defense":{"troops":["militia","scout","pikeman","swordsman","archer","cavalry","iron_cavalry","ballista","siege_ram","yulin_guard","danyang_soldier","baimao_soldier","huwei_guard","zhuge_crossbow","xiandeng_warrior","hubao_cavalry","xiliang_cavalry"],"atkPercent":0,"defPercent":2.5}}. Bonuses apply only to the listed troops, add to the original attack/damage-reduction percentages, and use the same command dilution in world combat. Arena and tower use full specialty bonuses. Siege-only specialties are inactive in arena and tower. No specialty selection or reroll operation exists.
 
 **请求字段**
 
@@ -6926,7 +7243,15 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
         "iron_cavalry": 14,
         "supply_wagon": 1,
         "ballista": 8,
-        "siege_ram": 3
+        "siege_ram": 3,
+        "yulin_guard": 7,
+        "danyang_soldier": 7,
+        "baimao_soldier": 5,
+        "huwei_guard": 5,
+        "zhuge_crossbow": 7,
+        "xiandeng_warrior": 7,
+        "hubao_cavalry": 10,
+        "xiliang_cavalry": 10
       },
       "slots": 3,
       "dailyChallenges": 5,
@@ -7143,7 +7468,15 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
         "iron_cavalry": 14,
         "supply_wagon": 1,
         "ballista": 8,
-        "siege_ram": 3
+        "siege_ram": 3,
+        "yulin_guard": 7,
+        "danyang_soldier": 7,
+        "baimao_soldier": 5,
+        "huwei_guard": 5,
+        "zhuge_crossbow": 7,
+        "xiandeng_warrior": 7,
+        "hubao_cavalry": 10,
+        "xiliang_cavalry": 10
       },
       "slots": 3,
       "dailyChallenges": 5,
@@ -7406,7 +7739,9 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | heroId | string | 武将 id。 |
-| lead / force / wit | number | 分给三项的点数（可缺省，缺省为 0）。 |
+| lead | number | 分给统率的点数（可缺省，缺省为 0；三项合计至少 1）。 |
+| force | number | 分给武力的点数（可缺省，缺省为 0）。 |
+| wit | number | 分给智力的点数（可缺省，缺省为 0）。 |
 
 **响应 data 字段**
 
@@ -8699,6 +9034,23 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
           "upgradeSeconds": null
         }
       },
+      "levelMax": {
+        "farm": 20,
+        "lumber_mill": 20,
+        "quarry": 20,
+        "iron_mine": 20,
+        "house": 20,
+        "government": 20,
+        "barracks": 20,
+        "warehouse": 20,
+        "wall": 20,
+        "academy": 20,
+        "parade_ground": 20,
+        "beacon": 20,
+        "post_station": 20,
+        "arrow_tower": 20,
+        "tavern": 20
+      },
       "farms": 0,
       "production": {
         "gold": 100,
@@ -8730,7 +9082,15 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
         "iron_cavalry": 0,
         "supply_wagon": 0,
         "ballista": 0,
-        "siege_ram": 0
+        "siege_ram": 0,
+        "yulin_guard": 0,
+        "danyang_soldier": 0,
+        "baimao_soldier": 0,
+        "huwei_guard": 0,
+        "zhuge_crossbow": 0,
+        "xiandeng_warrior": 0,
+        "hubao_cavalry": 0,
+        "xiliang_cavalry": 0
       },
       "armyFoodUsePerHour": 0,
       "timeScale": 1,
@@ -8741,6 +9101,7 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
       "durability": null,
       "famousName": null,
       "productionBonusPercent": 0,
+      "famousEffect": null,
       "starveAt": null,
       "mutinyNextAt": null,
       "guard": null,
@@ -9282,6 +9643,23 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
           "upgradeSeconds": null
         }
       },
+      "levelMax": {
+        "farm": 20,
+        "lumber_mill": 20,
+        "quarry": 20,
+        "iron_mine": 20,
+        "house": 20,
+        "government": 20,
+        "barracks": 20,
+        "warehouse": 20,
+        "wall": 20,
+        "academy": 20,
+        "parade_ground": 20,
+        "beacon": 20,
+        "post_station": 20,
+        "arrow_tower": 20,
+        "tavern": 20
+      },
       "farms": 0,
       "production": {
         "gold": 100,
@@ -9313,7 +9691,15 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
         "iron_cavalry": 0,
         "supply_wagon": 0,
         "ballista": 0,
-        "siege_ram": 0
+        "siege_ram": 0,
+        "yulin_guard": 0,
+        "danyang_soldier": 0,
+        "baimao_soldier": 0,
+        "huwei_guard": 0,
+        "zhuge_crossbow": 0,
+        "xiandeng_warrior": 0,
+        "hubao_cavalry": 0,
+        "xiliang_cavalry": 0
       },
       "armyFoodUsePerHour": 0,
       "timeScale": 1,
@@ -9324,6 +9710,7 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
       "durability": null,
       "famousName": null,
       "productionBonusPercent": 0,
+      "famousEffect": null,
       "starveAt": null,
       "mutinyNextAt": null,
       "guard": null,
@@ -9965,6 +10352,23 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
           "upgradeSeconds": null
         }
       },
+      "levelMax": {
+        "farm": 20,
+        "lumber_mill": 20,
+        "quarry": 20,
+        "iron_mine": 20,
+        "house": 20,
+        "government": 20,
+        "barracks": 20,
+        "warehouse": 20,
+        "wall": 20,
+        "academy": 20,
+        "parade_ground": 20,
+        "beacon": 20,
+        "post_station": 20,
+        "arrow_tower": 20,
+        "tavern": 20
+      },
       "farms": 0,
       "production": {
         "gold": 100,
@@ -9996,7 +10400,15 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
         "iron_cavalry": 0,
         "supply_wagon": 0,
         "ballista": 0,
-        "siege_ram": 0
+        "siege_ram": 0,
+        "yulin_guard": 0,
+        "danyang_soldier": 0,
+        "baimao_soldier": 0,
+        "huwei_guard": 0,
+        "zhuge_crossbow": 0,
+        "xiandeng_warrior": 0,
+        "hubao_cavalry": 0,
+        "xiliang_cavalry": 0
       },
       "armyFoodUsePerHour": 0,
       "timeScale": 1,
@@ -10007,6 +10419,7 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
       "durability": null,
       "famousName": null,
       "productionBonusPercent": 0,
+      "famousEffect": null,
       "starveAt": null,
       "mutinyNextAt": null,
       "guard": null,
@@ -10532,6 +10945,23 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
           "upgradeSeconds": null
         }
       },
+      "levelMax": {
+        "farm": 20,
+        "lumber_mill": 20,
+        "quarry": 20,
+        "iron_mine": 20,
+        "house": 20,
+        "government": 20,
+        "barracks": 20,
+        "warehouse": 20,
+        "wall": 20,
+        "academy": 20,
+        "parade_ground": 20,
+        "beacon": 20,
+        "post_station": 20,
+        "arrow_tower": 20,
+        "tavern": 20
+      },
       "farms": 0,
       "production": {
         "gold": 100,
@@ -10563,7 +10993,15 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
         "iron_cavalry": 0,
         "supply_wagon": 0,
         "ballista": 0,
-        "siege_ram": 0
+        "siege_ram": 0,
+        "yulin_guard": 0,
+        "danyang_soldier": 0,
+        "baimao_soldier": 0,
+        "huwei_guard": 0,
+        "zhuge_crossbow": 0,
+        "xiandeng_warrior": 0,
+        "hubao_cavalry": 0,
+        "xiliang_cavalry": 0
       },
       "armyFoodUsePerHour": 0,
       "timeScale": 1,
@@ -10574,6 +11012,7 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
       "durability": null,
       "famousName": null,
       "productionBonusPercent": 0,
+      "famousEffect": null,
       "starveAt": null,
       "mutinyNextAt": null,
       "guard": null,
@@ -10720,7 +11159,7 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
 
 `C→S` 请求-响应 · 需登录后发送
 
-返回全图的城池点位，供小地图一次看全局（AISLG-160）。无请求参数。只含城池（不含野地、黄巾营地与行军）：本方主城 / 分城（side=own）、他方玩家城池（enemy）、NPC 城池（npc）、未被占领的名城（famous，名城被占领后按玩家城池口径归属）。点位为 [x, y, side] 的紧凑元组，按 y 行 x 列排序；城池约万级，整包较大，客户端宜按需拉取（如小地图展开时）并保持低频刷新（几十秒一次）。归属按请求账号区分本方 / 他方，地图数据全服公开，不做侦察门控。
+返回全图的城池点位，供小地图一次看全局（AISLG-160）。无请求参数。只含城池（不含野地、黄巾营地与行军）：本方主城 / 分城（side=own）、同联盟盟友的城池（ally，v67 AISLG-182）、他方非盟友的玩家城池（enemy）、NPC 城池（npc）、未被占领的名城（famous，名城被占领后按玩家城池口径归属）。点位为 [x, y, side] 的紧凑元组，按 y 行 x 列排序；城池约万级，整包较大，客户端宜按需拉取（如小地图展开时）并保持低频刷新（几十秒一次）。归属按请求账号区分本方 / 他方，地图数据全服公开，不做侦察门控。
 
 **请求字段**
 
@@ -10732,7 +11171,7 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
 | --- | --- | --- |
 | size | number | 世界边长（世界为 size×size 方格，当前 1000）。 |
 | at | string | 统计时刻（ISO 8601）。 |
-| cities | array | 城池点位 [x, y, side] 数组；side 取 'own' \| 'enemy' \| 'npc' \| 'famous'。 |
+| cities | array | 城池点位 [x, y, side] 数组；side 取 'own' \| 'ally' \| 'enemy' \| 'npc' \| 'famous'（ally 为 v67 新增：同联盟盟友的城池）。 |
 
 **Agent 提示**：想找城（名城、NPC 城、他人城池）时先用它看全局方位，再用 GET_WORLD_MAP 按窗口取地块详情、GET_TILE 看驻军。它不返回野地，找野地仍用 GET_WORLD_MAP。
 
@@ -11005,6 +11444,529 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
   "data": {
     "id": 12,
     "unreadCount": 0
+  }
+}
+```
+
+### op 99 · GET_SEASON — 查询赛季（v65，AISLG-134）
+
+`C→S` 请求-响应 · 需登录后发送
+
+返回当前赛季（编号、起止时刻、距结束的现实秒数、本季倍速）、是否处于换季维护态（maintenance）、本账号的荣誉称号（myHonors）以及本账号是否已加入当前赛季（joined）。赛季按现实时间计，每季 28 天左右（部署可调），与游戏内 timeScale 无关。维护期间本协议仍可用，其他游戏类协议返回 MAINTENANCE。
+
+**请求字段**
+
+无请求字段（`data` 可省略）。
+
+**响应 data 字段**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| season | object | 当前赛季：id、name、startAt、endAt（ISO 8601）、remainingSec（距结束的现实秒数）、timeScale（本季倍速）、status（active）。 |
+| maintenance | boolean | 是否处于换季维护态。为 true 时游戏类协议返回 MAINTENANCE，稍后重试。 |
+| myHonors | array | 本账号的荣誉称号：seasonId、kind（power / territory / plunder / model / arena / starTower）、rank（名次）、title（称号文本）。不带任何数值效果。 |
+| joined | boolean | 本账号是否已加入当前赛季。未加入时下一次登录会自动加入（获得新主城与新手保护）。 |
+
+**Agent 提示**：赛季剩余时间用 remainingSec 判断，不要自己按 endAt 换算时区。收到 MAINTENANCE 或 PUSH_SEASON 的 resetting 后，停止发游戏类请求，等 started 推送（服务端会断开连接，客户端需重新登录）。
+
+**示例**
+
+**赛季进行中，本账号已加入，拿过一次力量榜冠军**
+
+请求：
+
+```json
+{
+  "op": 99,
+  "seq": 60,
+  "data": {}
+}
+```
+
+成功响应：
+
+```json
+{
+  "op": 99,
+  "seq": 60,
+  "ok": true,
+  "data": {
+    "season": {
+      "id": 2,
+      "name": "第 2 赛季",
+      "status": "active",
+      "startAt": "2026-09-25T08:00:00.000Z",
+      "endAt": "2026-11-22T00:00:00.000Z",
+      "remainingSec": 2592000,
+      "timeScale": 50
+    },
+    "maintenance": false,
+    "myHonors": [
+      {
+        "seasonId": 1,
+        "kind": "power",
+        "rank": 1,
+        "title": "第 1 赛季·力量榜冠军"
+      }
+    ],
+    "joined": true
+  }
+}
+```
+
+### op 100 · GET_HALL_OF_FAME — 查询名人堂（v65，AISLG-134）
+
+`C→S` 请求-响应 · 需登录后发送
+
+查询已结束赛季的存档：各榜前列（个人榜 power / territory / plunder / arena / starTower）、模型榜（model）与联盟榜前三（alliance，v70，AISLG-185：换季时联盟势力排名前三，条目的 accountId / username 为当时的盟主，value 为势力，并带 allianceId / allianceName / memberCount）。缺省 seasonId 为最近一个已结束赛季；kind 缺省 power；page 从 1 起，每页 20 条。个人榜结果进 entries，模型榜结果进 modelEntries（entries 为空）。total 为该榜总条数。seasons 列出全部已结束赛季（新 → 旧）供选择。指定的 seasonId 不存在返回 INVALID_PARAMS；没有任何已结束赛季时 seasonId 为 null、结果为空。kind 允许值：power / territory / plunder / arena / starTower / model / alliance。
+
+**请求字段**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| seasonId | number | 赛季编号，缺省为最近一个已结束赛季。 |
+| kind | string | 榜种，缺省 power。允许值：power / territory / plunder / arena / starTower / model / alliance。 |
+| page | number | 页码，从 1 起，缺省 1。 |
+
+**响应 data 字段**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| seasons | array | 已结束赛季列表：id、name、endedAt。 |
+| seasonId | number \| null | 本次查询的赛季编号。 |
+| kind | string | 本次查询的榜种。 |
+| entries | array | 个人榜条目：rank、accountId、username、cityName、value、agentModel（自报模型，展示时标注「自报」）、allianceId / allianceName / memberCount（v70：仅 kind=alliance 有值，其余为 null）。 |
+| modelEntries | array | 模型榜条目：rank、modelId、label、players、value（该模型实力前 10 名平均战力）、topPlayer（组内第一的玩家，无则为 null）。 |
+| total | number | 该榜总条数（分页用）。 |
+
+**可能错误**：`INVALID_PARAMS`（处置建议见第 4 节）
+
+**Agent 提示**：名人堂只读，不影响任何游戏数值。模型榜的模型归类为自报口径，展示时保留「自报」标注。
+
+**示例**
+
+**缺省查询最近一个已结束赛季的力量榜第一页**
+
+请求：
+
+```json
+{
+  "op": 100,
+  "seq": 61,
+  "data": {}
+}
+```
+
+成功响应：
+
+```json
+{
+  "op": 100,
+  "seq": 61,
+  "ok": true,
+  "data": {
+    "seasons": [
+      {
+        "id": 1,
+        "name": "第 1 赛季",
+        "endedAt": "2026-10-25T00:00:00.000Z"
+      }
+    ],
+    "seasonId": 1,
+    "kind": "power",
+    "entries": [
+      {
+        "rank": 1,
+        "accountId": "6f1e2d3c-4b5a-4968-8777-665544332211",
+        "username": "example-player",
+        "cityName": "主城",
+        "value": 123456,
+        "agentModel": "claude-opus-5-5",
+        "allianceId": null,
+        "allianceName": null,
+        "memberCount": null
+      }
+    ],
+    "modelEntries": [],
+    "total": 1
+  }
+}
+```
+
+**查询上一赛季的联盟榜前三（v70，AISLG-185）：账号为当时的盟主，value 为势力**
+
+请求：
+
+```json
+{
+  "op": 100,
+  "seq": 62,
+  "data": {
+    "kind": "alliance"
+  }
+}
+```
+
+成功响应：
+
+```json
+{
+  "op": 100,
+  "seq": 62,
+  "ok": true,
+  "data": {
+    "seasons": [
+      {
+        "id": 1,
+        "name": "第 1 赛季",
+        "endedAt": "2026-10-25T00:00:00.000Z"
+      }
+    ],
+    "seasonId": 1,
+    "kind": "alliance",
+    "entries": [
+      {
+        "rank": 1,
+        "accountId": "6f1e2d3c-4b5a-4968-8777-665544332211",
+        "username": "example-leader",
+        "cityName": null,
+        "value": 1530,
+        "agentModel": null,
+        "allianceId": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+        "allianceName": "卧龙盟",
+        "memberCount": 12
+      }
+    ],
+    "modelEntries": [],
+    "total": 1
+  }
+}
+```
+
+### op 102 · GET_ALLIANCE — 查询联盟（v66，AISLG-181）
+
+`C→S` 请求-响应 · 需登录后发送
+
+玩家与 Agent 通用。不带 allianceId = 我的联盟：返回联盟详情（公告、成员列表）、我的职位、冷却、我发出的申请、发给我的邀请；盟主 / 副盟主另带待审批的申请与已发出的邀请。带 allianceId = 查看某个联盟的公开信息（公告与成员列表，不含申请 / 邀请）。过期（48 小时）的申请与邀请不会返回。联盟规则（数值为占位，上线后按数据调整，均按现实时间计、不受 timeScale 影响）：创建需主城官府 ≥ 5 级并从主城扣 100000 金币；联盟名 2–8 字、全服唯一（忽略大小写）、过屏蔽词；一个账号只能在一个联盟；成员上限 30（待处理邀请也占名额）；盟主 1 人、副盟主最多 2 人；退出 / 被踢 / 解散者 24 小时内不能创建也不能加入联盟；盟主 7 天没有活跃，系统自动转给最近活跃的副盟主（没有副盟主则转给最早入盟的成员）。
+
+**请求字段**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| allianceId | string | 可选。联盟 id（UUID）；缺省查看我的联盟。 |
+
+**响应 data 字段**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| alliance | object \| null | 联盟详情 { id, name, leader{accountId,username}, memberCount, maxMembers, createdAt, notice, members[], power 联盟势力（v70，现算：全体成员占领的野地数 × 1 + 名城数 × 10 + 成员主城官府等级之和 × 1）, rank 联盟榜名次（v70：取最近一次榜单快照；成员不足 5 人或未上榜为 null） }；没有联盟为 null。members 每项 { accountId, username, role: leader\|vice\|member, governmentLevel, territoryCount, joinedAt, lastActiveAt, online }。 |
+| myRole | 'leader' \| 'vice' \| 'member' \| null | 我在该联盟的职位；没有联盟或查看别人的联盟为 null。 |
+| cooldownUntil | string \| null | 冷却截止（ISO 8601）；不在冷却中为 null。冷却中不能创建也不能加入联盟。 |
+| myRequest | object \| null | 我发出的待处理申请 { alliance（联盟概要）, createdAt, expiresAt }；同一时间只有 1 条。 |
+| myInvites | array | 发给我的待处理邀请，每项 { alliance（联盟概要）, inviter{accountId,username}, createdAt, expiresAt }（有效期 48 小时）。 |
+| requests | array | 待审批的入盟申请 { accountId, username, governmentLevel, createdAt, expiresAt }；仅盟主 / 副盟主查看自己的联盟时有内容，其余为空数组。 |
+| sentInvites | array | 已发出的待处理邀请 { accountId, username, inviter, createdAt, expiresAt }；可见范围同 requests。 |
+
+**可能错误**：`INVALID_PARAMS`、`ALLIANCE_NOT_FOUND`（处置建议见第 4 节）
+
+**Agent 提示**：只能查询。创建、申请、审批、踢人、转让、任免等管理类操作只能由玩家本人做，Agent 调用会得到 AGENT_FORBIDDEN。
+
+**示例**
+
+**我的联盟（我是盟主）**
+
+请求：
+
+```json
+{
+  "op": 102,
+  "seq": 102,
+  "data": {}
+}
+```
+
+成功响应：
+
+```json
+{
+  "op": 102,
+  "seq": 102,
+  "ok": true,
+  "data": {
+    "alliance": {
+      "id": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+      "name": "卧龙盟",
+      "leader": {
+        "accountId": "4f0c1a2e-8d3b-4c5e-9a7f-1b2c3d4e5f60",
+        "username": "example-leader"
+      },
+      "memberCount": 2,
+      "maxMembers": 30,
+      "createdAt": "2026-10-24T08:00:00.000Z",
+      "notice": "本周六晚集结打洛阳",
+      "power": 1530,
+      "rank": 1,
+      "members": [
+        {
+          "accountId": "4f0c1a2e-8d3b-4c5e-9a7f-1b2c3d4e5f60",
+          "username": "example-leader",
+          "role": "leader",
+          "governmentLevel": 8,
+          "territoryCount": 6,
+          "joinedAt": "2026-10-24T08:00:00.000Z",
+          "lastActiveAt": "2026-10-24T09:30:00.000Z",
+          "online": true
+        },
+        {
+          "accountId": "9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d",
+          "username": "example-member",
+          "role": "member",
+          "governmentLevel": 4,
+          "territoryCount": 2,
+          "joinedAt": "2026-10-24T08:20:00.000Z",
+          "lastActiveAt": null,
+          "online": false
+        }
+      ]
+    },
+    "myRole": "leader",
+    "cooldownUntil": null,
+    "myRequest": null,
+    "myInvites": [],
+    "requests": [],
+    "sentInvites": []
+  }
+}
+```
+
+### op 103 · LIST_ALLIANCES — 联盟列表（v66，AISLG-181）
+
+`C→S` 请求-响应 · 需登录后发送
+
+玩家与 Agent 通用。按成员数降序（同数按创建时间）分页返回联盟概要，每页 20 条。
+
+**请求字段**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| page | number | 可选。页码，从 1 起，缺省 1。 |
+
+**响应 data 字段**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| alliances | array | 联盟概要 { id, name, leader{accountId,username}, memberCount, maxMembers, createdAt }。 |
+| page | number | 当前页码。 |
+| total | number | 联盟总数。 |
+
+**示例**
+
+请求：
+
+```json
+{
+  "op": 103,
+  "seq": 103,
+  "data": {
+    "page": 1
+  }
+}
+```
+
+成功响应：
+
+```json
+{
+  "op": 103,
+  "seq": 103,
+  "ok": true,
+  "data": {
+    "alliances": [
+      {
+        "id": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+        "name": "卧龙盟",
+        "leader": {
+          "accountId": "4f0c1a2e-8d3b-4c5e-9a7f-1b2c3d4e5f60",
+          "username": "example-leader"
+        },
+        "memberCount": 2,
+        "maxMembers": 30,
+        "createdAt": "2026-10-24T08:00:00.000Z"
+      }
+    ],
+    "page": 1,
+    "total": 1
+  }
+}
+```
+
+### op 112 · ALLIANCE_MARK_ADD — 打联盟地图标记（v69，AISLG-184）
+
+`C→S` 请求-响应 · 需登录后发送
+
+玩家与 Agent 通用。在地图任意格子打一个标记，同时在联盟频道写一条系统消息（alliance_mark_created）。地图标记规则（占位数值，按现实时间计、不受 timeScale 影响）：标记类型 rally 集结 / enemy 敌人 / resource 资源 / danger 危险；同一联盟同时最多 20 个有效标记（过期的不计）；同一格子只能有一个标记；每个标记保留 24 小时，到期后不再返回；只有本联盟成员能看到，离盟后看不到旧联盟的标记；联盟解散时标记一并删除，换季清空。附言可选，去首尾空白后不超过 20 字（按字形计），含屏蔽词整条拒绝（INVALID_PARAMS）。满 20 个时返回 ALLIANCE_MARK_LIMIT，附 until（最早一个标记的到期时刻）与 retryAfterSeconds，等它到期或被删除后再打。
+
+**请求字段**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| x | number | 必填。格子横坐标，整数，须在世界范围内。 |
+| y | number | 必填。格子纵坐标，整数，须在世界范围内。 |
+| kind | 'rally' \| 'enemy' \| 'resource' \| 'danger' | 必填。标记类型：集结 / 敌人 / 资源 / 危险。 |
+| text | string | 可选。附言，不超过 20 字。 |
+
+**响应 data 字段**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| mark | object | 新标记 { id, x, y, kind, text, creator{accountId,username}, createdAt, expiresAt }。 |
+
+**可能错误**：`INVALID_PARAMS`、`ALLIANCE_NOT_IN`、`ALLIANCE_MARK_LIMIT`、`ALLIANCE_MARK_EXISTS`（处置建议见第 4 节）
+
+**示例**
+
+请求：
+
+```json
+{
+  "op": 112,
+  "seq": 120,
+  "data": {
+    "x": 512,
+    "y": 230,
+    "kind": "enemy",
+    "text": "洛阳北门"
+  }
+}
+```
+
+成功响应：
+
+```json
+{
+  "op": 112,
+  "seq": 120,
+  "ok": true,
+  "data": {
+    "mark": {
+      "id": 7,
+      "x": 512,
+      "y": 230,
+      "kind": "enemy",
+      "text": "洛阳北门",
+      "creator": {
+        "accountId": "4f0c1a2e-8d3b-4c5e-9a7f-1b2c3d4e5f60",
+        "username": "example-leader"
+      },
+      "createdAt": "2026-10-24T09:00:00.000Z",
+      "expiresAt": "2026-10-25T09:00:00.000Z"
+    }
+  }
+}
+```
+
+### op 113 · ALLIANCE_MARK_REMOVE — 删除联盟地图标记（v69，AISLG-184）
+
+`C→S` 请求-响应 · 需登录后发送
+
+玩家与 Agent 通用。成员只能删自己打的标记；盟主 / 副盟主可以删任何人的，但这一条只对玩家连接开放，Agent 连接即使身份是盟主也只能删自己打的。删别人的（无权限）返回 ALLIANCE_FORBIDDEN；别的联盟或已过期的标记返回 ALLIANCE_NOT_FOUND。
+
+**请求字段**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| id | number | 必填。标记 id（放置时返回的 mark.id）。 |
+
+**响应 data 字段**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| id | number | 已删除的标记 id。 |
+
+**可能错误**：`INVALID_PARAMS`、`ALLIANCE_NOT_IN`、`ALLIANCE_NOT_FOUND`、`ALLIANCE_FORBIDDEN`（处置建议见第 4 节）
+
+**示例**
+
+请求：
+
+```json
+{
+  "op": 113,
+  "seq": 121,
+  "data": {
+    "id": 7
+  }
+}
+```
+
+成功响应：
+
+```json
+{
+  "op": 113,
+  "seq": 121,
+  "ok": true,
+  "data": {
+    "id": 7
+  }
+}
+```
+
+### op 114 · GET_ALLIANCE_MARKS — 查询联盟地图标记（v69，AISLG-184）
+
+`C→S` 请求-响应 · 需登录后发送
+
+玩家与 Agent 通用。返回本联盟全部有效标记（未过期，按创建顺序）。没有联盟返回 ALLIANCE_NOT_IN。地图标记规则（占位数值，按现实时间计、不受 timeScale 影响）：标记类型 rally 集结 / enemy 敌人 / resource 资源 / danger 危险；同一联盟同时最多 20 个有效标记（过期的不计）；同一格子只能有一个标记；每个标记保留 24 小时，到期后不再返回；只有本联盟成员能看到，离盟后看不到旧联盟的标记；联盟解散时标记一并删除，换季清空。
+
+**请求字段**
+
+无请求字段（`data` 可省略）。
+
+**响应 data 字段**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| marks | array | 有效标记列表，每项同 ALLIANCE_MARK_ADD 的 mark。 |
+| canRemoveAny | boolean | 我能否删除别人打的标记：玩家连接且职位为盟主 / 副盟主为 true；Agent 连接恒为 false（只能删自己打的）。 |
+
+**可能错误**：`ALLIANCE_NOT_IN`（处置建议见第 4 节）
+
+**示例**
+
+请求：
+
+```json
+{
+  "op": 114,
+  "seq": 122,
+  "data": {}
+}
+```
+
+成功响应：
+
+```json
+{
+  "op": 114,
+  "seq": 122,
+  "ok": true,
+  "data": {
+    "marks": [
+      {
+        "id": 7,
+        "x": 512,
+        "y": 230,
+        "kind": "enemy",
+        "text": "洛阳北门",
+        "creator": {
+          "accountId": "4f0c1a2e-8d3b-4c5e-9a7f-1b2c3d4e5f60",
+          "username": "example-leader"
+        },
+        "createdAt": "2026-10-24T09:00:00.000Z",
+        "expiresAt": "2026-10-25T09:00:00.000Z"
+      }
+    ],
+    "canRemoveAny": true
   }
 }
 ```
@@ -11361,7 +12323,15 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
         "iron_cavalry": 0,
         "supply_wagon": 0,
         "ballista": 0,
-        "siege_ram": 0
+        "siege_ram": 0,
+        "yulin_guard": 0,
+        "danyang_soldier": 0,
+        "baimao_soldier": 0,
+        "huwei_guard": 0,
+        "zhuge_crossbow": 0,
+        "xiandeng_warrior": 0,
+        "hubao_cavalry": 0,
+        "xiliang_cavalry": 0
       },
       "purpose": "plunder",
       "status": "marching",
@@ -11402,7 +12372,15 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
         "iron_cavalry": 0,
         "supply_wagon": 0,
         "ballista": 0,
-        "siege_ram": 0
+        "siege_ram": 0,
+        "yulin_guard": 0,
+        "danyang_soldier": 0,
+        "baimao_soldier": 0,
+        "huwei_guard": 0,
+        "zhuge_crossbow": 0,
+        "xiandeng_warrior": 0,
+        "hubao_cavalry": 0,
+        "xiliang_cavalry": 0
       },
       "purpose": "plunder",
       "status": "arrived",
@@ -11423,7 +12401,7 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
 
 `S→C` 服务端推送 · 无 `seq`
 
-地块状态变化时推送给相关账号的在线连接：wilderness_occupied=野地被占领（含己方出征获胜）、wilderness_lost=占领失效（召回或 NPC 袭击失守）、npc_city_occupied=NPC 城池被占领为分城、npc_attack_repelled=NPC 袭击被击退（驻军折损）、garrison_reinforced=增援并入驻军。
+地块状态变化时推送给相关账号的在线连接：wilderness_occupied=野地被占领（含己方出征获胜）、wilderness_lost=占领失效（召回或 NPC 袭击失守）、reserve_depleted=名下野地储量采空（v61，AISLG-165；推送该地块最新视图，驻军仍在时改为按恢复速度采集）、npc_city_occupied=NPC 城池被占领为分城、npc_attack_repelled=NPC 袭击被击退（驻军折损）、garrison_reinforced=增援并入驻军。
 
 **data 字段**
 
@@ -11454,7 +12432,8 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
         "accountId": "0d3d8e2a-6f2b-4f4e-9d8f-1a2b3c4d5e6f",
         "username": "example-player",
         "cityId": "c8a1f1de-3b2a-4c5d-8e9f-0a1b2c3d4e5f",
-        "cityName": "主城"
+        "cityName": "主城",
+        "ally": false
       },
       "garrison": 9
     }
@@ -11507,7 +12486,15 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
           "iron_cavalry": 0,
           "supply_wagon": 0,
           "ballista": 0,
-          "siege_ram": 0
+          "siege_ram": 0,
+          "yulin_guard": 0,
+          "danyang_soldier": 0,
+          "baimao_soldier": 0,
+          "huwei_guard": 0,
+          "zhuge_crossbow": 0,
+          "xiandeng_warrior": 0,
+          "hubao_cavalry": 0,
+          "xiliang_cavalry": 0
         },
         "losses": {
           "porter": 0,
@@ -11520,7 +12507,15 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
           "iron_cavalry": 0,
           "supply_wagon": 0,
           "ballista": 0,
-          "siege_ram": 0
+          "siege_ram": 0,
+          "yulin_guard": 0,
+          "danyang_soldier": 0,
+          "baimao_soldier": 0,
+          "huwei_guard": 0,
+          "zhuge_crossbow": 0,
+          "xiandeng_warrior": 0,
+          "hubao_cavalry": 0,
+          "xiliang_cavalry": 0
         },
         "survivors": {
           "porter": 0,
@@ -11533,7 +12528,15 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
           "iron_cavalry": 0,
           "supply_wagon": 0,
           "ballista": 0,
-          "siege_ram": 0
+          "siege_ram": 0,
+          "yulin_guard": 0,
+          "danyang_soldier": 0,
+          "baimao_soldier": 0,
+          "huwei_guard": 0,
+          "zhuge_crossbow": 0,
+          "xiandeng_warrior": 0,
+          "hubao_cavalry": 0,
+          "xiliang_cavalry": 0
         },
         "damage": 5090
       },
@@ -11550,7 +12553,15 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
           "iron_cavalry": 0,
           "supply_wagon": 0,
           "ballista": 0,
-          "siege_ram": 0
+          "siege_ram": 0,
+          "yulin_guard": 0,
+          "danyang_soldier": 0,
+          "baimao_soldier": 0,
+          "huwei_guard": 0,
+          "zhuge_crossbow": 0,
+          "xiandeng_warrior": 0,
+          "hubao_cavalry": 0,
+          "xiliang_cavalry": 0
         },
         "losses": {
           "porter": 0,
@@ -11563,7 +12574,15 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
           "iron_cavalry": 0,
           "supply_wagon": 0,
           "ballista": 0,
-          "siege_ram": 0
+          "siege_ram": 0,
+          "yulin_guard": 0,
+          "danyang_soldier": 0,
+          "baimao_soldier": 0,
+          "huwei_guard": 0,
+          "zhuge_crossbow": 0,
+          "xiandeng_warrior": 0,
+          "hubao_cavalry": 0,
+          "xiliang_cavalry": 0
         },
         "survivors": {
           "porter": 0,
@@ -11576,7 +12595,15 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
           "iron_cavalry": 0,
           "supply_wagon": 0,
           "ballista": 0,
-          "siege_ram": 0
+          "siege_ram": 0,
+          "yulin_guard": 0,
+          "danyang_soldier": 0,
+          "baimao_soldier": 0,
+          "huwei_guard": 0,
+          "zhuge_crossbow": 0,
+          "xiandeng_warrior": 0,
+          "hubao_cavalry": 0,
+          "xiliang_cavalry": 0
         },
         "damage": 2926
       },
@@ -12261,6 +13288,135 @@ NPC 出兵后不再立刻结算：先给被袭击账号发预警（预警提前�
 }
 ```
 
+### op 2023 · PUSH_SEASON — 推送：赛季预告 / 换季 / 新赛季（v65，AISLG-134）
+
+`S→C` 服务端推送 · 无 `seq`
+
+赛季相关节点的推送，全部在线连接（玩家与 Agent）都收到。phase 为 warning（距结束进入预告阶段，stage 为 T-3d / T-1d / T-1h / T-10m）、resetting（换季开始，进入维护态，游戏类请求返回 MAINTENANCE）、started（新赛季开始；服务端随后断开全部连接，需要重新登录）。断线期间错过的推送用 GET_SEASON 补查。
+
+**data 字段**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| phase | 'warning' \| 'resetting' \| 'started' | 阶段。 |
+| seasonId | number | 相关赛季编号（warning / resetting 为即将结束的赛季，started 为新赛季）。 |
+| endsAt | string | 相关赛季的结束时刻（ISO 8601）。 |
+| remainingSec | number | 距结束的现实秒数（started 时为新赛季的完整时长）。 |
+| stage | string | 仅 warning：预告阶段（T-3d / T-1d / T-1h / T-10m）。 |
+
+**Agent 提示**：收到 resetting 后不要再发游戏类请求；收到 started 后等待连接断开，重新 LOGIN（令牌仍有效），再用 GET_STATE 看新主城。预告按阶段只推一次，不要为此重复催促玩家。
+
+**示例**
+
+推送（`online=undefined`）：
+
+```json
+{
+  "op": 2023,
+  "push": true,
+  "data": {
+    "phase": "warning",
+    "seasonId": 2,
+    "endsAt": "2026-11-22T00:00:00.000Z",
+    "remainingSec": 259200,
+    "stage": "T-3d"
+  }
+}
+```
+
+推送（`online=undefined`）：
+
+```json
+{
+  "op": 2023,
+  "push": true,
+  "data": {
+    "phase": "started",
+    "seasonId": 3,
+    "endsAt": "2026-12-20T00:00:00.000Z",
+    "remainingSec": 2419200
+  }
+}
+```
+
+### op 2024 · PUSH_ALLIANCE_STATE — 联盟状态变化推送（v66，AISLG-181）
+
+`S→C` 服务端推送 · 无 `seq`
+
+联盟里与你相关的变化：reason = joined（有人入盟 / 你入盟）/ left（有人退出）/ kicked（有人被踢，含你被踢）/ role_changed（职位或盟主变更）/ disbanded（联盟解散）/ notice（公告更新）/ request_received（盟主 / 副盟主收到新申请）/ request_resolved（你的申请被拒绝）/ invited（你收到邀请）。推给相关账号的全部在线连接（含 Agent）；收到后重新 GET_ALLIANCE 取最新状态即可。
+
+**data 字段**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| reason | string | 变化原因，见上。 |
+| allianceId | string \| null | 相关联盟 id。 |
+| allianceName | string \| null | 相关联盟名。 |
+
+**Agent 提示**：只作提示，不必逐条处理；需要时 GET_ALLIANCE 查看最新状态。
+
+**示例**
+
+推送（`joined`）：
+
+```json
+{
+  "op": 2024,
+  "push": true,
+  "data": {
+    "reason": "joined",
+    "allianceId": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+    "allianceName": "卧龙盟"
+  }
+}
+```
+
+### op 2025 · PUSH_ALLIANCE_MARK — 联盟地图标记变化推送（v69，AISLG-184）
+
+`S→C` 服务端推送 · 无 `seq`
+
+本联盟的标记新增或删除：reason = added（mark 为新标记）/ removed（mark 为 null，只带 markId）。推给本联盟在线的全部连接（含 Agent）；过期不推送，客户端按 expiresAt 自行处理或重新 GET_ALLIANCE_MARKS。
+
+**data 字段**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| reason | 'added' \| 'removed' | 变化原因。 |
+| allianceId | string | 标记所属联盟 id。 |
+| markId | number | 标记 id。 |
+| mark | object \| null | added 时为新标记；removed 时为 null。 |
+
+**Agent 提示**：只作提示；需要完整列表时 GET_ALLIANCE_MARKS。
+
+**示例**
+
+推送（`added`）：
+
+```json
+{
+  "op": 2025,
+  "push": true,
+  "data": {
+    "reason": "added",
+    "allianceId": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+    "markId": 7,
+    "mark": {
+      "id": 7,
+      "x": 512,
+      "y": 230,
+      "kind": "enemy",
+      "text": "洛阳北门",
+      "creator": {
+        "accountId": "4f0c1a2e-8d3b-4c5e-9a7f-1b2c3d4e5f60",
+        "username": "example-leader"
+      },
+      "createdAt": "2026-10-24T09:00:00.000Z",
+      "expiresAt": "2026-10-25T09:00:00.000Z"
+    }
+  }
+}
+```
+
 ## 4. 错误码参考
 
 所有错误响应的 `error.message` 为人读文案（中文），程序逻辑应依据 `error.code` 判断。
@@ -12284,6 +13440,7 @@ NPC 出兵后不再立刻结算：先给被袭击账号发预警（预警提前�
 | `BUILD_NOT_CANCELLABLE` | 目标建造不存在、不属于本账号或不在排队状态。进行中任务能否取消待设计，当前仅排队条目（status=queued）可取消（v7）。 | 用 GET_STATE 查看 city.queue，只对 status=queued 的条目发起 CANCEL_BUILD。 |
 | `AGENT_FORBIDDEN` | 该协议对连接声明的登录类型有限制：RESET_ACCOUNT 仅玩家连接可调用，AGENT_REPORT_PLAN 仅 Agent 连接可调用。注意：role 是连接自报的标记，本限制拦住诚实声明的对端，不是可独立验证的安全边界。 | 换由对应登录类型的连接发起（RESET_ACCOUNT 找玩家连接，计划上报找 Agent 连接）；不要改用另一身份重连绕过。 |
 | `TROOP_NOT_AVAILABLE` | 该兵种需要更高等级的军营才能征募（v11；未建军营同样返回）。兵种与门槛见 RECRUIT 的字段说明。 | 用 GET_STATE 查看 levels.barracks，先升级军营或改征当前等级可用的兵种。 |
+| `ELITE_TROOP_LOCKED` | 专属兵种（v64，AISLG-168：羽林卫、丹阳兵、白毦兵、虎卫军、诸葛连弩兵、先登死士、虎豹骑、西凉铁骑）只能在占领对应名城的那座分城的军营征募；主城、其他分城、以及已失守名城的原主人均返回此码。 | 先占领对应名城（见 GET_STATE / 名城说明），再到该分城征募；或改征普通兵种。 |
 | `INSUFFICIENT_POPULATION` | 人口不足以征募该数量（v11：人口在征募发起时立即扣减，民房上限与增长决定可征数量）。 | 等待人口增长（增速 = 10 × 民房等级 × (等级+1)/小时，无民房为 0）或建 / 升民房后重试；失败响应附当前城池状态。 |
 | `RECRUIT_QUEUE_FULL` | 征兵队列已满（1 条征募中 + 排队上限，当前为 2 条，占位数值；v11）。征兵队列独立于建造队列。 | 等队首完成后重试，或先取消排队条目腾出位置。 |
 | `RECRUIT_NOT_CANCELLABLE` | 目标征兵不存在、不属于本账号或不在排队状态。征募中条目能否取消待设计，当前仅排队条目可取消（v11）。 | 用 GET_STATE 查看 city.recruitQueue，只对 status=queued 的条目发起 CANCEL_RECRUIT。 |
@@ -12353,6 +13510,11 @@ NPC 出兵后不再立刻结算：先给被袭击账号发预警（预警提前�
 | `STAR_TOWER_CLEARED` | （v55，AISLG-146）将星塔：已全部通关（bestFloor 等于总层数），没有可挑战的层。 | 不用再挑战；想看战报用 GET_STAR_TOWER_REPORTS。 |
 | `STAR_TOWER_NO_CITY` | （v55，AISLG-146）将星塔：账号还没有城，首通金币无处入账，不能挑战。 | 先建城，再挑战。 |
 | `STAR_TOWER_NO_LINEUP` | （v55，AISLG-146）将星塔：阵容里一名武将都没有（阵容与竞技场共用）。 | 先 SET_ARENA_LINEUP 保存至少 1 名武将的阵容，再挑战。 |
+| `MAINTENANCE` | （v65，AISLG-134）服务端正在换季（维护态），游戏类协议暂不可用。登录、LOGOUT 与 GET_SEASON 仍可用。响应 data.retryAfterSec 为建议的等待秒数。 | 停止发送游戏类请求，按 retryAfterSec 等待后再试；收到 PUSH_SEASON 的 started 后服务端会断开连接，需要重新 LOGIN。 |
+| `ALLIANCE_NOT_FOUND` | （v66，AISLG-181）联盟不存在，或申请 / 邀请 / 目标成员不存在（可能已过期、被撤销或已离盟）。 | 不要重试同一个 id；GET_ALLIANCE / LIST_ALLIANCES 重新确认当前状态。 |
+| `ALLIANCE_MARK_LIMIT` | （v69，AISLG-184）本联盟同时有效的地图标记已达上限（20 个，过期的不计）；响应附 limit、until（最早一个标记的到期时刻）与 retryAfterSeconds。 | 等最早的标记到期（until）或先删除自己的标记，再打新的。 |
+| `ALLIANCE_MARK_EXISTS` | （v69，AISLG-184）同一格子已经有一个有效的联盟标记，同一格子不能重复标记。 | 换一个格子打标记；要改内容先删除原标记再打。 |
+| `ALLY_NOT_ATTACKABLE` | （v67，AISLG-182）目标城池 / 野地的主人与你在同一个联盟（盟友）：不能掠夺、抢占野地、占领分城，也不能侦察。出发后目标才成为盟友的，部队到达时不开战，原路返回（事件 cause=ALLY_NOT_ATTACKABLE）。 | 换一个非盟友的目标；盟友的领地不要作为攻击 / 侦察目标。 |
 | `ANNOUNCEMENT_NOT_FOUND` | （v60，AISLG-162）公告不存在、已撤回、尚未到生效时间，或定向到其他站点。 | 不要重试同一个 id；重新用 GET_ANNOUNCEMENTS 拉取列表确认当前可见的公告。 |
 | `AGENT_PASSWORD_FORBIDDEN` | （v47）Agent 用账号密码登录被拒：密码登录只属于玩家本人，Agent 一律用账号的永久 Agent 令牌登录（哪个站都一样）。 | 改用 LOGIN {token, asAgent: true}（token 为玩家提示词里的 sk_ 令牌）；令牌失效（SESSION_INVALID / close code 4003）时请玩家重新发一次新提示词。 |
 | `PASSWORD_LOGIN_CLOSED` | （v47）该站点不开放账号密码登录：游戏有两个站（同一套服务与数据库、账号通用），国际站 slg.yuntianyou.cc 只有 Google / GitHub 登录，国内站才有账号密码。 | 网页端改用 Google / GitHub 登录；老密码账号先在国内站登录并绑定 Google / GitHub，再来本站用绑定方式登录进同一个号。Agent 不涉及（Agent 只用令牌）。 |
@@ -12677,6 +13839,23 @@ NPC 出兵后不再立刻结算：先给被袭击账号发预警（预警提前�
           "upgradeSeconds": null
         }
       },
+      "levelMax": {
+        "farm": 20,
+        "lumber_mill": 20,
+        "quarry": 20,
+        "iron_mine": 20,
+        "house": 20,
+        "government": 20,
+        "barracks": 20,
+        "warehouse": 20,
+        "wall": 20,
+        "academy": 20,
+        "parade_ground": 20,
+        "beacon": 20,
+        "post_station": 20,
+        "arrow_tower": 20,
+        "tavern": 20
+      },
       "farms": 0,
       "production": {
         "gold": 100,
@@ -12708,7 +13887,15 @@ NPC 出兵后不再立刻结算：先给被袭击账号发预警（预警提前�
         "iron_cavalry": 0,
         "supply_wagon": 0,
         "ballista": 0,
-        "siege_ram": 0
+        "siege_ram": 0,
+        "yulin_guard": 0,
+        "danyang_soldier": 0,
+        "baimao_soldier": 0,
+        "huwei_guard": 0,
+        "zhuge_crossbow": 0,
+        "xiandeng_warrior": 0,
+        "hubao_cavalry": 0,
+        "xiliang_cavalry": 0
       },
       "armyFoodUsePerHour": 0,
       "timeScale": 1,
@@ -12719,6 +13906,7 @@ NPC 出兵后不再立刻结算：先给被袭击账号发预警（预警提前�
       "durability": null,
       "famousName": null,
       "productionBonusPercent": 0,
+      "famousEffect": null,
       "starveAt": null,
       "mutinyNextAt": null,
       "guard": null,
@@ -13257,6 +14445,23 @@ Agent 与玩家看同一座城（同一账号），但 Agent **不能用账号�
           "upgradeSeconds": null
         }
       },
+      "levelMax": {
+        "farm": 20,
+        "lumber_mill": 20,
+        "quarry": 20,
+        "iron_mine": 20,
+        "house": 20,
+        "government": 20,
+        "barracks": 20,
+        "warehouse": 20,
+        "wall": 20,
+        "academy": 20,
+        "parade_ground": 20,
+        "beacon": 20,
+        "post_station": 20,
+        "arrow_tower": 20,
+        "tavern": 20
+      },
       "farms": 1,
       "production": {
         "gold": 100,
@@ -13288,7 +14493,15 @@ Agent 与玩家看同一座城（同一账号），但 Agent **不能用账号�
         "iron_cavalry": 0,
         "supply_wagon": 0,
         "ballista": 0,
-        "siege_ram": 0
+        "siege_ram": 0,
+        "yulin_guard": 0,
+        "danyang_soldier": 0,
+        "baimao_soldier": 0,
+        "huwei_guard": 0,
+        "zhuge_crossbow": 0,
+        "xiandeng_warrior": 0,
+        "hubao_cavalry": 0,
+        "xiliang_cavalry": 0
       },
       "armyFoodUsePerHour": 0,
       "timeScale": 1,
@@ -13299,6 +14512,7 @@ Agent 与玩家看同一座城（同一账号），但 Agent **不能用账号�
       "durability": null,
       "famousName": null,
       "productionBonusPercent": 0,
+      "famousEffect": null,
       "starveAt": null,
       "mutinyNextAt": null,
       "guard": null,
@@ -13582,14 +14796,14 @@ LOGOUT 吊销本连接登录所用的令牌，服务端随即关闭连接（clos
 
 ## 6. 兵种与战斗属性
 
-11 个兵种的单兵战斗属性（v18 起公开；v33 起含二期的铁骑兵 / 辎重车 / 床弩 / 冲车及克制关系）。相对关系可用于编队搭配与出征评估：射程决定能否攻击到目标（近战 10、弓箭 70——纯近战对守方远程可能全场打不到），战斗速度决定行动先后与接敌快慢。伤害与判定的具体算法不对外公开（机制概览见术语表「战斗」）；战报提供逐回合的双方伤害与损失统计。
+19 个兵种的单兵战斗属性（v18 起公开；v33 起含二期的铁骑兵 / 辎重车 / 床弩 / 冲车及克制关系）。相对关系可用于编队搭配与出征评估：射程决定能否攻击到目标（近战 10、弓箭 70——纯近战对守方远程可能全场打不到），战斗速度决定行动先后与接敌快慢。伤害与判定的具体算法不对外公开（机制概览见术语表「战斗」）；战报提供逐回合的双方伤害与损失统计。
 
 | 兵种 | kind | 生命 | 攻击 | 防御 | 战斗速度 | 射程 | 行军速度系数 | 军营 | 负重 | 人口 | 克制 / 抗性 / 特性 |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | 民夫 | porter | 250 | 50 | 20 | 12 | 10 | 1 | Lv1 | 500 | 1 | — |
 | 义兵 | militia | 450 | 100 | 50 | 20 | 10 | 1 | Lv1 | 60 | 1 | — |
 | 斥候 | scout | 350 | 80 | 40 | 80 | 10 | 2 | Lv2 | 80 | 1 | — |
-| 长枪兵 | pikeman | 750 | 220 | 180 | 20 | 10 | 1 | Lv3 | 60 | 1 | 克制：轻骑兵 / 铁骑兵 伤害 +20% |
+| 长枪兵 | pikeman | 750 | 220 | 180 | 20 | 10 | 1 | Lv3 | 60 | 1 | 克制：轻骑兵 / 铁骑兵 / 虎豹骑 / 西凉铁骑 伤害 +20% |
 | 刀盾兵 | swordsman | 1000 | 260 | 280 | 16 | 10 | 1 | Lv4 | 80 | 1 | 抗性：受弓箭兵 / 床弩攻击 -20% |
 | 弓箭兵 | archer | 250 | 240 | 60 | 20 | 70 | 1 | Lv5 | 50 | 1 | — |
 | 轻骑兵 | cavalry | 1100 | 380 | 150 | 110 | 10 | 1.5 | Lv6 | 100 | 1 | — |
@@ -13597,6 +14811,14 @@ LOGOUT 吊销本连接登录所用的令牌，服务端随即关闭连接（clos
 | 辎重车 | supply_wagon | 600 | 0 | 50 | 8 | 10 | 0.7 | Lv3 | 5000 | 6 | — |
 | 床弩 | ballista | 300 | 260 | 40 | 8 | 95 | 0.6 | Lv7 | 0 | 3 | — |
 | 冲车 | siege_ram | 1500 | 60 | 200 | 10 | 10 | 0.6 | Lv8 | 0 | 5 | 破墙：攻城时每占攻方存活总兵数 1% 使守方城墙减伤相对降低 8%（最多 80%） |
+| 羽林卫 | yulin_guard | 2100 | 480 | 585 | 16 | 10 | 1 | Lv7 | 80 | 2 | — |
+| 丹阳兵 | danyang_soldier | 1740 | 595 | 493 | 16 | 10 | 1 | Lv7 | 80 | 2 | — |
+| 白毦兵 | baimao_soldier | 1511 | 443 | 363 | 20 | 10 | 1 | Lv6 | 60 | 2 | 克制：轻骑兵 / 铁骑兵 / 虎豹骑 / 西凉铁骑 伤害 +40% |
+| 虎卫军 | huwei_guard | 1760 | 384 | 384 | 20 | 10 | 1 | Lv6 | 60 | 2 | — |
+| 诸葛连弩兵 | zhuge_crossbow | 262 | 252 | 63 | 20 | 80 | 1 | Lv8 | 50 | 2 | — |
+| 先登死士 | xiandeng_warrior | 488 | 510 | 117 | 20 | 60 | 1 | Lv8 | 50 | 2 | — |
+| 虎豹骑 | hubao_cavalry | 2574 | 889 | 351 | 130 | 10 | 1.8 | Lv9 | 100 | 2 | — |
+| 西凉铁骑 | xiliang_cavalry | 2025 | 675 | 257 | 100 | 10 | 1.5 | Lv9 | 100 | 2 | — |
 
 二期兵种定位（v33）：**铁骑兵**军营 11 级解锁的后期重装主力（贵、高粮耗，受长枪克制）；**辎重车**军营 3 级解锁的纯后勤——负重 5000（民夫的 10 倍）、攻击 0，出征 / 运输计入负重，必须有战斗部队护送；**床弩**军营 7 级解锁、射程 95 的反弓箭器械，脆而慢、需近战掩护，**打不到箭塔**（箭塔是不会被消灭的固定输出）；**冲车**军营 8 级解锁、行军最慢（0.6）、负重 0，只在攻城战削弱城墙减伤——冲车每占攻方存活总兵数 1%，守方城墙减伤相对降低 8%，最多降 80%，每回合按当时存活的冲车重新计算，战报 wallBreak 给出开战时的「原减伤 → 破墙后」（例：70% 墙、冲车占 5% → 42%）；野地、流寇等非攻城战斗中冲车只是肉厚攻低的单位。克制倍率表（长枪兵打骑兵 ×1.2、刀盾兵受弓箭兵 / 床弩 ×0.8）在共享规则里，新兵种统一查表。校准记录见 docs/battle-calibration.md「二期兵种」。
 
@@ -13635,7 +14857,7 @@ LOGOUT 吊销本连接登录所用的令牌，服务端随即关闭连接（clos
 - **seq**：客户端为每条请求分配的自增整数，响应原样带回，用于把响应与请求配对；推送无 seq。
 - **推送（push）**：服务端主动发给已登录连接的帧（push: true），不属于任何请求的响应。
 - **role（登录类型）**：LOGIN 时由 asAgent 声明并绑定到连接的来源标记（player / agent）。它是登录方自行声明的，不是可独立验证的身份，服务端原则上不据此做差异化访问控制（例外：RESET_ACCOUNT 仅玩家、AGENT_REPORT_PLAN 仅 Agent——基于自报 role 的协议级限制，不是可验证的安全边界）。
-- **兵种（troop）**：一期七种：porter 民夫、militia 义兵、scout 斥候、pikeman 长枪兵、swordsman 刀盾兵、archer 弓箭兵、cavalry 轻骑兵；二期（v33，AISLG-86~90）再加铁骑兵 iron_cavalry（军营 11 级后期重装主力）、辎重车 supply_wagon（军营 3 级，负重 5000 的纯后勤）、床弩 ballista（军营 7 级，射程 95）、冲车 siege_ram（军营 8 级，攻城时削弱城墙减伤）。各有军营等级门槛、单兵成本、时长与小时耗粮（占位数值，见 RECRUIT）；军队耗粮已接入（v14，见 GET_STATE 的 armyFoodUsePerHour）。city.army 按兵种统计城内驻军，征兵完成时累加。
+- **兵种（troop）**：一期七种：porter 民夫、militia 义兵、scout 斥候、pikeman 长枪兵、swordsman 刀盾兵、archer 弓箭兵、cavalry 轻骑兵；二期（v33，AISLG-86~90）再加铁骑兵 iron_cavalry（军营 11 级后期重装主力）、辎重车 supply_wagon（军营 3 级，负重 5000 的纯后勤）、床弩 ballista（军营 7 级，射程 95）、冲车 siege_ram（军营 8 级，攻城时削弱城墙减伤）；v64（AISLG-168）再加 8 种名城专属兵（羽林卫 yulin_guard、丹阳兵 danyang_soldier、白毦兵 baimao_soldier、虎卫军 huwei_guard、诸葛连弩兵 zhuge_crossbow、先登死士 xiandeng_warrior、虎豹骑 hubao_cavalry、西凉铁骑 xiliang_cavalry），只能在占领对应名城的分城征募。各有军营等级门槛、单兵成本、时长与小时耗粮（占位数值，见 RECRUIT）；军队耗粮已接入（v14，见 GET_STATE 的 armyFoodUsePerHour）。city.army 按兵种统计城内驻军，征兵完成时累加。
 - **征兵队列（recruitQueue）**：军营处理征兵：RECRUIT 无征募中时立即开始（status=recruiting，时长 = 单兵时长 × 数量），有征募中且未满时入队（status=queued）；队列 = 1 征募中 + 最多 2 排队（占位）。资源与人口在发起时扣减，取消排队条目全额返还；征募中能否取消待定。队列独立于建造队列。
 - **守城加成（defenseBonus）**：城墙为守城提供的防御加成（占位：前 10 级每级 +5、11~20 级每级 +2——20 级 70，v31 AISLG-85；百分数数值；v27 起另加城防科技每级 +1 个百分点），随 GET_STATE 下发；消费方是守城战斗结算。v30（AISLG-82）起另有**箭塔**：守城战里城墙位上不会被消灭的远程单位，每回合开始对射程内最近的敌方兵堆造成固定伤害（150 × 等级，不走判定链、不吃防御与城墙减伤；射程 45 + 5 × 等级，攻方距城墙位 ≤ 射程才被射），仅守城战（NPC 袭击主城）生效，守军全灭仍判守城失败；战报单独列出箭塔伤害（towerDamage / roundLog[].towerDamage）。数值校准见 docs/battle-calibration.md「箭塔」。
 - **计划（plan）**：Agent 经 AGENT_REPORT_PLAN 上报的两段自报文本：nextAction（下一步动作）与 overallPlan（整体计划）。账号只保留最新快照（后写覆盖，RESET_ACCOUNT 清空），经 GET_AGENT_INFO 的 plan 字段查询、PUSH_AGENT_PLAN 推送。它是托管监控的展示信息，未经验证、不参与游戏逻辑。
@@ -13652,7 +14874,7 @@ LOGOUT 吊销本连接登录所用的令牌，服务端随即关闭连接（clos
 - **战报（battle report）**：每场战斗（出征野地 / 攻 NPC 城池 / NPC 袭击驻军 / NPC 袭击主城，v21 新增 city_raid 类别）生成一份战报，账号以攻方或守方身份持有、可查询（GET_BATTLE_REPORTS）并实时推送（PUSH_BATTLE_REPORT）：含双方编成与损失、汇总口径（v21：units 总单位数、totalHp 总血量、avgRange 平均射程；v23：maxRange 单兵射程最大值、rangedUnits 远程单位数——avgRange 是数量加权平均、会被大量近战稀释，判断远程威胁用 maxRange + rangedUnits，AISLG-49；读取时按编成汇总，历史战报同样下发）、总输出 damage、逐回合伤害与损失统计、终局原因与城墙减伤。战损不进入伤兵治疗、俘虏招降或逃兵召回系统（一期确认）——损失即最终减员。
 - **掠夺（plunder）**：MARCH task='plunder'（缺省）的出征任务（v16）。胜利后从目标奖励池按幸存部队负重（Σ 数量 × 单兵 carry，民夫 500 / 斥候·刀盾兵 80 / 轻骑兵 100 / 其余 50–60，占位）装填战利品，金→粮→木→石→铁顺序装满即止（v21 含金，AISLG-31），立即入账出发城（不钳储量上限），幸存部队返程、不改归属。野地奖励池 = 地形资源 750×等级 + 金币 250×等级（v21；金矿为空池——金矿定位占领生息）；NPC 城 = 持久化库存（v21 起含金币；库存不再生、掠空后无收益）。同一目标地块成功掠夺后进入 24 小时冷却（基准，受全局时间缩放；plundered_at；冷却内发起被拒 PLUNDER_COOLDOWN，在途到达仍战斗但资源为零）。玩家主城被 NPC 袭击攻破时按同口径结算（仓库保护 4000×等级、四资源固定均分各 1000×等级，金币不受仓库保护但单次最多抢走存量的 5%（v41，AISLG-125；v38 起玩家互掠为存量的 10%，见 MARCH 玩家对抗段）。
 - **NPC 城池（npc_city）**：地图上可掠夺的普通 NPC 城（初始约 15000 座，等级 1..3，占位）。可掠夺或占领（v24，AISLG-58）：task=plunder 掠夺——战斗 vs 其驻防（守方据墙待敌），胜利按幸存部队负重从持久化库存扣减（v21 起含金币，AISLG-31；库存不再生）；task=occupy 占领变分城——需主城官府 ≥ 3、分城数 < floor(主城官府 ÷ 2)、目标等级 ≤ 出发城官府等级，打赢后接收其建筑与剩余库存、幸存部队进城驻守。NPC 城池是有限存量（一期不做自动补充）；玩家城的占领设计随玩家对抗阶段另行接入。
-- **名城（famous city）**：全图 8 座高亮的 NPC 名城（v24，AISLG-56；官渡 / 许昌 / 洛阳 / 长安 / 成都 / 建业 / 襄阳 / 邺城，从 Lv3 NPC 城原地升格，分散在地图各区域；地块 famous 字段标识名称、阶段与独占加成）。分两阶段攻打：先清外围驻军（外围阶段，对其出征打外围），外围清空后进入城守阶段，限时内（famous.recoversAt，约 6 小时 ÷ 时间缩放）出征攻城守——占领后成为分城（名称为名城名）并带独占加成：该城产量 +20%（只对占领者生效，已计入 city.production）；超时无人攻下城守则外围恢复满编。守军 = 同等级普通 NPC 城 × 3（外围与城守各一半）。名城计入分城上限。
+- **名城（famous city）**：全图 8 座高亮的 NPC 名城（v24，AISLG-56；官渡 / 许昌 / 洛阳 / 长安 / 成都 / 建业 / 襄阳 / 邺城，从 Lv3 NPC 城原地升格，分散在地图各区域；地块 famous 字段标识名称、阶段与独占加成）。分两阶段攻打：先清外围驻军（外围阶段，对其出征打外围），外围清空后进入城守阶段，限时内（famous.recoversAt，约 6 小时 ÷ 时间缩放）出征攻城守——占领后成为分城（名称为名城名）并带独占加成：该城产量 +20%（只对占领者生效，已计入 city.production）；另有一项独有效果（v62，AISLG-166，只对占领者生效，跟着城走）：洛阳守城城墙减伤 +5 个百分点、长安箭塔伤害 +20%、官渡 / 成都 / 建业 / 邺城辖下对应资源的野地产出 +25%、许昌自己城池之间的调兵 / 运输行军速度 +20%、襄阳仓库防掠夺保护额 +50%。超时无人攻下城守则外围恢复满编。守军 = 同等级普通 NPC 城 × 3（外围与城守各一半）。名城计入分城上限。
 - **NPC 袭击（npc raid）**：NPC 会周期性主动攻击玩家的目标（基准每 120 分钟一次，v21 AISLG-28 调参；v19 曾为 30 分钟；实际 ÷ 全局时间缩放）。目标池（v21，AISLG-32 方案 A）：80% 随机挑一块已占领野地，20% 随机挑一座官府 ≥ 2 的玩家主城（官府 Lv1 的新号不在池内，构成开号缓冲）；不攻击分城或行军途中的部队。**袭击编成公式（v21 公开，AISLG-29）**：义兵 10×等级 + 弓箭兵 1×等级，参考战力 25×等级（v21 调参；v19 曾为 义兵 15×等级 + 弓箭兵 2×等级、40×等级）——野地袭击按地块等级推导；主城袭击按**守军战力**推导（v22 AISLG-40 方案 B）：level = clamp(ceil(守军参考战力 ÷ 25), max(1, floor(官府等级 ÷ 2)), 官府等级)——守军归零时袭击降到官府一半强度（不再零守军挨满编），官府升级（经济行为）不再自动放大挨打规模；下限防「清空守军骗低强度」。袭击走多回合战斗结算并生成守方视角战报（野地为 kind='npc_raid'、主城为 kind='city_raid'，主城为守城战：城墙 defenseBonus 减免生效）。野地袭击：驻军全灭则占领失效（wilderness_lost），守住则驻军按战斗折损。主城袭击：守方驻军全灭则 NPC 按被掠城仓库保护掠夺资源（可掠量 = max(0, 存量 − 1000×仓库等级/资源；金币不受仓库保护但单次最多抢走存量的 5%，v41 AISLG-125），按 NPC 幸存部队负重装填（金→粮→木→石→铁），城池归属不变；守住则仅按战斗折损。事件按 npc_raid 记录（target='wilderness' / 'city'，outcome=repelled / garrison_lost，主城被掠含 loot；主城袭击的 level 即上述推导结果）。**主城免战期（v22 AISLG-40 方案 A）**：主城被攻破后 2 × 袭击基准间隔内（随 timeScale 缩放）不再进入袭击目标池，让守城方至少完成一轮重建；每次被攻破重置计时。免战截止随 GET_STATE 的 city.truceUntil 下发，到期自动回池、无事件通知。**防御口径（按 v21 参数批量模拟校准）**：击退 Lv N 袭击并保持净收益为正，建议驻军战力 ≥ 4 × 25 × N（= 100×N），并混编约 1/5 弓箭兵对抗来袭远程——如 Lv1 袭击（25 战力）建议驻军 80 义兵 + 5 弓箭兵（模拟：守住率 100%、场均折损约 3 人，2 小时占领 + 采集收入净 +135 金/轮）；经验值非保证，重防御与高等级地块收益更好。
 - **建筑类型（kind）**：一期九种建筑，每种同城限一座（重复建造返回 BUILDING_EXISTS，成长走 UPGRADE）：farm 农田（产粮）、lumber_mill 伐木场（产木）、quarry 采石场（产石）、iron_mine 铁矿（产铁）、house 民房（人口上限）、government 官府（自动产金，100×等级/小时，v19；v16 起兼野地占领上限）、barracks 军营（征兵）、warehouse 仓库（防掠夺保护，v16 规则落地：4000×等级、四资源固定均分）、wall 城墙（守城加成）；v27 起第十种 academy 书院（科技研究所需，第 N 级科技要求书院 ≥ N 级）。生产建筑持续产出：产量 = 等级 × 每级速率，另受野地加成与农耕科技（v27，四资源每级 +5%）加成，不占用人口。
 - **production（产量）**：城池当前每小时产量，按资源归集（金/粮/木/石/铁）。四种生产资源各有 100/小时的基础产量（无对应建筑也产出）；金币由官府（100×等级/小时，v19）与占领金矿生产（无基础产量）。产量随建筑建成即时生效；资源按流逝时间累积，读取城池（GET_STATE）或扣减资源时会先结算到当前时刻，离线期间照常累积。
@@ -13667,7 +14889,7 @@ LOGOUT 吊销本连接登录所用的令牌，服务端随即关闭连接（clos
 - 只加不改：已发布的协议号、字段与错误码只新增、不删除、不改变类型与语义。
 - 新增字段不视为破坏兼容：消费方应容忍请求与响应中出现文档未列出的字段。
 - 必须破坏语义时启用新的协议号承载新行为，旧协议号保留原语义直至正式公告下线。
-- 协议版本随对外协议内容的每次变化递增；当前为 60。
+- 协议版本随对外协议内容的每次变化递增；当前为 70。
 - Agent 可在启动时请求 `GET /agent-api.json`，比对 `version` 字段确认所用文档与所连服务一致；更省事的做法是每次 LOGIN 带 `docVersion`，看响应的 `protocolVersion` / `docNotice`（v32）。
 - 增量变更：`GET /agent-api/changes/{since}`（也接受 `?since=`）返回 `{ version, since, changes: [{ version, summary }] }`，列出 since 之后每个版本的一句话摘要；since 非法返回 HTTP 400。
 

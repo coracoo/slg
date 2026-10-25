@@ -230,6 +230,10 @@ export const ERROR_DOC: Record<ErrorCode, ErrorDoc> = {
     desc: '该兵种需要更高等级的军营才能征募（v11；未建军营同样返回）。兵种与门槛见 RECRUIT 的字段说明。',
     action: '用 GET_STATE 查看 levels.barracks，先升级军营或改征当前等级可用的兵种。',
   },
+  ELITE_TROOP_LOCKED: {
+    desc: '专属兵种（v64，AISLG-168：羽林卫、丹阳兵、白毦兵、虎卫军、诸葛连弩兵、先登死士、虎豹骑、西凉铁骑）只能在占领对应名城的那座分城的军营征募；主城、其他分城、以及已失守名城的原主人均返回此码。',
+    action: '先占领对应名城（见 GET_STATE / 名城说明），再到该分城征募；或改征普通兵种。',
+  },
   INSUFFICIENT_POPULATION: {
     desc: '人口不足以征募该数量（v11：人口在征募发起时立即扣减，民房上限与增长决定可征数量）。',
     action: '等待人口增长（增速 = 10 × 民房等级 × (等级+1)/小时，无民房为 0）或建 / 升民房后重试；失败响应附当前城池状态。',
@@ -522,6 +526,70 @@ export const ERROR_DOC: Record<ErrorCode, ErrorDoc> = {
     desc: '（v55，AISLG-146）将星塔：阵容里一名武将都没有（阵容与竞技场共用）。',
     action: '先 SET_ARENA_LINEUP 保存至少 1 名武将的阵容，再挑战。',
   },
+  MAINTENANCE: {
+    desc: '（v65，AISLG-134）服务端正在换季（维护态），游戏类协议暂不可用。登录、LOGOUT 与 GET_SEASON 仍可用。响应 data.retryAfterSec 为建议的等待秒数。',
+    action: '停止发送游戏类请求，按 retryAfterSec 等待后再试；收到 PUSH_SEASON 的 started 后服务端会断开连接，需要重新 LOGIN。',
+  },
+  ALLIANCE_NAME_INVALID: {
+    desc: '（v66，AISLG-181）联盟名不合法：长度不在 2–8 字、含空白 / 控制字符或含屏蔽词。',
+    action: '换一个符合规则的名字再试。',
+  },
+  ALLIANCE_NAME_TAKEN: {
+    desc: '（v66，AISLG-181）联盟名已被占用（全服唯一，忽略大小写）。',
+    action: '换一个名字再试。',
+  },
+  ALLIANCE_GOVERNMENT_TOO_LOW: {
+    desc: '（v66，AISLG-181）主城官府等级不够创建联盟（需 ≥ 5 级）；响应附 required / current。',
+    action: '先升级主城官府。',
+  },
+  ALLIANCE_ALREADY_IN: {
+    desc: '（v66，AISLG-181）操作者或目标已经在一个联盟里（一个账号只能在一个联盟）。',
+    action: '先退出当前联盟，或换一个没有联盟的对象。',
+  },
+  ALLIANCE_NOT_IN: {
+    desc: '（v66，AISLG-181）操作者不在任何联盟里。',
+    action: '先创建或加入联盟。',
+  },
+  ALLIANCE_NOT_FOUND: {
+    desc: '（v66，AISLG-181）联盟不存在，或申请 / 邀请 / 目标成员不存在（可能已过期、被撤销或已离盟）。',
+    action: '不要重试同一个 id；GET_ALLIANCE / LIST_ALLIANCES 重新确认当前状态。',
+  },
+  ALLIANCE_COOLDOWN: {
+    desc: '（v66，AISLG-181）退出 / 被踢 / 解散联盟后 24 小时冷却中，不能创建也不能加入联盟；响应附 until 与 retryAfterSeconds。',
+    action: '等冷却结束（GET_ALLIANCE 的 cooldownUntil）再试。',
+  },
+  ALLIANCE_FULL: {
+    desc: '（v66，AISLG-181）联盟成员已满（成员数 + 待处理邀请数 ≥ 上限 30）。',
+    action: '换一个联盟，或等有人离开 / 邀请过期。',
+  },
+  ALLIANCE_FORBIDDEN: {
+    desc: '（v66，AISLG-181）当前联盟职位没有这个权限，或不能对该职位的成员做这个操作（如副盟主踢副盟主、任何人踢盟主）。',
+    action: '换有权限的职位操作，或换一个对象。',
+  },
+  ALLIANCE_ROLE_FULL: {
+    desc: '（v66，AISLG-181）副盟主人数已达上限（2 人）。',
+    action: '先撤销一名副盟主再任命。',
+  },
+  ALLIANCE_LEADER_MUST_TRANSFER: {
+    desc: '（v66，AISLG-181）盟主在盟里还有其他成员时不能直接退出。',
+    action: '先 ALLIANCE_SET_ROLE 转让盟主，或 ALLIANCE_DISBAND 解散联盟。',
+  },
+  ALLIANCE_REQUEST_EXISTS: {
+    desc: '（v66，AISLG-181）已经有一条待处理的入盟申请（同一时间只能有 1 条）。',
+    action: '先 ALLIANCE_APPLY（cancel=true）撤回原申请，再申请别的联盟。',
+  },
+  ALLIANCE_MARK_LIMIT: {
+    desc: '（v69，AISLG-184）本联盟同时有效的地图标记已达上限（20 个，过期的不计）；响应附 limit、until（最早一个标记的到期时刻）与 retryAfterSeconds。',
+    action: '等最早的标记到期（until）或先删除自己的标记，再打新的。',
+  },
+  ALLIANCE_MARK_EXISTS: {
+    desc: '（v69，AISLG-184）同一格子已经有一个有效的联盟标记，同一格子不能重复标记。',
+    action: '换一个格子打标记；要改内容先删除原标记再打。',
+  },
+  ALLY_NOT_ATTACKABLE: {
+    desc: '（v67，AISLG-182）目标城池 / 野地的主人与你在同一个联盟（盟友）：不能掠夺、抢占野地、占领分城，也不能侦察。出发后目标才成为盟友的，部队到达时不开战，原路返回（事件 cause=ALLY_NOT_ATTACKABLE）。',
+    action: '换一个非盟友的目标；盟友的领地不要作为攻击 / 侦察目标。',
+  },
   ANNOUNCEMENT_NOT_FOUND: {
     desc: '（v60，AISLG-162）公告不存在、已撤回、尚未到生效时间，或定向到其他站点。',
     action: '不要重试同一个 id；重新用 GET_ANNOUNCEMENTS 拉取列表确认当前可见的公告。',
@@ -570,7 +638,7 @@ export const GLOSSARY: Array<{ term: string; desc: string }> = [
   },
   {
     term: '兵种（troop）',
-    desc: '一期七种：porter 民夫、militia 义兵、scout 斥候、pikeman 长枪兵、swordsman 刀盾兵、archer 弓箭兵、cavalry 轻骑兵；二期（v33，AISLG-86~90）再加铁骑兵 iron_cavalry（军营 11 级后期重装主力）、辎重车 supply_wagon（军营 3 级，负重 5000 的纯后勤）、床弩 ballista（军营 7 级，射程 95）、冲车 siege_ram（军营 8 级，攻城时削弱城墙减伤）。各有军营等级门槛、单兵成本、时长与小时耗粮（占位数值，见 RECRUIT）；军队耗粮已接入（v14，见 GET_STATE 的 armyFoodUsePerHour）。city.army 按兵种统计城内驻军，征兵完成时累加。',
+    desc: '一期七种：porter 民夫、militia 义兵、scout 斥候、pikeman 长枪兵、swordsman 刀盾兵、archer 弓箭兵、cavalry 轻骑兵；二期（v33，AISLG-86~90）再加铁骑兵 iron_cavalry（军营 11 级后期重装主力）、辎重车 supply_wagon（军营 3 级，负重 5000 的纯后勤）、床弩 ballista（军营 7 级，射程 95）、冲车 siege_ram（军营 8 级，攻城时削弱城墙减伤）；v64（AISLG-168）再加 8 种名城专属兵（羽林卫 yulin_guard、丹阳兵 danyang_soldier、白毦兵 baimao_soldier、虎卫军 huwei_guard、诸葛连弩兵 zhuge_crossbow、先登死士 xiandeng_warrior、虎豹骑 hubao_cavalry、西凉铁骑 xiliang_cavalry），只能在占领对应名城的分城征募。各有军营等级门槛、单兵成本、时长与小时耗粮（占位数值，见 RECRUIT）；军队耗粮已接入（v14，见 GET_STATE 的 armyFoodUsePerHour）。city.army 按兵种统计城内驻军，征兵完成时累加。',
   },
   {
     term: '征兵队列（recruitQueue）',
@@ -632,7 +700,7 @@ export const GLOSSARY: Array<{ term: string; desc: string }> = [
   },
   {
     term: '名城（famous city）',
-    desc: '全图 8 座高亮的 NPC 名城（v24，AISLG-56；官渡 / 许昌 / 洛阳 / 长安 / 成都 / 建业 / 襄阳 / 邺城，从 Lv3 NPC 城原地升格，分散在地图各区域；地块 famous 字段标识名称、阶段与独占加成）。分两阶段攻打：先清外围驻军（外围阶段，对其出征打外围），外围清空后进入城守阶段，限时内（famous.recoversAt，约 6 小时 ÷ 时间缩放）出征攻城守——占领后成为分城（名称为名城名）并带独占加成：该城产量 +20%（只对占领者生效，已计入 city.production）；超时无人攻下城守则外围恢复满编。守军 = 同等级普通 NPC 城 × 3（外围与城守各一半）。名城计入分城上限。',
+    desc: '全图 8 座高亮的 NPC 名城（v24，AISLG-56；官渡 / 许昌 / 洛阳 / 长安 / 成都 / 建业 / 襄阳 / 邺城，从 Lv3 NPC 城原地升格，分散在地图各区域；地块 famous 字段标识名称、阶段与独占加成）。分两阶段攻打：先清外围驻军（外围阶段，对其出征打外围），外围清空后进入城守阶段，限时内（famous.recoversAt，约 6 小时 ÷ 时间缩放）出征攻城守——占领后成为分城（名称为名城名）并带独占加成：该城产量 +20%（只对占领者生效，已计入 city.production）；另有一项独有效果（v62，AISLG-166，只对占领者生效，跟着城走）：洛阳守城城墙减伤 +5 个百分点、长安箭塔伤害 +20%、官渡 / 成都 / 建业 / 邺城辖下对应资源的野地产出 +25%、许昌自己城池之间的调兵 / 运输行军速度 +20%、襄阳仓库防掠夺保护额 +50%。超时无人攻下城守则外围恢复满编。守军 = 同等级普通 NPC 城 × 3（外围与城守各一半）。名城计入分城上限。',
   },
   {
     term: 'NPC 袭击（npc raid）',

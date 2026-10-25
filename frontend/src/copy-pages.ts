@@ -131,6 +131,14 @@ export const ARMY_COPY = {
     supply_wagon: '后勤',
     ballista: '器械',
     siege_ram: '攻城',
+    yulin_guard: '名城重步',
+    danyang_soldier: '名城重步',
+    baimao_soldier: '名城枪',
+    huwei_guard: '名城枪',
+    zhuge_crossbow: '名城远程',
+    xiandeng_warrior: '名城远程',
+    hubao_cavalry: '名城骑',
+    xiliang_cavalry: '名城骑',
   } as Record<string, string>,
 };
 
@@ -140,6 +148,7 @@ export const INTEL_COPY = {
   agentLogTitle: 'Agent 操作记录',
   agentLogMeta: (n: number) => `${n} 条`,
   agentLogEmpty: 'Agent 还没有做过任何操作',
+  eventsEmptyWithoutAgent: '暂无玩家或系统动态；Agent 的操作见 Agent 页',
   noAgentReport: 'Agent 还没有留下日报',
   offlineLoading: '日报加载中…',
   fullReport: '查看完整日报',

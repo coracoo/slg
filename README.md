@@ -1,8 +1,8 @@
 # SLG · Selfhost 自托管版
 
-SLG 是可由玩家或 AI Agent 游玩的三国策略游戏。本分支基于 [main](https://github.com/coracoo/slg/tree/main)，保留新版玩法，补充面向 NAS / 私有服务器的自托管支持。
+SLG 是可由玩家或 AI Agent 游玩的三国策略游戏。本分支合入 [athlan20/slg 的上游版本](https://github.com/athlan20/slg/tree/248a7bc200239c65f1fe065813d633ee1c93dfad)，保留新版玩法，补充面向 NAS / 私有服务器的自托管支持。
 
-游戏介绍、截图与玩法见 [main 中文说明](https://github.com/coracoo/slg/blob/main/README.zh-CN.md)；原项目：[athlan20/slg](https://github.com/athlan20/slg)。
+游戏介绍、截图与玩法见 [上游中文说明](https://github.com/athlan20/slg/blob/248a7bc200239c65f1fe065813d633ee1c93dfad/README.md)；原项目：[athlan20/slg](https://github.com/athlan20/slg)。
 
 ## 本分支提供什么
 
@@ -10,6 +10,16 @@ SLG 是可由玩家或 AI Agent 游玩的三国策略游戏。本分支基于 [m
 - **保留原密码登录**：已有账号和密码哈希沿用原数据库，无需重置；Google / GitHub 登录配置也可继续使用。
 - **同源 WebSocket**：网页与 WebSocket 共用访问域名和端口，适合 NAS 与反向代理部署。
 - **两文件构建部署**：本地只需 `Dockerfile`、`compose.yaml` 和原来的 `.env`，构建时自动下载固定提交源码，无需手动下载源码包。
+
+## 本次上游更新
+
+**2026-10-25 本次按维护者要求先发布待部署验收的合并版本。17 个依赖真实 PostgreSQL 的测试套件未运行，Docker 镜像/运行时和浏览器端到端验证未完成；这不代表可直接升级生产存档，也不改变后续自动更新须先通过验证的要求。**
+
+- 合入协议 v70 / MCP 0.1.6，包含联盟、联盟聊天与标记、赛季和名人堂功能。
+- API 启动时会自动执行新增表和列的迁移；请先在隔离 PostgreSQL 16 数据库验证旧存档升级，再部署到原卷。
+- 赛季首次播种的结束时间需在升级前核对；不要直接照抄上游的示例日期，也不要执行 `end-now`。
+- 同一数据库同一时刻只运行一个 Worker；原有 Compose 仍是单 Worker 服务。
+- 更新详情见 [赛季说明](docs/season-system.md)、[联盟说明](docs/alliance-system.md) 和 [上游发布说明](deploy/2026-10-25/README.md)。上游的发版、公告及 npm 发布步骤不属于自托管升级必做项。
 
 ## 部署
 
@@ -66,7 +76,7 @@ HTTPS 请在外层可信反向代理配置，并启用 WebSocket 转发；使用
 
 ## 验证范围与文档
 
-当前自托管补丁已完成源码测试、TypeScript 检查及前端构建；**Docker 镜像构建与真实数据库升级尚未实测**，正式升级前仍需隔离验证。本次 README 更新不代表已完成部署验收。
+已通过后端非数据库测试 529 项、前端单元测试 7 项、TypeScript 检查、同源前端生产构建及 Docker 后端编译配置检查。**17 个数据库测试套件因缺少隔离 PostgreSQL 未运行；Docker 镜像构建/运行时未验证；浏览器测试因云端进程套接字限制未能启动。** 正式升级前仍须完成隔离 PostgreSQL 16 迁移、容器运行和浏览器端到端验收。本次仅更新仓库，未操作 NAS。
 
 - [详细部署、备份与迁移指南](README.Selfhost.zh-CN.md)
 - [Agent API](docs/agent-api.md) · [MCP 配置](mcp/README.md)

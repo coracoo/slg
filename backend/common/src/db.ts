@@ -8,12 +8,16 @@ import { ARENA_SCHEMA_SQL } from './arena-schema';
 import { STAR_TOWER_SCHEMA_SQL } from './star-tower-schema';
 import { HERO_SCHEMA_SQL } from './hero-schema';
 import { ANNOUNCEMENT_SCHEMA_SQL } from './announcement-schema';
+import { ALLIANCE_SCHEMA_SQL } from './alliance-schema';
+import { SEASON_SCHEMA_SQL } from './season-schema';
+import { seedFirstSeason } from './season-seed';
+import { attachPoolDiagnostics, logConnError } from './db-diag';
 
 /** Worker 完成建造后通知 API 的 PostgreSQL 通道名 */
 export const NOTIFY_CHANNEL = 'slg_build_completed';
 
 /** DDL 引导用的咨询锁 ID（任意固定值，两进程一致即可） */
-const SCHEMA_LOCK_ID = 8721401;
+export const SCHEMA_LOCK_ID = 8721401;
 
 export interface DbConfig {
   host: string;
@@ -47,31 +51,69 @@ export function readDbConfig(): DbConfig {
   };
 }
 
-export function createPool(applicationName: string, max = 5): pg.Pool {
+/**
+ * 维护类长语句（启动建表、世界重建、换季）的语句超时（毫秒）：这些语句在一次 DDL / 整图 DELETE 里
+ * 可能跑十几秒到更久，不能套运行期的收紧值；它们走 createPool 的 maintenance 连接池。
+ */
+export const MAINTENANCE_STATEMENT_TIMEOUT_MS = 600_000;
+
+/** 运行期语句超时默认值（毫秒）：环境变量 DB_STATEMENT_TIMEOUT_MS 可调 */
+const DEFAULT_STATEMENT_TIMEOUT_MS = 30_000;
+/** 客户端读超时比语句超时多出的余量：健康链路上先由服务端取消语句并返回明确错误，客户端只兜底网络半死 */
+const QUERY_TIMEOUT_GRACE_MS = 5_000;
+
+export interface PoolOptions {
+  /** 维护用连接池（启动迁移、世界重建、换季）：语句超时放宽到 MAINTENANCE_STATEMENT_TIMEOUT_MS */
+  maintenance?: boolean;
+}
+
+export function createPool(applicationName: string, max = 5, options: PoolOptions = {}): pg.Pool {
   const config = readDbConfig();
+  const statementTimeout = options.maintenance
+    ? MAINTENANCE_STATEMENT_TIMEOUT_MS
+    : Number(process.env.DB_STATEMENT_TIMEOUT_MS || DEFAULT_STATEMENT_TIMEOUT_MS);
   const pool = new pg.Pool({
     ...config,
     max,
     application_name: applicationName,
-    // 只限制「从池里拿连接」（含新建 TCP 连接）的等待时长，不限制查询执行。
+    // 只限制「从池里拿连接」（含新建 TCP 连接）的等待时长。
     // 数据库不可达（如 VPN 断开）时进程在启动阶段会卡在 ensureSchema 上：
     // 端口不监听、终端无任何输出，前端表现为 WebSocket 1006。加超时让它快速报错退出。
     connectionTimeoutMillis: 10_000,
+    // 服务端语句超时：语句跑超时由服务端取消，连接本身仍可用。
+    statement_timeout: statementTimeout,
+    // 客户端读超时：服务端的取消也送不到客户端时（链路半死），在这里放弃等待，释放池位。
+    query_timeout: statementTimeout + QUERY_TIMEOUT_GRACE_MS,
+    // TCP keepalive：空闲 10 秒后开始探测，让半死的 TCP 连接尽快被内核判死（判死的最终时长取决于系统探测参数）
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10_000,
+  });
+  // 查询读超时后 pg 不会结束仍在途的那条查询：连接会带着未完成的查询回到池里，之后拿到它的查询都会排队超时。
+  // 调用方（多数是 pool.connect + client.release()）未把错误传给 release，这里主动结束这种连接，让池丢弃它。
+  // 正常结束的连接 readyForQuery 为 true，不受影响。
+  pool.on('release', (err, client) => {
+    const busy = (client as unknown as { readyForQuery?: boolean }).readyForQuery === false;
+    if (!err && busy) {
+      void client.end().catch(() => undefined);
+    }
   });
   // 空闲连接被网络中断（休眠唤醒、VPN/网络切换）时会触发池级 error；
   // 不挂处理器会让整个进程崩溃。打日志即可：死连接会被池丢弃并重建，
   // 进行中的查询按各自路径处理（Worker 下个 tick 重试、API 响应 INTERNAL）。
+  // 错误输出走 logConnError（带错误码、同类限流；DIAG_LOG=0 时保留原来的 console.error 行）
   pool.on('error', (err) => {
-    console.error(`pg pool error (${applicationName}):`, err instanceof Error ? err.message : err);
+    logConnError(applicationName, 'pool', err);
   });
   // 检出中的连接同样可能因网络瞬断在两条查询之间抛 socket error；pg 对被检出的
   // client 错误不走池级 error，若无监听会以未捕获事件击穿进程（2026-09-27 实测：
   // 远端数据库瞬断导致 Worker 以 EADDRNOTAVAIL 崩溃）。挂监听记日志，死连接由池重建。
   pool.on('connect', (client) => {
     client.on('error', (err) => {
-      console.error(`pg client error (${applicationName}):`, err instanceof Error ? err.message : err);
+      logConnError(applicationName, 'client', err);
     });
   });
+  // AISLG-173 诊断：池状态、连接生命周期、占用者、慢语句（只观测，不改变上面的行为）
+  attachPoolDiagnostics(pool, applicationName);
   return pool;
 }
 
@@ -390,6 +432,12 @@ ALTER TABLE world_tiles ADD COLUMN IF NOT EXISTS plundered_at timestamptz;
 -- v39（AISLG-123 玩家对抗二）：野地换主保护截止——被玩家抢占后 1 小时基准（随缩放）内
 -- 谁都不能再抢这块地（玩家抢占与 NPC 袭击目标池都跳过）；无主化不设保护
 ALTER TABLE world_tiles ADD COLUMN IF NOT EXISTS owner_changed_until timestamptz;
+-- v61（AISLG-165 野地储量）：储量只在 (reserve, reserve_at) 落库，读取 / 结算时惰性推进（见 wilderness-reserve.ts）；
+-- 无值 = 满储量（老地图与新占领的野地无需迁移）。reserve_empty_at 为按当前驻军预计采空的时刻，供 Worker 到点结算。
+ALTER TABLE world_tiles ADD COLUMN IF NOT EXISTS reserve double precision;
+ALTER TABLE world_tiles ADD COLUMN IF NOT EXISTS reserve_at timestamptz;
+ALTER TABLE world_tiles ADD COLUMN IF NOT EXISTS reserve_empty_at timestamptz;
+CREATE INDEX IF NOT EXISTS idx_world_tiles_reserve_empty ON world_tiles (reserve_empty_at) WHERE reserve_empty_at IS NOT NULL;
 
 -- v24（AISLG-48）：未占领野地原住守军的战后存量。无行 = 满编；有行 = 战后幸存守军，
 -- 按每小时恢复基准 25% 惰性回补（读取时按 updated_at 现算，见 common/src/native-garrison.ts）
@@ -696,13 +744,16 @@ export async function ensureSchema(pool: pg.Pool): Promise<void> {
     await client.query(`SELECT pg_advisory_lock(${SCHEMA_LOCK_ID})`);
     for (let attempt = 1; ; attempt += 1) {
       try {
-        await client.query(SCHEMA_SQL + CHAT_SCHEMA_SQL + ARENA_SCHEMA_SQL + HERO_SCHEMA_SQL + STAR_TOWER_SCHEMA_SQL + ANNOUNCEMENT_SCHEMA_SQL);
+        await client.query(SCHEMA_SQL + ALLIANCE_SCHEMA_SQL + CHAT_SCHEMA_SQL + ARENA_SCHEMA_SQL + HERO_SCHEMA_SQL + STAR_TOWER_SCHEMA_SQL + ANNOUNCEMENT_SCHEMA_SQL + SEASON_SCHEMA_SQL);
+        // 赛季（AISLG-134）：seasons 为空时播种第 1 季（幂等，咨询锁内执行）
+        await seedFirstSeason(client);
         return;
       } catch (err) {
-        if ((err as { code?: string }).code !== '40P01' || attempt >= 5) {
+        // 对方可能正在跑十几秒的建图事务（世界锁内），退避总长要盖过它：500ms × (1+…+7) ≈ 14s
+        if ((err as { code?: string }).code !== '40P01' || attempt >= 8) {
           throw err;
         }
-        await new Promise((resolve) => setTimeout(resolve, 300 * attempt));
+        await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
       }
     }
   } finally {

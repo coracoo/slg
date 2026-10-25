@@ -7,5 +7,5 @@
     "sourceMap": false,
     "typeRoots": ["../backend/node_modules/@types"]
   },
-  "include": ["../backend/api/**/*.ts", "../backend/worker/**/*.ts", "../backend/common/**/*.ts", "../backend/scripts/set-time-scale.ts"]
+  "include": ["../backend/api/**/*.ts", "../backend/worker/**/*.ts", "../backend/common/**/*.ts", "../backend/scripts/set-time-scale.ts", "../backend/scripts/season.ts"]
 }

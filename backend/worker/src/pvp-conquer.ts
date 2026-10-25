@@ -22,6 +22,8 @@ import { armyPower, resolveBattle, wallDefensePercent } from '../../common/src/b
 import { defenseExtraPercent } from '../../common/src/tech';
 import { loadTechLevels } from '../../common/src/tech-db';
 import { towerStats } from '../../common/src/building-effects';
+import { loadFamousName } from '../../common/src/famous-effects-db';
+import { famousTowerPercent, famousWallExtraPercent } from '../../common/src/famous-effects';
 import { loadBuildingLevels } from '../../common/src/production';
 import { checkOccupyNpcCity } from '../../common/src/branch-city';
 import { loadBranchStanding } from '../../common/src/branch-city-db';
@@ -51,7 +53,9 @@ import {
   troopsEnterCity,
   type MarchRow,
   type TileNotify,
+  abortForAlly,
 } from './tick-shared';
+import { areAllies } from '../../common/src/alliance-db';
 
 /** 事务内统一时间源 */
 async function dbNow(client: pg.PoolClient): Promise<Date> {
@@ -84,6 +88,11 @@ export async function resolvePvpConquestArrival(
     await abortConquest(client, march, troops, settled, notifies, 'target_gone', null);
     return;
   }
+  // v67（AISLG-182）：出发后目标才成为盟友（同一联盟）：不开战，原路返回
+  if (await areAllies(client, march.account_id, city.account_id)) {
+    await abortForAlly(client, march, troops, settled, notifies);
+    return;
+  }
   // 锁内复核保护 / 免战（与掠夺同规则：新手保护 / 被动免战 / 主动免战）
   if (inNewbieProtection(city.newbie_until, now)) {
     await abortConquest(client, march, troops, settled, notifies, 'NEWBIE_PROTECTED', city.newbie_until);
@@ -105,7 +114,9 @@ export async function resolvePvpConquestArrival(
   for (const row of armyRes.rows as { troop: TroopKind; count: number }[]) {
     garrison[row.troop] = row.count;
   }
-  const wall = wallDefensePercent(levels.wall ?? 0, defenseExtraPercent(await loadTechLevels(client, city.account_id)));
+  // v62（AISLG-166）：守方名城（洛阳）城墙额外减伤、长安箭塔伤害
+  const famousName = await loadFamousName(client, city.id);
+  const wall = wallDefensePercent(levels.wall ?? 0, defenseExtraPercent(await loadTechLevels(client, city.account_id)) + famousWallExtraPercent(famousName));
   const guard = await loadCityGuard(client, city.id);
   const garrisonTotal = Object.values(garrison).reduce((sum, n) => sum + (n ?? 0), 0);
   const guardBonus = battleBonusOf(guard, garrisonTotal);
@@ -113,7 +124,7 @@ export async function resolvePvpConquestArrival(
   const result = resolveBattle(troops, garrison, {
     wallDefensePercent: wall,
     siege: true,
-    tower: towerStats(levels.arrow_tower ?? 0),
+    tower: towerStats(levels.arrow_tower ?? 0, famousTowerPercent(famousName)),
     attackerHero: hero?.engine ?? null,
     defenderHero: guardBonus,
   });
@@ -215,11 +226,7 @@ export async function resolvePvpConquestArrival(
   // 到达复核攻方名额（发起后可能经他城占领 / 失守变化）：名额没了照打、只降城防值
   const standing = await loadBranchStanding(client, march.account_id);
   const fromLevels = await loadBuildingLevels(client, march.from_city_id);
-  const targetGovRes = await client.query(
-    `SELECT COALESCE(g.level, 0)::int AS level FROM city_buildings g WHERE g.city_id = $1 AND g.kind = 'government'`,
-    [city.id],
-  );
-  const targetLevel = targetGovRes.rowCount ? (targetGovRes.rows[0] as { level: number }).level : 0;
+  const targetLevel = (await loadBuildingLevels(client, city.id)).government;
   const denial = checkOccupyNpcCity({
     mainGovernment: standing.mainGovernment,
     fromGovernment: fromLevels.government,

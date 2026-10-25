@@ -19,6 +19,8 @@ import { armyCarryCapacity } from '../../common/src/troops';
 import { carryingPercent, defenseExtraPercent } from '../../common/src/tech';
 import { loadTechLevels } from '../../common/src/tech-db';
 import { towerStats } from '../../common/src/building-effects';
+import { loadFamousName } from '../../common/src/famous-effects-db';
+import { famousTowerPercent, famousWallExtraPercent, famousWarehousePercent } from '../../common/src/famous-effects';
 import { loadBuildingLevels } from '../../common/src/production';
 import { loadByCarry } from '../../common/src/plunder';
 import {
@@ -45,7 +47,9 @@ import {
   settleMarchHero,
   type MarchRow,
   type TileNotify,
+  abortForAlly,
 } from './tick-shared';
+import { areAllies } from '../../common/src/alliance-db';
 
 /** 事务内统一时间源 */
 async function dbNow(client: pg.PoolClient): Promise<Date> {
@@ -91,6 +95,11 @@ export async function resolvePvpPlunderArrival(
     await abortMarchToReturn(client, march, troops, settled, notifies);
     return;
   }
+  // v67（AISLG-182）：出发后目标才成为盟友（同一联盟）：不开战，原路返回
+  if (await areAllies(client, march.account_id, city.account_id)) {
+    await abortForAlly(client, march, troops, settled, notifies);
+    return;
+  }
   // 锁内复核保护 / 免战（同一城多支部队先后到达：前一支攻破触发免战后，后到的扑空返程）
   if (inNewbieProtection(city.newbie_until, now)) {
     await abortProtected(client, march, troops, settled, notifies, 'NEWBIE_PROTECTED', city.newbie_until);
@@ -113,7 +122,9 @@ export async function resolvePvpPlunderArrival(
   for (const row of armyRes.rows as { troop: TroopKind; count: number }[]) {
     garrison[row.troop] = row.count;
   }
-  const wall = wallDefensePercent(levels.wall ?? 0, await defenseBonusOfDefender(client, city.account_id));
+  // v62（AISLG-166）：守方名城（洛阳）城墙额外减伤、长安箭塔伤害，效果跟着被攻城走
+  const famousName = await loadFamousName(client, city.id);
+  const wall = wallDefensePercent(levels.wall ?? 0, (await defenseBonusOfDefender(client, city.account_id)) + famousWallExtraPercent(famousName));
   const guard = await loadCityGuard(client, city.id);
   const garrisonTotal = Object.values(garrison).reduce((sum, n) => sum + (n ?? 0), 0);
   const guardBonus = battleBonusOf(guard, garrisonTotal);
@@ -121,7 +132,7 @@ export async function resolvePvpPlunderArrival(
   const result = resolveBattle(troops, garrison, {
     wallDefensePercent: wall,
     siege: true,
-    tower: towerStats(levels.arrow_tower ?? 0),
+    tower: towerStats(levels.arrow_tower ?? 0, famousTowerPercent(famousName)),
     attackerHero: hero?.engine ?? null,
     defenderHero: guardBonus,
   });
@@ -238,6 +249,7 @@ export async function resolvePvpPlunderArrival(
     levels.warehouse ?? 0,
     attackerGov,
     defenderGov,
+    famousWarehousePercent(famousName),
   );
   const carry = armyCarryCapacity(result.attacker.survivors, carryingPercent(await loadTechLevels(client, march.account_id)));
   const loot = loadByCarry(carry, pool);

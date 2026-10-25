@@ -136,6 +136,11 @@ test('explicit LOGIN registration issues the current session response and binds 
   assert.equal(response.role, 'player');
   assert.equal(response.protocolVersion, PROTOCOL_VERSION);
   assert.equal(response.docNotice, null);
+  assert.deepEqual(response.season, { id: 1, endsAt: '2026-11-22T00:00:00.000Z' });
+  assert.equal(t.transactions.length, 2, 'creation and season entry each retain their own transaction');
+  assert.ok(t.transactions.every((tx) => tx.committed && tx.released && !tx.rolledBack));
+  assert.equal(t.transactions.flatMap((tx) => tx.calls).filter((call) => call.sql.startsWith('INSERT INTO cities ')).length, 1,
+    'new signup enters its season without duplicating the main city');
   assert.match(String(response.sessionToken), /^[A-Za-z0-9_-]{43}$/);
   assert.equal(conn.sessionId, 'session-1');
   assert.deepEqual(t.sessions, [conn.accountId]);

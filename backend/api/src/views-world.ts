@@ -12,25 +12,32 @@ import {
   type TileKind,
   type TileOwnerView,
   type TileProtectionView,
+  type ReserveView,
   type TileView,
   type TroopKind,
 } from '../../common/src/protocol';
 import { armyPower } from '../../common/src/battle';
 import { settleDurability } from '../../common/src/protection';
 import { loadNativeGarrison } from '../../common/src/native-garrison';
+import { advanceTile, effectiveGatherOf, type TileReserveStep } from '../../common/src/wilderness-reserve';
+import { reserveViewFrom } from './reserve-view';
 import { FAMOUS_PRODUCTION_BONUS_PERCENT, famousRecoversAt, famousStage } from '../../common/src/famous-city';
+import { famousEffectView } from '../../common/src/famous-effects';
 import { loadTileArmy, type TileRow } from '../../common/src/world-db';
 import {
   TERRAIN_INFO,
   npcStockTierOf,
   wildernessBonusRate,
-  wildernessGatherRate,
   type NpcCitySnapshot,
 } from '../../common/src/world';
 
 /** 地图查询的联表行：占领者信息、驻军总数与请求账号的侦察快照一并取回 */
 interface TileQueryRow extends TileRow {
+  /** 野地储量（v61）与归属方城池的结算时刻（储量推进到当前时刻须从结算时刻起算） */
+  owner_settled_at?: Date | null;
   owner_account_id: string | null;
+  /** 占领者与请求账号同一联盟（v67，AISLG-182；自己不算盟友） */
+  owner_is_ally?: boolean;
   owner_username: string | null;
   owner_city_name: string | null;
   garrison: number | null;
@@ -68,6 +75,7 @@ interface TileQueryRow extends TileRow {
 const TILE_SELECT = `
   SELECT wt.x, wt.y, wt.terrain, wt.kind, wt.level, wt.owner_city_id, wt.npc, wt.plundered_at,
          c.account_id AS owner_account_id, a.username AS owner_username, c.name AS owner_city_name,
+         (am_me.alliance_id IS NOT NULL AND am_me.alliance_id = am_o.alliance_id AND c.account_id <> $1) AS owner_is_ally,
          c.truce_until AS owner_city_truce_until, a.newbie_until AS owner_newbie_until, a.self_truce_until AS owner_shield_until,
          wt.owner_changed_until, c.durability, c.durability_settled_at,
          c.created_at AS owner_created_at, om.first_created AS owner_main_created_at,
@@ -76,10 +84,13 @@ const TILE_SELECT = `
          si.detail->>'detail' AS intel_detail, si.detail->'garrisonTotal' AS intel_total,
          row_to_json(yc) AS camp_json,
          wt.wild_hero, wt.wild_lead, wt.wild_force, wt.wild_wit,
+         wt.reserve, wt.reserve_at, c.settled_at AS owner_settled_at,
          EXISTS (SELECT 1 FROM famous_heroes fh WHERE fh.name = wt.wild_hero) AS wild_claimed
   FROM world_tiles wt
   LEFT JOIN cities c ON c.id = wt.owner_city_id
   LEFT JOIN accounts a ON a.id = c.account_id
+  LEFT JOIN alliance_members am_me ON am_me.account_id = $1
+  LEFT JOIN alliance_members am_o ON am_o.account_id = c.account_id
   LEFT JOIN (SELECT account_id, MIN(created_at) AS first_created FROM cities GROUP BY account_id) om
     ON om.account_id = c.account_id
   LEFT JOIN (SELECT x, y, sum(count) AS total FROM tile_army GROUP BY x, y) ta
@@ -117,6 +128,7 @@ function famousView(row: TileQueryRow): FamousTileView | null {
     stage: famousStage(famous, now),
     bonusPercent: FAMOUS_PRODUCTION_BONUS_PERCENT,
     recoversAt: recoversAt ? recoversAt.toISOString() : null,
+    effect: famousEffectView(famous.name),
   };
 }
 
@@ -180,6 +192,7 @@ export function tileView(row: TileQueryRow, requesterAccountId?: string): TileVi
       username: row.owner_username,
       cityId: row.owner_city_id,
       cityName: row.owner_city_name,
+      ally: row.owner_is_ally === true,
     };
   }
   // NPC 城池库存档位（v23 AISLG-55）：对全服可见（只给档位不给数值，精确值走侦察）
@@ -201,7 +214,36 @@ export function tileView(row: TileQueryRow, requesterAccountId?: string): TileVi
     protection: protectionView(row, requesterAccountId),
     durability: durabilityView(row, requesterAccountId),
     wildFamous: wildFamousMarked(row),
+    reserve: reserveOf(row, garrison, requesterAccountId),
   };
+}
+
+/**
+ * 野地储量视图（v61，AISLG-165）：只对野地有值。档位对所有人可见；数值与预计时刻仅归属方与侦察过该地块的账号可见。
+ * 推进口径：有主地块从归属方的结算时刻起算（采集只在归属期间发生），无主地块只按恢复计算。
+ */
+function reserveOf(row: TileQueryRow, garrison: number, requesterAccountId?: string): ReserveView | null {
+  const step = reserveStepOf(row, garrison);
+  if (!step) {
+    return null;
+  }
+  const visible = (Boolean(row.owner_city_id) && row.owner_account_id === requesterAccountId) || row.intel_at != null;
+  return reserveViewFrom(step, visible);
+}
+
+/** 野地的当前储量推进结果（只读；非野地为 null）。归属方地块从其结算时刻起算，无主地块只按恢复计算 */
+function reserveStepOf(row: TileQueryRow, garrison: number): TileReserveStep | null {
+  if (row.kind !== 'wilderness' || !isTerrain(row.terrain)) {
+    return null;
+  }
+  const owned = Boolean(row.owner_city_id);
+  const now = new Date();
+  return advanceTile(
+    { x: row.x, y: row.y, terrain: row.terrain, level: row.level, garrison, reserve: row.reserve, reserve_at: row.reserve_at },
+    owned ? (row.owner_settled_at ?? now) : now,
+    now,
+    owned,
+  );
 }
 
 /** 在野名将标记（v54）：落位在此且尚未被获得（获得后标记撤下，名将归属见 GET_HEROES） */
@@ -268,6 +310,7 @@ export async function loadTileDetail(
   // 侦察过的地块一律给出最近一次快照时间（v23，AISLG-62：此前仅 NPC 城池返回；
   // 字段原本就有，只是把 scout_intel 的联表值对非 NPC 地块也透出，无新增字段）
   const scoutedAt = row.intel_at ? row.intel_at.toISOString() : null;
+  const reserveStep = reserveStepOf(row, garrisonTotal);
   const detail: TileDetailView = {
     ...view,
     garrisonDetail: row.kind === 'npc_city' ? (npcView ? npcView.garrison : emptyArmy()) : tileGarrison,
@@ -281,8 +324,8 @@ export async function loadTileDetail(
         ? {
             resource: TERRAIN_INFO[row.terrain].resource,
             bonusRate: wildernessBonusRate(row.terrain, row.level),
-            gatherRate: row.owner_city_id
-              ? wildernessGatherRate(row.terrain, row.level, garrisonTotal)
+            gatherRate: row.owner_city_id && reserveStep
+              ? Math.round(effectiveGatherOf(reserveStep.reserve, reserveStep.cap, reserveStep.drain))
               : 0,
           }
         : null,

@@ -137,6 +137,14 @@ export const ARMY_COPY_EN = {
     supply_wagon: 'Logistics',
     ballista: 'Siege engine',
     siege_ram: 'Siege',
+    yulin_guard: 'Famous Heavy',
+    danyang_soldier: 'Famous Heavy',
+    baimao_soldier: 'Famous Spear',
+    huwei_guard: 'Famous Spear',
+    zhuge_crossbow: 'Famous Ranged',
+    xiandeng_warrior: 'Famous Ranged',
+    hubao_cavalry: 'Famous Cavalry',
+    xiliang_cavalry: 'Famous Cavalry',
   } as Record<string, string>,
 } satisfies typeof ARMY_COPY;
 
@@ -146,6 +154,7 @@ export const INTEL_COPY_EN = {
   agentLogTitle: 'Agent Activity Log',
   agentLogMeta: (n: number) => `${n} entries`,
   agentLogEmpty: 'The Agent has not taken any actions yet',
+  eventsEmptyWithoutAgent: 'No player or system activity yet; Agent actions are on the Agent page',
   noAgentReport: 'The Agent has not left a daily report yet',
   offlineLoading: 'Loading daily report…',
   fullReport: 'View full report',

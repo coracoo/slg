@@ -2,8 +2,8 @@
 // 按需查询与服务端推送同步。协议语义见 docs/agent-api.md（协议版本 11）。
 // 网页端固定以玩家（player）身份登录；Agent 由玩家另行用协议接入，不经本界面。
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ApiClient } from '../api/client';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ApiClient, ConnectionError } from '../api/client';
 import { passwordLoginData, passwordSignupErrorText } from '../api/passwordLogin';
 import {
   Op,
@@ -37,6 +37,9 @@ import {
   type HeroStatePushData,
   type TileStatePushData,
   type TroopKind,
+  type SeasonPushData,
+  type PushAllianceStateData,
+  type PushAllianceMarkData,
 } from '../api/protocol';
 import { buildErrorText, formatClock, loginErrorText, renameErrorText, toSessionEvent } from '../api/mapping';
 import { useAccountSecurity, type AccountSecurity } from './useAccountSecurity';
@@ -69,6 +72,10 @@ import { useChat, type ChatState } from './useChat';
 import { useAnnouncements, type AnnouncementSlice } from './announcements';
 import { emitBattleCommentPatched } from './battleReportModal';
 import { useCityList, type CityList } from './useCityList';
+import { useSeasonSession, type SeasonSession } from './seasonSession';
+import { useAllianceSession, type AllianceSession } from './allianceSession';
+import { useAllianceMarks, type AllianceMarksSession } from './allianceMarks';
+import { useHallOfFame, type HallOfFameSession } from './hallOfFame';
 
 /** 断线自动重连间隔（毫秒） */
 const RECONNECT_DELAY_MS = 3000;
@@ -174,6 +181,13 @@ export interface GameSession {
   chat: ChatState;
   /** 公告（v60 AISLG-162）：红点、列表 / 往期 / 正文、强提醒弹窗队列 */
   announcements: AnnouncementSlice;
+  /** 联盟（v66 起，AISLG-186 F1）：我的联盟 / 列表 / 管理操作 / 面板开合与红点 */
+  alliance: AllianceSession;
+  allianceMarks: AllianceMarksSession;
+  /** 赛季（v65 AISLG-134）：当前赛季 / 荣誉 / 预告弹窗 / 换季遮罩与新赛季提示 */
+  season: SeasonSession;
+  /** 名人堂（v65 AISLG-134）：赛季列表 / 榜种 / 分页累积 */
+  hallOfFame: HallOfFameSession;
   /** 移动目标会话（v28 AISLG-78）：流寇 / 运粮商队列表 */
   moving: MovingTargetsSession;
   /** 黄巾之乱会话（v29 AISLG-76）：事件进度 / 营地 / 我的贡献 / 贡献榜 */
@@ -225,6 +239,8 @@ export function useGameSession(): GameSession {
   // 事件列表的 ref 镜像：翻页游标要在动作回调里读最新值，避免闭包拿到旧渲染快照
   const eventsRef = useRef<SessionEvent[]>([]);
   const loadingOlderRef = useRef(false);
+  // 上一次「加载更早」用的游标：同一游标不重复请求（返回的还是同一页，会让自动补页卡死）；失败 / 重置时清空
+  const olderCursorRef = useRef<number | null>(null);
   const logoutIntentRef = useRef(false);
   const reconnectTimerRef = useRef<number | null>(null);
   const syncTimerRef = useRef<number | null>(null);
@@ -278,6 +294,8 @@ export function useGameSession(): GameSession {
       }
       lastEventIdRef.current = Math.max(lastEventIdRef.current, ...views.map((v) => v.id));
       if (initial) {
+        // 列表整体换成最新一页：之前的「加载更早」游标记录作废，否则可能误拦合法的补页
+        olderCursorRef.current = null;
         // 服务端按 id 倒序返回；界面按时间正序存放，渲染时再倒转
         setEvents(views.slice().reverse().map(toSessionEvent));
       } else {
@@ -383,10 +401,27 @@ export function useGameSession(): GameSession {
 
   // 会话扩展切片（v23）：离线日报 / 全服播报 / 排行榜——状态与动作拆在 session-extras
   const extras = useSessionExtras(clientRef);
-  const chat = useChat({ clientRef, online: connection === 'online', accountId: account?.accountId ?? null });
+  // 联盟切片（AISLG-186 F1）：连接建立时拉取我的联盟，PUSH_ALLIANCE_STATE 到达时重拉；登出时清空。
+  // 放在聊天之前：联盟频道要知道我当前的联盟 id
+  const alliance = useAllianceSession(clientRef, connection === 'online');
+  const { clear: allianceClear, onPush: onAlliancePush } = alliance;
+  // 联盟地图标记（AISLG-184 / F2）：随所在联盟加载；PUSH_ALLIANCE_MARK 增量合并；离盟 / 登出清空
+  const allianceMarks = useAllianceMarks(clientRef, connection === 'online', alliance.state?.alliance?.id ?? null, alliance.state?.myRole ?? null);
+  const { clear: allianceMarksClear, onPush: onAllianceMarkPush } = allianceMarks;
+  const chat = useChat({
+    clientRef,
+    online: connection === 'online',
+    accountId: account?.accountId ?? null,
+    allianceId: alliance.state?.alliance?.id ?? null,
+  });
   const announcements = useAnnouncements(clientRef);
   const { refresh: refreshAnnouncements, onPush: onAnnouncementPush, reset: resetAnnouncements } = announcements;
   const { checkOfflineReportRef, fetchServerBroadcasts, onBroadcastPush, onNpcWarningPush, resetNpcWarnings } = extras;
+  // 赛季切片（v65 AISLG-134）：换季预告 / 维护遮罩 / 新赛季重连收尾；名人堂切片：打开页签时按需拉取
+  const season = useSeasonSession(clientRef, connection === 'online');
+  const { applyLogin: applySeasonLogin, onPush: onSeasonPush, onMaintenance: onSeasonMaintenance, refresh: refreshSeason, clear: seasonClear } = season;
+  const hallOfFame = useHallOfFame(clientRef);
+  const { clear: hallClear } = hallOfFame;
 
   /** 推送先做乐观更新，再防抖走一轮按需查询对齐权威状态 */
   const handlePush = useCallback(
@@ -440,6 +475,18 @@ export function useGameSession(): GameSession {
       } else if (frame.op === Op.PUSH_YELLOW_TURBAN_STATE) {
         // v29（AISLG-76）：黄巾之乱起事 / 进度 / 老巢出现 / 收场（全服广播，与账号状态无关）
         onYtPush();
+        return;
+      } else if (frame.op === Op.PUSH_SEASON) {
+        // v65（AISLG-134）：赛季预告 / 换季遮罩 / 新赛季开始（断线重连由连接关闭流程接管）
+        onSeasonPush(frame.data as unknown as SeasonPushData);
+        return;
+      } else if (frame.op === Op.PUSH_ALLIANCE_STATE) {
+        // 联盟状态变化（AISLG-186）：面板与红点的数据整体重拉
+        onAlliancePush(frame.data as unknown as PushAllianceStateData);
+        return;
+      } else if (frame.op === Op.PUSH_ALLIANCE_MARK) {
+        // 联盟地图标记变化（AISLG-184）：增量并入标记列表，不触发按需查询
+        onAllianceMarkPush(frame.data as unknown as PushAllianceMarkData);
         return;
       } else if (frame.op === Op.PUSH_ANNOUNCEMENT) {
         // v60（AISLG-162）：新公告——重拉列表与红点；强提醒在切片内弹窗（不记本地事件）
@@ -511,7 +558,7 @@ export function useGameSession(): GameSession {
       }
       scheduleSync();
     },
-    [scheduleSync, syncAll, onMarchPush, onTilePush, onBattleReportPush, onBattleReportCommentPush, onBroadcastPush, onNpcWarningPush, onTechPush, onArenaPush, onHeroPush, onMovingPush, onYtPush, onAnnouncementPush],
+    [scheduleSync, syncAll, onMarchPush, onTilePush, onBattleReportPush, onBattleReportCommentPush, onBroadcastPush, onNpcWarningPush, onTechPush, onArenaPush, onHeroPush, onMovingPush, onYtPush, onAnnouncementPush, onSeasonPush, onAlliancePush, onAllianceMarkPush],
   );
 
   const ensureClient = useCallback((): ApiClient => {
@@ -528,9 +575,11 @@ export function useGameSession(): GameSession {
       appendLocalEvent('system', getCopy().COPY.session.disconnected);
       reconnectTriggerRef.current();
     };
+    // v65（AISLG-134）：换季维护中的请求返回 MAINTENANCE，改为遮罩并稍后确认
+    client.onMaintenance = (retryAfterSec) => onSeasonMaintenance(retryAfterSec);
     clientRef.current = client;
     return client;
-  }, [handlePush, appendLocalEvent]);
+  }, [handlePush, appendLocalEvent, onSeasonMaintenance]);
 
   /** 回到未登录表单；可选地清掉连接并给出提示 */
   const resetToLoginForm = useCallback(
@@ -546,6 +595,7 @@ export function useGameSession(): GameSession {
       setEventsExhausted(false);
       setEventsLoadingOlder(false);
       loadingOlderRef.current = false;
+      olderCursorRef.current = null;
       setBuildError(null);
       setRecruitError(null);
       setLoginError(message);
@@ -560,11 +610,43 @@ export function useGameSession(): GameSession {
       movingClear();
       ytClear();
       questClear();
+      seasonClear();
+      hallClear();
+      allianceClear();
+      allianceMarksClear();
       clientRef.current?.close();
       clientRef.current = null;
     },
-    [clearTimers, worldClear, techClear, arenaClear, starTowerClear, heroClear, movingClear, ytClear, questClear, resetCityList],
+    [clearTimers, worldClear, techClear, arenaClear, starTowerClear, heroClear, movingClear, ytClear, questClear, resetCityList, seasonClear, hallClear],
   );
+
+  /** 清空游戏态缓存（登录 / 新赛季重连前调用）：世界、科技、竞技场等切片与事件流都回到初始状态 */
+  const clearGameCaches = useCallback(() => {
+    resetCityList();
+    setCity(null);
+    setAgent(null);
+    setEvents([]);
+    setEventsExhausted(false);
+    setEventsLoadingOlder(false);
+    loadingOlderRef.current = false;
+    olderCursorRef.current = null;
+    setBuildError(null);
+    setRecruitError(null);
+    lastEventIdRef.current = 0;
+    resetNpcWarnings();
+    resetAnnouncements();
+    worldClear();
+    techClear();
+    arenaClear();
+    starTowerClear();
+    heroClear();
+    movingClear();
+    ytClear();
+    questClear();
+    hallClear();
+    allianceClear();
+    allianceMarksClear();
+  }, [resetCityList, resetNpcWarnings, resetAnnouncements, worldClear, techClear, arenaClear, starTowerClear, heroClear, movingClear, ytClear, questClear, hallClear, allianceClear, allianceMarksClear]);
 
   const scheduleReconnect = useCallback(() => {
     if (reconnectTimerRef.current !== null || !aliveRef.current) {
@@ -602,24 +684,32 @@ export function useGameSession(): GameSession {
       }
       const data = res.data as unknown as LoginResultData;
       saveStoredToken(data.sessionToken);
+      // v65（AISLG-134）：赛季换了（新赛季开始后的重连）时清空上一赛季的缓存，整体重拉
+      const seasonChanged = data.season ? applySeasonLogin(data.season) : false;
       setConnection('online');
+      if (seasonChanged) {
+        clearGameCaches();
+      }
       appendLocalEvent('system', COPY.session.reconnected);
-      await syncAll('incremental');
+      await syncAll(seasonChanged ? 'initial' : 'incremental');
+      void refreshSeason();
       void checkOfflineReportRef.current();
       void fetchServerBroadcasts();
       void refreshAnnouncements(true);
     } catch {
       scheduleReconnect();
     }
-  }, [ensureClient, scheduleReconnect, resetToLoginForm, appendLocalEvent, syncAll]);
+  }, [ensureClient, scheduleReconnect, resetToLoginForm, appendLocalEvent, syncAll, applySeasonLogin, clearGameCaches, refreshSeason]);
 
   useEffect(() => {
     attemptReconnectRef.current = attemptReconnect;
     reconnectTriggerRef.current = scheduleReconnect;
   });
 
-  // 事件列表镜像：翻页/增量动作在回调里读最新值，避免闭包拿到旧渲染快照
-  useEffect(() => {
+  // 事件列表镜像：翻页/增量动作在回调里读最新值，避免闭包拿到旧渲染快照。
+  // 必须用 useLayoutEffect：子组件（PagedList 的自动补页）的 useEffect 先于父级的 useEffect 执行，
+  // 用 useEffect 会让补页读到上一版列表、用旧游标重复请求同一页；布局 effect 全部先于被动 effect
+  useLayoutEffect(() => {
     eventsRef.current = events;
   }, [events]);
 
@@ -640,26 +730,8 @@ export function useGameSession(): GameSession {
     setAccount(info);
     setConnection('online');
     setLoginError(null);
-    setCity(null);
-    setAgent(null);
-    setEvents([]);
-    setEventsExhausted(false);
-    setEventsLoadingOlder(false);
-    loadingOlderRef.current = false;
-    setBuildError(null);
-    setRecruitError(null);
-    lastEventIdRef.current = 0;
-    resetNpcWarnings();
-    resetAnnouncements();
-    worldClear();
-    techClear();
-    arenaClear();
-    starTowerClear();
-    heroClear();
-    movingClear();
-    ytClear();
-    questClear();
-  }, [worldClear, techClear, arenaClear, starTowerClear, heroClear, movingClear, ytClear, questClear, resetNpcWarnings, resetAnnouncements]);
+    clearGameCaches();
+  }, [clearGameCaches]);
 
   const login = useCallback(
     async (username: string, password: string, register = false) => {
@@ -682,8 +754,12 @@ export function useGameSession(): GameSession {
         saveStoredToken(data.sessionToken);
         saveLastUsername(username);
         setLastUsername(username);
+        if (data.season) {
+          applySeasonLogin(data.season);
+        }
         applyLoginResult(data);
         await syncAll('initial');
+        void refreshSeason();
         void checkOfflineReportRef.current();
         void fetchServerBroadcasts();
         void refreshAnnouncements(true);
@@ -696,7 +772,7 @@ export function useGameSession(): GameSession {
         setLoginBusy(false);
       }
     },
-    [ensureClient, applyLoginResult, syncAll, appendLocalEvent],
+    [ensureClient, applyLoginResult, syncAll, appendLocalEvent, applySeasonLogin, refreshSeason],
   );
 
   /** 页面加载时的令牌自动登录；网络失败保留令牌，会话失效则清除并回落表单 */
@@ -716,8 +792,12 @@ export function useGameSession(): GameSession {
         }
         const data = res.data as unknown as LoginResultData;
         saveStoredToken(data.sessionToken);
+        if (data.season) {
+          applySeasonLogin(data.season);
+        }
         applyLoginResult(data);
         await syncAll('initial');
+        void refreshSeason();
         void checkOfflineReportRef.current();
         void fetchServerBroadcasts();
         void refreshAnnouncements(true);
@@ -742,7 +822,7 @@ export function useGameSession(): GameSession {
         );
       }
     },
-    [ensureClient, applyLoginResult, syncAll, appendLocalEvent],
+    [ensureClient, applyLoginResult, syncAll, appendLocalEvent, applySeasonLogin, refreshSeason],
   );
 
   // 微信扫码登录（v43）：二维码需要一条已连接但尚未登录的连接；扫码确认后拿到的会话令牌走原有令牌登录
@@ -806,7 +886,12 @@ export function useGameSession(): GameSession {
         await tokenLogin(sessionToken, 'github');
       } catch (err) {
         setConnection('idle');
-        setLoginError(err instanceof Error ? err.message : COPY.errors.login.fallback);
+        // 超时 / 连接断开：登录码可能已被服务端用掉，原始报错对玩家没有用，统一提示重新点 GitHub 登录
+        if (err instanceof ConnectionError) {
+          setLoginError(GITHUB_COPY.errors.interrupted);
+        } else {
+          setLoginError(err instanceof Error ? err.message : COPY.errors.login.fallback);
+        }
       } finally {
         setLoginBusy(false);
       }
@@ -1092,18 +1177,31 @@ export function useGameSession(): GameSession {
     if (!client?.connected || !accountRef.current || loadingOlderRef.current || eventsExhausted) {
       return;
     }
+    // 窗口已满（MAX_EVENTS）时，合并进来的更早条目会被上限截掉（截的正是刚拉到的最旧部分），游标不前进；
+    // 直接视为没有更早可看，避免自动补页时反复请求同一段历史
+    if (eventsRef.current.length >= MAX_EVENTS) {
+      setEventsExhausted(true);
+      return;
+    }
     const serverIds = eventsRef.current.map((event) => event.id).filter((id) => id > 0);
     if (serverIds.length === 0) {
       return;
     }
+    const cursor = Math.min(...serverIds);
+    // 同一游标已经请求过（成功后游标必然前移）：再请求只会拿回同一页，直接跳过
+    if (olderCursorRef.current === cursor) {
+      return;
+    }
+    olderCursorRef.current = cursor;
     loadingOlderRef.current = true;
     setEventsLoadingOlder(true);
     try {
       const res = await client.request(Op.GET_EVENTS, {
         limit: EVENTS_PAGE_SIZE,
-        beforeId: Math.min(...serverIds),
+        beforeId: cursor,
       });
       if (!res.ok) {
+        olderCursorRef.current = null;
         return;
       }
       const views = (field<EventView[]>(res.data, 'events') ?? []) as EventView[];
@@ -1122,7 +1220,8 @@ export function useGameSession(): GameSession {
         return next.length > MAX_EVENTS ? next.slice(next.length - MAX_EVENTS) : next;
       });
     } catch {
-      // 网络异常：保持现状，下次滚动到底再试
+      // 网络异常：保持现状，清掉游标记录以便再试
+      olderCursorRef.current = null;
     } finally {
       loadingOlderRef.current = false;
       setEventsLoadingOlder(false);
@@ -1178,6 +1277,10 @@ export function useGameSession(): GameSession {
     questSession,
     chat,
     announcements,
+    alliance,
+    allianceMarks,
+    season,
+    hallOfFame,
     moving,
     yellowTurban,
     loadOlderEvents,

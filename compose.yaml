@@ -19,6 +19,9 @@ x-backend: &backend
     HOST: 0.0.0.0
     PORT: '8080'
     LOG_LEVEL: ${LOG_LEVEL:-info}
+    SEASON_1_START: ${SEASON_1_START:-}
+    SEASON_1_END: ${SEASON_1_END:-}
+    SEASON_LENGTH_DAYS: ${SEASON_LENGTH_DAYS:-28}
   depends_on:
     db:
       condition: service_healthy

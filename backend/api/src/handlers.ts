@@ -36,6 +36,8 @@ import {
 } from './handlers-world';
 import { handleGetMapOverview } from './map-overview';
 import { handleAnnouncementOp } from './handlers-announcement';
+import { handleAllianceOp } from './handlers-alliance';
+import { handleAllianceMarkOp } from './handlers-alliance-mark';
 import { readMarchParams } from './march-target';
 import { handleGetMovingTargets } from './handlers-moving';
 import { handleGetYellowTurban } from './handlers-yt';
@@ -62,11 +64,14 @@ import { handleChatOp } from './handlers-chat';
 import { handleClaimDaily, handleGetDaily, handleGetSignin, handleSignin } from './handlers-quest';
 import { handleClaimActivity, handleClaimQuest, handleGetActivities, handleGetQuests } from './handlers-quests';
 import { handleGetLeaderboard } from './handlers-leaderboard';
+import { effectiveLevelSql } from '../../common/src/production';
 import { handleAgentDailyReport, handleGetOfflineReport, markPlayerOffline } from './handlers-offline';
 import { loadCityState } from './views';
 import { CITY_SCOPED_OPS, runWithCity } from './city-scope';
 import { handleDiscardCity } from './handlers-discard';
 import { BRANCH_MIN_GOVERNMENT, branchCityLimit } from '../../common/src/branch-city';
+import { handleGetHallOfFame, handleGetSeason, respondMaintenance } from './handlers-season';
+import { maintenanceActive } from './maintenance-gate';
 
 export interface HandlerContext {
   pool: pg.Pool;
@@ -88,6 +93,9 @@ export interface HandlerContext {
  *  Google 登录（GOOGLE_BIND 在处理器内要求玩家已登录）与 GitHub 授权 / 一次性码兑换
  * （GITHUB_AUTH_START 的 bind 用途在处理器内要求玩家已登录） */
 const PRE_AUTH_OPS: ReadonlySet<number> = new Set([Op.LOGIN, Op.WX_QR_CREATE, Op.WX_SCAN, Op.WX_CONFIRM, Op.WX_CANCEL, Op.GOOGLE_LOGIN, Op.GITHUB_AUTH_START, Op.OAUTH_REDEEM]);
+
+/** 换季维护期间仍可发送的协议（v65）：登录相关、LOGOUT 与 GET_SEASON；其余游戏类请求返回 MAINTENANCE */
+const MAINTENANCE_EXEMPT_OPS: ReadonlySet<number> = new Set([...PRE_AUTH_OPS, Op.LOGOUT, Op.GET_SEASON]);
 
 /** 消息入口：解析帧并路由；任何处理异常都转成错误响应，不让连接中断。 */
 export async function handleMessage(ctx: HandlerContext, conn: ConnInfo, raw: string): Promise<void> {
@@ -127,6 +135,11 @@ export async function handleMessage(ctx: HandlerContext, conn: ConnInfo, raw: st
   }
 
   try {
+    // v65（AISLG-134）：换季维护态下拒绝游戏类协议（维护态缓存约 2 秒，见 maintenance-gate.ts）
+    if (!MAINTENANCE_EXEMPT_OPS.has(op) && (await maintenanceActive(ctx.pool))) {
+      respondMaintenance(ctx, conn, op, seq);
+      return;
+    }
     // v24（AISLG-58）：城池类协议可选带 cityId（缺省 = 主城）；归属校验失败按参数错误拒绝
     let cityId: string | undefined;
     if (CITY_SCOPED_OPS.has(op) && data?.cityId !== undefined && data?.cityId !== null) {
@@ -186,6 +199,24 @@ async function dispatchOp(
     case Op.GET_ANNOUNCEMENT:
     case Op.READ_ANNOUNCEMENT:
       await handleAnnouncementOp(ctx, conn, op, seq, data);
+      break;
+    case Op.CREATE_ALLIANCE:
+    case Op.GET_ALLIANCE:
+    case Op.LIST_ALLIANCES:
+    case Op.ALLIANCE_APPLY:
+    case Op.ALLIANCE_INVITE:
+    case Op.ALLIANCE_RESPOND:
+    case Op.ALLIANCE_LEAVE:
+    case Op.ALLIANCE_DISBAND:
+    case Op.ALLIANCE_KICK:
+    case Op.ALLIANCE_SET_ROLE:
+    case Op.ALLIANCE_SET_NOTICE:
+      await handleAllianceOp(ctx, conn, op, seq, data);
+      break;
+    case Op.ALLIANCE_MARK_ADD:
+    case Op.ALLIANCE_MARK_REMOVE:
+    case Op.GET_ALLIANCE_MARKS:
+      await handleAllianceMarkOp(ctx, conn, op, seq, data);
       break;
     case Op.GET_TILE: {
       const x = data?.x;
@@ -441,6 +472,12 @@ async function dispatchOp(
     case Op.CLAIM_ACTIVITY:
       await handleClaimActivity(ctx, conn, op, seq, data);
       break;
+    case Op.GET_SEASON:
+      await handleGetSeason(ctx, conn, op, seq);
+      break;
+    case Op.GET_HALL_OF_FAME:
+      await handleGetHallOfFame(ctx, conn, op, seq, data);
+      break;
     case Op.BUILD_FARM:
       // 兼容入口（协议 v2 及以前）：等价于 BUILD 且 kind='farm'，忽略请求参数
       await handleBuild(ctx, conn, op, seq, 'farm');
@@ -466,7 +503,7 @@ async function handleGetState(
   // v12：附带账号全部城池（主城在前；占领 NPC 城池后出现分城），供客户端定位与展示；
   // v24（AISLG-58）：level = 各城官府等级；branch 给出分城名额与占领门槛
   const citiesRes = await ctx.pool.query(
-    `SELECT c.id, c.name, COALESCE(g.level, 0)::int AS level, c.x, c.y
+    `SELECT c.id, c.name, COALESCE(${effectiveLevelSql('g.level', "'government'", 'c.famous_name')}, 0)::int AS level, c.x, c.y
      FROM cities c LEFT JOIN city_buildings g ON g.city_id = c.id AND g.kind = 'government'
      WHERE c.account_id = $1 ORDER BY c.created_at`,
     [accountId],
