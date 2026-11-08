@@ -1,7 +1,7 @@
 /** 已登录外壳（方案 D「导航工作区」）：侧栏 + 顶栏 + 单页工作区 + 底栏。工作区一次只放一页，每页是固定单屏网格，
  *  内容放不下就分页 / 截断，任何窗口尺寸都不出现竖向滚动条。账号相关确认框在这里挂载。 */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useGame } from '../../state/GameContext';
 import { useNav } from '../../state/NavContext';
 import { activeMarches } from '../../state/progressItems';
@@ -14,6 +14,8 @@ import { MapPage } from '../pages/MapPage';
 import { OverviewPage } from '../pages/OverviewPage';
 import { StarTowerPage } from '../pages/StarTowerPage';
 import { AccountDialogs, type AccountDialogMode } from './AccountDialogs';
+import { BattlefieldModal } from '../BattlefieldModal';
+import { MarketModal } from '../MarketModal';
 import { BottomBar } from './BottomBar';
 import { ChatWindow } from '../chat/ChatWindow';
 import { Sidebar, type NavBadges } from './Sidebar';
@@ -22,10 +24,20 @@ import { SeasonOverlay } from '../season/SeasonOverlay';
 
 export function AppShell() {
   const { session, incoming, openWarning, openLeaderboard } = useGame();
-  const { page, go, seenReportId } = useNav();
+  const { page, go, seenReportId, requestExchange, battlefieldAsk } = useNav();
   const [dialog, setDialog] = useState<AccountDialogMode | null>(null);
-  const [exchangeRequest, setExchangeRequest] = useState(0);
+  const [battlefieldOpen, setBattlefieldOpen] = useState(false);
+  // 施计弹窗里的「去战场商店兑换」：请求 id 变化即打开剧本战场（商店在里面）
+  useEffect(() => {
+    if (battlefieldAsk.id > 0) {
+      setBattlefieldOpen(true);
+      void session.battlefield.fetchState();
+      void session.stratagem.fetch();
+    }
+  }, [battlefieldAsk.id, session.battlefield]);
+  const [marketOpen, setMarketOpen] = useState(false);
   const city = session.city;
+  const onSelectCity = (cityId: string) => void session.switchCity(cityId);
 
   // 导航角标（docs 第 4 节）：总览 = NPC 来袭数（红）；城池 = 建造队列条数；军队 = 在外行军数；
   // 养成 = 进行中的研究数；情报 = 进入情报页后新到的战报数；Agent 无
@@ -46,7 +58,7 @@ export function AppShell() {
         badges={badges}
         cityList={session.cityList}
         switching={city === null}
-        onSelectCity={(cityId) => void session.switchCity(cityId)}
+        onSelectCity={onSelectCity}
         account={session.account?.username ?? null}
         connection={session.connection}
         cityLoaded={city !== null}
@@ -55,7 +67,9 @@ export function AppShell() {
         onSwitchAccount={() => setDialog('switch')}
         onReset={() => setDialog('reset')}
         onDiscardBranch={() => setDialog('discard')}
-        onExchange={() => setExchangeRequest((n) => n + 1)}
+        onMoveCity={() => setDialog('move')}
+        onSetCapital={() => setDialog('capital')}
+        onExchange={() => requestExchange()}
         onLeaderboard={() => openLeaderboard()}
         chatOpen={session.chat.open}
         chatUnread={session.chat.unreadTotal}
@@ -64,6 +78,7 @@ export function AppShell() {
         onOpenAnnouncements={session.announcements.openList}
         allianceBadge={session.alliance.badge}
         onOpenAlliance={session.alliance.openPanel}
+        onOpenItems={session.items.openPanel}
       />
       <TopBar
         page={page}
@@ -72,9 +87,21 @@ export function AppShell() {
         onOpenWarning={openWarning}
         onOpenLeaderboard={() => openLeaderboard()}
         onExchange={session.exchangeGold}
-        exchangeRequest={exchangeRequest}
         onStartTruce={session.startTruce}
+        onCancelTruce={session.cancelTruce}
         season={session.season.info}
+        cityList={session.cityList}
+        onSelectCity={onSelectCity}
+        switching={city === null}
+        battlefield={session.battlefield.state?.event ?? null}
+        onOpenBattlefield={() => {
+          setBattlefieldOpen(true);
+          // v86（AISLG-211）：商店里的计谋令行要显示持有数 / 上限
+          if (session.stratagem.state === null) {
+            void session.stratagem.fetch();
+          }
+        }}
+        onOpenMarket={() => setMarketOpen(true)}
       />
       <main role="导航-工作区" className="nav-work">
         {page === 'overview' ? <OverviewPage /> : null}
@@ -96,6 +123,8 @@ export function AppShell() {
         onOpenAlliance={session.alliance.openPanel}
       />
       <ChatWindow />
+      {battlefieldOpen ? <BattlefieldModal onClose={() => setBattlefieldOpen(false)} /> : null}
+      {marketOpen ? <MarketModal onClose={() => setMarketOpen(false)} /> : null}
       <SeasonOverlay season={session.season} />
       {dialog ? (
         <AccountDialogs
@@ -106,6 +135,22 @@ export function AppShell() {
           onResetAccount={session.resetAccount}
           onRenameCity={session.renameCity}
           onDiscardCity={() => session.discardCity(city?.id ?? '')}
+          cityId={city?.id ?? null}
+          cityList={session.cityList}
+          timeScale={city?.timeScale ?? 1}
+          onSetCapital={session.setCapital}
+          moveCityView={session.cityList.moveCity}
+          items={session.cityList.items}
+          moveCity={session.moveCity}
+          onPickMoveOnMap={(cityId) => {
+            session.moveCity.startPick(cityId);
+            setDialog(null);
+            go('map');
+          }}
+          onBuyItems={() => {
+            setDialog(null);
+            session.items.openPanel();
+          }}
         />
       ) : null}
     </div>

@@ -37,7 +37,7 @@
 
 **清空（世界级）**：`world_tiles`、`tile_army`、`native_garrison_state`、`famous_cities`、`npc_attacks`、`moving_targets`、`yt_events`、`yt_camps`、`yt_contrib`、`city_discards`。
 
-**清空（账号级游戏态）**：`cities`、`city_buildings`、`city_army`、`builds`、`recruits`、`marches`、`battle_reports`、`scout_intel`、`events`、`account_techs`、`tech_research`、`account_heroes`、`tavern_candidates`、`famous_heroes`、`hero_unlocks`、`hero_friendship`、`arena_entries`、`arena_daily`、`arena_matches`、`star_tower_progress`、`star_tower_matches`、`quest_claims`、`quest_claims_once`、`signin_state`、`agent_plans`、`agent_daily_reports`、`win_streaks`、`leaderboard_snapshots`、`leaderboard_model_snapshots`、`server_broadcasts`、`chat_messages`、`chat_reads`。
+**清空（账号级游戏态）**：`cities`、`capital_swaps`、`city_buildings`、`city_army`、`builds`、`recruits`、`marches`、`battle_reports`、`scout_intel`、`events`、`account_techs`、`tech_research`、`account_heroes`、`tavern_candidates`、`famous_heroes`、`hero_unlocks`、`hero_friendship`、`arena_entries`、`arena_daily`、`arena_matches`、`star_tower_progress`、`star_tower_matches`、`quest_claims`、`quest_claims_once`、`signin_state`、`agent_plans`、`agent_daily_reports`、`win_streaks`、`leaderboard_snapshots`、`leaderboard_model_snapshots`、`server_broadcasts`、`chat_messages`、`chat_reads`。
 
 **清空后要重建**：世界地块（`generateWorldTiles`，**新种子**）、名城（`ensureFamousCities`）、野外名将（`ensureWildFamous`）、竞技场 NPC（`seedArenaNpcs`）。
 
@@ -107,13 +107,16 @@ season_honors(              -- 荣誉称号
 
 ## 4. 预告与通知
 
-阶段（以现实时间距 `end_at`）：`T-3d`、`T-1d`、`T-1h`、`T-10m`。Worker 每个 tick 检查，到点且 `notified_stages` 里没有则：
+阶段（以现实时间距 `end_at`）：`T-3d`、`T-1d`、`T-1h`、`T-10m`。Worker 每 5 秒检查一次（AISLG-208 起节流），到点且 `notified_stages` 里没有则：
 - 用 `publishAnnouncement`（`common/src/announcement-publish.ts`）发公告，`--chat` 同步到世界频道；
 - `insertServerBroadcast(..., {force:true})` 发全服播报；
 - 推 `PUSH_SEASON{phase:'warning', stage, endsAt, remainingSec}` 给**所有在线连接含 Agent**（`broadcastAll`）；
 - 把阶段写进 `notified_stages`。
 
 换季中推 `phase:'resetting'`（进入维护态时）、`phase:'started'`（新赛季开始时）。离线的 Agent 下次连上用 `GET_SEASON` 查到。
+
+预告文案里要带一句“礼金将随换季清零”（AISLG-221）：前端换季预告弹窗（`换季预告弹窗`）的正文已带上这句，英文版同步。礼金规则见 `backend/common/src/gift.ts`：每季开始发 1000，换季清零，不能转让。
+道具背包（AISLG-222）与礼金同口径：换季时 `user_items` 整表清空（`RESET_TABLES`），道具配置见 `backend/common/src/items.ts`。
 
 ## 5. 协议（版本 64 → 65，只加不改）
 

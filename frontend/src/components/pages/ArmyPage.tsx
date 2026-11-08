@@ -27,6 +27,12 @@ export function ArmyPage() {
               recruitError={session.recruitError}
               onStartRecruit={(troop, count) => void session.startRecruit(troop, count)}
               onCancelRecruit={(id) => void session.cancelRecruit(id)}
+              onDisband={session.disbandTroops}
+              onRestore={session.restoreTroops}
+              onRelease={session.releaseTroops}
+              allCities={session.troopPoolsAll.cities}
+              onRefreshAll={() => void session.troopPoolsAll.refresh()}
+              setPoolsVisible={session.troopPoolsAll.setVisible}
             />
           ),
         },

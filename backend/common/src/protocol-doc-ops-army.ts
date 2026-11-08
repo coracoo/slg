@@ -2,11 +2,12 @@
 // 账号与查询类见 protocol-doc-ops.ts；建造类见 protocol-doc-ops-build.ts；
 // 城池管理类见 protocol-doc-ops-city.ts；共用示例常量见 protocol-doc-shared.ts。
 
-import { Op, TROOP_KINDS } from './protocol';
+import { Op, TROOP_KINDS, type ArmyCounts } from './protocol';
 import { famousCityOfEliteTroop } from './famous-effects';
-import { TROOP_INFO, RECRUIT_COUNT_MAX } from './troops';
+import { DISBAND_REFUND_PERCENT, TROOP_INFO, RECRUIT_COUNT_MAX, disbandRefund } from './troops';
 import type { PushOpDoc, RequestOpDoc } from './protocol-doc';
-import { CITY_ID } from './protocol-doc-shared';
+import { CITY_ID, exampleCity } from './protocol-doc-shared';
+import { EMPTY_ARMY } from './protocol-doc-army-consts';
 
 const TROOP_TYPE = TROOP_KINDS.map((kind) => `'${kind}'`).join(' | ');
 
@@ -96,18 +97,18 @@ export const REQUEST_RECRUIT: RequestOpDoc = {
     },
   ],
   agentNote:
-    '发起前用 GET_STATE 的 levels.barracks 对照兵种门槛、resources 与 population 预判；失败响应的 data 仅含 city（无 recruit 载荷）。征募中条目能否取消待定，当前只能取消排队条目。同账号其他在线连接会收到 PUSH_RECRUIT_STATE（recruit_started / recruit_queued）推送。',
+    '发起前用 GET_STATE 的 levels.barracks 对照兵种门槛、resources 与 population 预判；失败响应的 data 仅含 city（无 recruit 载荷）。征募中条目也可取消（CANCEL_RECRUIT，全额返还）。同账号其他在线连接会收到 PUSH_RECRUIT_STATE（recruit_started / recruit_queued）推送。',
 };
 
 export const REQUEST_CANCEL_RECRUIT: RequestOpDoc = {
   kind: 'request',
   name: 'CANCEL_RECRUIT',
-  title: '取消排队中的征兵条目',
+  title: '取消征兵条目（排队中 / 征募中）',
   preAuth: false,
   summary:
-    '取消征兵队列中 status=queued 的条目：该条目退出队列（status 变为 cancelled，保留为历史），发起时扣减的资源与人口按条目快照全额返还（人口立即回到城池、恢复增长）。征募中（recruiting）条目能否取消待定，当前返回 RECRUIT_NOT_CANCELLABLE。',
+    '取消征兵队列中 status=queued（排队中）或 status=recruiting（征募中）的条目：该条目退出队列（status 变为 cancelled，保留为历史），发起时扣减的资源与人口按条目快照全额返还（人口立即回到城池、恢复增长）。征募中取消后已经过去的征募时间作废，该城排队的下一条立即开始征募（同一事务激活，推送 recruit_started）。已完成 / 已取消的条目返回 RECRUIT_NOT_CANCELLABLE。',
   requestFields: [
-    { name: 'recruitId', type: 'string', desc: '必填。要取消的征兵条目 UUID（GET_STATE 的 city.recruitQueue 中排队条目的 id）；缺失返回 INVALID_PARAMS。' },
+    { name: 'recruitId', type: 'string', desc: '必填。要取消的征兵条目 UUID（GET_STATE 的 city.recruitQueue 中 queued / recruiting 条目的 id）；缺失返回 INVALID_PARAMS。' },
   ],
   dataFields: [
     { name: 'recruit', type: 'object', desc: '征兵视图，结构与 RECRUIT 响应相同；status 为 cancelled。' },
@@ -120,14 +121,14 @@ export const REQUEST_CANCEL_RECRUIT: RequestOpDoc = {
       responses: [{ op: Op.CANCEL_RECRUIT, seq: 1, ok: true, data: { recruit: { ...QUEUED_RECRUIT_VIEW, status: 'cancelled' } } }],
     },
     {
-      caption: '取消征募中条目被拒',
+      caption: '取消已完成的条目被拒',
       request: { op: Op.CANCEL_RECRUIT, seq: 2, data: { recruitId: RECRUIT_VIEW.id } },
       responses: [
-        { op: Op.CANCEL_RECRUIT, seq: 2, ok: false, error: { code: 'RECRUIT_NOT_CANCELLABLE', message: '只能取消排队中的征兵任务（征募中能否取消待设计）' } },
+        { op: Op.CANCEL_RECRUIT, seq: 2, ok: false, error: { code: 'RECRUIT_NOT_CANCELLABLE', message: '征兵任务不存在、不属于本账号或已完成 / 已取消，无法取消' } },
       ],
     },
   ],
-  agentNote: '先 GET_STATE 拿 city.recruitQueue 中排队条目的 id 再取消。同账号其他在线连接收到 PUSH_RECRUIT_STATE（recruit_cancelled）推送。',
+  agentNote: '先 GET_STATE 拿 city.recruitQueue 中条目的 id 再取消（排队中与征募中都可取消）。同账号其他在线连接收到 PUSH_RECRUIT_STATE（recruit_cancelled，以及下一条的 recruit_started）推送。',
 };
 
 export const PUSH_RECRUIT_STATE: PushOpDoc = {
@@ -135,7 +136,7 @@ export const PUSH_RECRUIT_STATE: PushOpDoc = {
   name: 'PUSH_RECRUIT_STATE',
   title: '推送：征兵状态变化（v11）',
   summary:
-    '征兵状态变化时推送给该账号所有在线连接（发起连接除外）：recruit_started=立即开始或队首被后台激活、recruit_queued=进入排队、recruit_completed=完成（兵力累加进城内驻军）、recruit_cancelled=排队条目被取消。完成后的驻军数量变化不逐条推送，用 GET_STATE 对齐或按 city.army 本地累加。',
+    '征兵状态变化时推送给该账号所有在线连接（发起连接除外）：recruit_started=立即开始或队首被后台激活（含取消在征条目后的下一条）、recruit_queued=进入排队、recruit_completed=完成（兵力累加进城内驻军）、recruit_cancelled=条目被取消（排队或征募中）。完成后的驻军数量变化不逐条推送，用 GET_STATE 对齐或按 city.army 本地累加。',
   dataFields: [
     { name: 'reason', type: "'recruit_started' | 'recruit_queued' | 'recruit_completed' | 'recruit_cancelled'", desc: '触发本次推送的状态变化。' },
     { name: 'recruit', type: 'object', desc: '征兵视图，字段与 RECRUIT 响应的 recruit 相同；完成时 status 为 completed 且 completedAt 非空。' },
@@ -146,3 +147,75 @@ export const PUSH_RECRUIT_STATE: PushOpDoc = {
   ],
   agentNote: '收到 recruit_completed 后把 recruit.count 累加进本地 city.army[recruit.troop]；断线重连用 GET_STATE 对齐。',
 };
+
+/** 遣散示例：城内 100 长枪兵，遣散 40 → 城内剩 60，返还 = 单兵成本 × 40 × 50% */
+const DISBAND_EXAMPLE_TROOPS = { pikeman: 40 };
+/** 示例返还直接调用实现函数，文档数值与代码永远不会漂移 */
+const DISBAND_EXAMPLE_REFUND = disbandRefund(DISBAND_EXAMPLE_TROOPS);
+/** 示例城池：遣散后的驻军与入账资源（其余字段取开号初始示例） */
+const DISBAND_EXAMPLE_CITY = exampleCity({
+  army: { ...EMPTY_ARMY, pikeman: 60 } as ArmyCounts,
+  armyFoodUsePerHour: TROOP_INFO.pikeman.foodUse * 60,
+  resources: { gold: 5000, wood: 3600, food: 3500, stone: 2000, iron: 3000 },
+});
+
+export const REQUEST_DISBAND_TROOPS: RequestOpDoc = {
+  kind: 'request',
+  name: 'DISBAND_TROOPS',
+  title: '遣散士兵（解散城内驻军并返还一半征兵资源）',
+  preAuth: false,
+  summary: `把指定城池（缺省主城）的**城内驻军**按兵种解散（v84，AISLG-209）：请求 troops = { 兵种: 数量 }，**立即生效、没有等待时间**，并返还当初征兵花掉的资源的 ${DISBAND_REFUND_PERCENT}%（金 / 木 / 铁 / 粮 / 石分别计算，石只在冲车等成本里出现，没有就是 0）。每种资源返还 = floor(Σ 单兵征募成本 × 遣散数量 × ${DISBAND_REFUND_PERCENT}%)——多个兵种**先累加再取整一次**（不按兵种逐个取整）。**不返还人口**：人口是征兵时消耗、随民房自然增长的征兵额度，退人口会让「征兵 → 遣散」循环绕开征兵速度上限。返还直接入账该城，不钳储量上限（与 CANCEL_RECRUIT 同口径）。只认该城的城内驻军：在外部队（行军 / 返程 / 运输 / 侦察）、驻守野地的兵、派去盟友城的协防部队都不受影响，要遣散得先召回。该城或其名下野地正有行军在途指向、或有未结的 NPC 来袭时拒绝（CITY_IN_BATTLE，与放弃分城同一判定），否则会变成「躲战损 + 拿回一半资源」的投机；遣散**不受断粮、欠饷、免战状态限制**（断粮时遣散正好是止损手段）。遣散后 armyFoodUsePerHour 立即下降；遣散前先结算到当前时刻，断粮状态下若因此不再断粮，starveAt / mutinyNextAt 会同时清空。玩家与 Agent 都可以发起。`,
+  requestFields: [
+    {
+      name: 'troops',
+      type: 'object',
+      desc: `必填。要遣散的兵种与数量，形如 { "pikeman": 40, "porter": 200 }：键为兵种（取值同 RECRUIT 的 troop），值为 1..城内该兵种现有数量的正整数。空对象 / 未知兵种 / 0 / 负数 / 小数 / 非对象一律返回 INVALID_PARAMS；某兵种超过城内数量返回 INSUFFICIENT_TROOPS；两种拒绝都不改任何数据。`,
+    },
+  ],
+  dataFields: [
+    { name: 'disbanded', type: 'object', desc: '本次实际解散的兵种与数量（= 请求里数量大于 0 的项），如 { "pikeman": 40 }。' },
+    { name: 'refunded', type: 'object', desc: `返还的资源 { gold, wood, food, stone, iron }：每种资源 = floor(Σ 单兵成本 × 数量 × ${DISBAND_REFUND_PERCENT}%)，已直接入账 city.resources。不返还人口。` },
+    { name: 'city', type: 'object', desc: '遣散后的城池状态，结构与 GET_STATE 的 city 相同（含新的 army / armyFoodUsePerHour / starveAt / mutinyNextAt）。' },
+  ],
+  errors: ['INVALID_PARAMS', 'INSUFFICIENT_TROOPS', 'CITY_IN_BATTLE'],
+  examples: [
+    {
+      caption: `遣散 40 个长枪兵（城内 100 → 60，返还单兵成本的 ${DISBAND_REFUND_PERCENT}%）`,
+      request: { op: Op.DISBAND_TROOPS, seq: 1, data: { troops: DISBAND_EXAMPLE_TROOPS } },
+      responses: [
+        {
+          op: Op.DISBAND_TROOPS,
+          seq: 1,
+          ok: true,
+          data: { disbanded: { ...DISBAND_EXAMPLE_TROOPS }, refunded: DISBAND_EXAMPLE_REFUND, city: DISBAND_EXAMPLE_CITY },
+        },
+      ],
+    },
+    {
+      caption: '遣散数量超过城内驻军被拒（不改任何数据）',
+      request: { op: Op.DISBAND_TROOPS, seq: 2, data: { troops: { pikeman: 200 } } },
+      responses: [
+        {
+          op: Op.DISBAND_TROOPS,
+          seq: 2,
+          ok: false,
+          error: { code: 'INSUFFICIENT_TROOPS', message: '城内兵力不足以派出该编队（或要遣散的数量超过城内驻军）' },
+        },
+      ],
+    },
+    {
+      caption: '有敌情（行军指向本城 / NPC 来袭未结）时被拒',
+      request: { op: Op.DISBAND_TROOPS, seq: 3, data: { troops: { pikeman: 10 } } },
+      responses: [
+        {
+          op: Op.DISBAND_TROOPS,
+          seq: 3,
+          ok: false,
+          error: { code: 'CITY_IN_BATTLE', message: '该城或其名下野地正有行军在途 / 有 NPC 来袭未结，暂不能放弃分城或遣散士兵' },
+        },
+      ],
+    },
+  ],
+  agentNote: `遣散是「止损与调兵种结构」的手段，不是回血：只拿回 ${DISBAND_REFUND_PERCENT}%，换阵容有真实代价。发起前用 GET_STATE 的 city.army 核对各兵种城内数量（city.inBattle 为 true 时先别发，会被 CITY_IN_BATTLE 拒绝）；响应直接给遣散后的 city，不必再查。同账号其他在线连接会收到 PUSH_CITY_STATE（reason=troops_disbanded），事件流新增 troops_disbanded（detail = { cityId, troops, refunded }）。`,
+};
+

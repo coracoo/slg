@@ -246,17 +246,45 @@ export function recruitUnitSeconds(troop: TroopKind): number {
 }
 
 /**
- * 批次征募总时长（秒）= max(1, 基准单兵时长 × 数量 ÷ time_scale)——**下限作用于
- * 批次总时长**而非单兵（v22，AISLG-39 方案 A：修复 v20 起单兵被逐个钳 1 秒、批量
- * 征兵比文档公式慢数倍的问题；显式环境变量覆盖优先且不再缩放，与建造路径一致）。
+ * 批次征募总时长（秒）= max(1, 基准单兵时长 × 数量 × 练兵科技折扣 ÷ time_scale)——
+ * **下限作用于批次总时长**而非单兵（v22，AISLG-39 方案 A：修复 v20 起单兵被逐个钳
+ * 1 秒、批量征兵比文档公式慢数倍的问题；显式环境变量覆盖优先且不再缩放，与建造路径一致）。
+ * v72（AISLG-192）：drillPercent 为「练兵」科技的征兵时长减少百分数（每级 3%，正数）。
  */
-export function recruitBatchSeconds(troop: TroopKind, count: number): number {
+export function recruitBatchSeconds(troop: TroopKind, count: number, drillPercent = 0): number {
   const n = Math.max(1, Math.floor(count));
+  const factor = 1 - Math.min(100, Math.max(0, drillPercent)) / 100;
   const raw = Number(process.env.RECRUIT_UNIT_SECONDS);
   if (Number.isFinite(raw) && raw >= 1) {
-    return Math.floor(raw) * n;
+    return Math.max(1, Math.floor(Math.floor(raw) * n * factor));
   }
-  return scaledSeconds(TROOP_INFO[troop].unitSeconds * n);
+  return scaledSeconds(TROOP_INFO[troop].unitSeconds * n * factor);
+}
+
+/** 遣散（DISBAND_TROOPS，v84，AISLG-209）返还比例（百分数）：按征兵成本退回，不返还人口。
+ *  协议文档用本常量拼数字，避免文档与实现不一致；上线一周后按事件统计复核是否降到 40。 */
+export const DISBAND_REFUND_PERCENT = 50;
+
+/**
+ * 遣散返还 = floor(Σ(单兵成本 × 遣散数量) × 50%)，五种资源分别累加后各取整一次
+ * （多个兵种先累加再取整，不按兵种逐个取整）。不存在的资源（石）成本为 0，返还也是 0。
+ * 人口不退：人口是征兵时消耗、随民房增长的征兵额度，退人口会绕过征兵速度上限。
+ */
+export function disbandRefund(troops: Partial<Record<TroopKind, number>>): Resources {
+  const totals: Resources = { gold: 0, wood: 0, food: 0, stone: 0, iron: 0 };
+  for (const kind of TROOP_KINDS) {
+    const count = Math.floor(troops[kind] ?? 0);
+    if (count <= 0) {
+      continue;
+    }
+    for (const key of RESOURCE_KEYS) {
+      totals[key] += TROOP_INFO[kind].cost[key] * count;
+    }
+  }
+  for (const key of RESOURCE_KEYS) {
+    totals[key] = Math.floor((totals[key] * DISBAND_REFUND_PERCENT) / 100);
+  }
+  return totals;
 }
 
 /** 一支部队的小时耗粮合计 = Σ(单兵 foodUse × 数量)；未知兵种按 0 计 */

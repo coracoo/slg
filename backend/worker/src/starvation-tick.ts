@@ -22,9 +22,11 @@ import { territoryDisplayRates } from '../../common/src/wilderness-reserve';
 import {
   applyMutiny,
   mutinyIntervalMs,
+  nextStarvationCheckMs,
   projectStarvation,
   starveWarningLeadMs,
 } from '../../common/src/starvation';
+import { recordPoolTroops } from '../../common/src/troop-pools-db';
 import { settleOwnerCity } from './tick-shared';
 
 /** 扫描最小间隔（毫秒，真实时间）与单次扫描城池上限 */
@@ -34,17 +36,25 @@ const SWEEP_LIMIT = 500;
 const MUTINY_CATCHUP_MAX = 24;
 
 let lastRunMs = 0;
+/** 城池 → 下次复查时刻（真实毫秒，仅本进程内存；重启后全部城重新评估一遍） */
+const nextCheckAt = new Map<string, number>();
 
 interface Notice {
   accountId: string;
   data: Record<string, unknown>;
 }
 
-/** 单城评估（调用方持有事务）；返回需要在提交后推送的通知 */
-async function evaluateCity(client: pg.PoolClient, cityId: string): Promise<Notice[]> {
+interface Evaluation {
+  notices: Notice[];
+  /** 下次复查时刻（毫秒时间戳）；null = 城池已不存在，不再排期 */
+  nextCheckMs: number | null;
+}
+
+/** 单城评估（调用方持有事务）；返回需要在提交后推送的通知与下次复查时刻 */
+async function evaluateCity(client: pg.PoolClient, cityId: string): Promise<Evaluation> {
   const settled = await settleOwnerCity(client, cityId);
   if (!settled.row) {
-    return [];
+    return { notices: [], nextCheckMs: null };
   }
   const res = await client.query(
     `SELECT account_id, name, food, mutiny_next_at, starve_warned_at, now() AS db_now FROM cities WHERE id = $1`,
@@ -67,21 +77,26 @@ async function evaluateCity(client: pg.PoolClient, cityId: string): Promise<Noti
     levels, territoryDisplayRates(territory), await loadProductionBonusPercent(client, cityId), techs,
     guard ? guardProductionPercent(guard.wit) : 0,
   );
-  const armyUse = await loadArmyFoodUsePerHour(client, cityId);
+  // 结算刚算过的耗粮直接沿用（同一事务、同一把城池行锁，编成不变），不再重复跑一遍 tile_army 联表
+  const armyUse = settled.armyFoodUsePerHour ?? await loadArmyFoodUsePerHour(client, cityId);
   const net = rates.food - armyUse;
   const projection = projectStarvation(city.food, net, nowMs);
   const notices: Notice[] = [];
+  const lead = starveWarningLeadMs();
+  const done = (mutinyNextMs: number | null): Evaluation => ({
+    notices,
+    nextCheckMs: nextStarvationCheckMs(nowMs, projection.starveAtMs, projection.starving, mutinyNextMs, lead),
+  });
 
   // 恢复 / 不会断粮：清空计时与预警标记
   if (projection.starveAtMs === null) {
     if (city.mutiny_next_at || city.starve_warned_at) {
       await client.query(`UPDATE cities SET mutiny_next_at = NULL, starve_warned_at = NULL WHERE id = $1`, [cityId]);
     }
-    return notices;
+    return done(null);
   }
 
   // 预警：距断粮不足 1 小时（含已断粮）且本轮未预警
-  const lead = starveWarningLeadMs();
   if (projection.starveAtMs - nowMs <= lead) {
     if (!city.starve_warned_at) {
       const data = {
@@ -110,7 +125,7 @@ async function evaluateCity(client: pg.PoolClient, cityId: string): Promise<Noti
     if (city.mutiny_next_at) {
       await client.query(`UPDATE cities SET mutiny_next_at = NULL WHERE id = $1`, [cityId]);
     }
-    return notices;
+    return done(null);
   }
 
   // 已断粮：起算 / 结算哗变
@@ -118,7 +133,7 @@ async function evaluateCity(client: pg.PoolClient, cityId: string): Promise<Noti
   let next = city.mutiny_next_at ? city.mutiny_next_at.getTime() : nowMs + interval;
   if (!city.mutiny_next_at) {
     await client.query(`UPDATE cities SET mutiny_next_at = $2 WHERE id = $1`, [cityId, new Date(next)]);
-    return notices;
+    return done(next);
   }
   let rounds = 0;
   while (next <= nowMs && rounds < MUTINY_CATCHUP_MAX) {
@@ -141,19 +156,45 @@ async function evaluateCity(client: pg.PoolClient, cityId: string): Promise<Noti
           }
         }
       }
+      // v85（AISLG-212）：兵变减少的兵不再直接损失，进这座城的逃兵营（断粮结束后可花征兵
+      // 资源 50% 劝回，24 小时不处理就没了）；同一事务、同一把城池行锁内入账
+      await recordPoolTroops(client, cityId, 'deserter', result.losses);
+    }
+    // v74（AISLG-194）：出发城断粮时，协防部队与出发城驻军一起按断粮规则减员
+    const assistLosses: Partial<Record<TroopKind, number>> = {};
+    const assistRes = await client.query(`SELECT id, troops FROM city_assist WHERE from_city_id = $1`, [cityId]);
+    for (const assist of assistRes.rows as Array<{ id: string; troops: Partial<Record<TroopKind, number>> }>) {
+      const cut = applyMutiny(assist.troops ?? {});
+      if (cut.total <= 0) {
+        continue;
+      }
+      for (const kind of TROOP_KINDS) {
+        if (cut.losses[kind]) {
+          assistLosses[kind] = (assistLosses[kind] ?? 0) + (cut.losses[kind] ?? 0);
+        }
+      }
+      if (Object.keys(cut.remaining).length === 0) {
+        await client.query(`DELETE FROM city_assist WHERE id = $1`, [assist.id]);
+      } else {
+        await client.query(`UPDATE city_assist SET troops = $2::jsonb WHERE id = $1`, [assist.id, JSON.stringify(cut.remaining)]);
+      }
+      // v85（AISLG-212）：协防部队哗变减员同样进逃兵营——协防从这座城派出，逃兵也归这座城
+      // （累计后一次入账，与伤兵「协防进派出城」同口径）
+      await recordPoolTroops(client, cityId, 'deserter', cut.losses);
     }
     const detail = {
       cityId,
       cityName: city.name,
       losses: result.losses,
       total: result.total,
+      ...(Object.keys(assistLosses).length > 0 ? { assistLosses } : {}),
       nextAt: new Date(next).toISOString(),
     };
     await insertEvent(client, { accountId: city.account_id, cityId, type: EventType.MUTINY, initiator: null, detail });
     notices.push({ accountId: city.account_id, data: { reason: 'mutiny', ...detail } });
   }
   await client.query(`UPDATE cities SET mutiny_next_at = $2 WHERE id = $1`, [cityId, new Date(next)]);
-  return notices;
+  return done(next);
 }
 
 /** 单 tick 入口：节流到 STARVATION_TICK_MS；返回本次发出的通知数 */
@@ -162,23 +203,38 @@ export async function processStarvation(pool: pg.Pool, nowMs: number = Date.now(
     return 0;
   }
   lastRunMs = nowMs;
+  // 候选只取 id（廉价）；是否到复查时刻在内存里判，没到点的城整城跳过，不开事务、不锁城、不结算。
+  // 不再 LIMIT：以前按 id 截 500 会让靠后的城永远扫不到；改为每轮最多评估 SWEEP_LIMIT 座到点的城。
   const candidates = await pool.query(
     `SELECT c.id FROM cities c
      WHERE c.mutiny_next_at IS NOT NULL OR c.starve_warned_at IS NOT NULL
         OR EXISTS (SELECT 1 FROM city_army a WHERE a.city_id = c.id AND a.count > 0)
         OR EXISTS (SELECT 1 FROM marches m WHERE m.from_city_id = c.id AND m.status = 'marching')
         OR EXISTS (SELECT 1 FROM world_tiles t WHERE t.owner_city_id = c.id AND t.kind = 'wilderness')
-     ORDER BY c.id LIMIT $1`,
-    [SWEEP_LIMIT],
+        OR EXISTS (SELECT 1 FROM city_assist ca WHERE ca.from_city_id = c.id)
+     ORDER BY c.id`,
   );
+  const live = new Set<string>();
   let sent = 0;
+  let evaluated = 0;
   for (const row of candidates.rows as Array<{ id: string }>) {
+    live.add(row.id);
+    if (evaluated >= SWEEP_LIMIT || (nextCheckAt.get(row.id) ?? 0) > nowMs) {
+      continue;
+    }
+    evaluated += 1;
     const client = await pool.connect();
     let notices: Notice[] = [];
     try {
       await client.query('BEGIN');
-      notices = await evaluateCity(client, row.id);
+      const evaluation = await evaluateCity(client, row.id);
+      notices = evaluation.notices;
       await client.query('COMMIT');
+      if (evaluation.nextCheckMs === null) {
+        nextCheckAt.delete(row.id);
+      } else {
+        nextCheckAt.set(row.id, evaluation.nextCheckMs);
+      }
     } catch (err) {
       await client.query('ROLLBACK').catch(() => undefined);
       throw err;
@@ -191,6 +247,11 @@ export async function processStarvation(pool: pg.Pool, nowMs: number = Date.now(
         JSON.stringify({ reason: 'starvation', accountId: notice.accountId, data: notice.data }),
       ]);
       sent += 1;
+    }
+  }
+  for (const id of nextCheckAt.keys()) {
+    if (!live.has(id)) {
+      nextCheckAt.delete(id);
     }
   }
   return sent;

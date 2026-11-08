@@ -12,9 +12,11 @@
 import pg from 'pg';
 import type { Resources, TroopKind } from '../../common/src/protocol';
 import { armyPower, resolveBattle, toFullArmyCounts } from '../../common/src/battle';
+import { splitBattleCasualties } from '../../common/src/battle-casualties';
+import { recordPoolTroops } from '../../common/src/troop-pools-db';
 import { armyCarryCapacity } from '../../common/src/troops';
 import { loadByCarry, lootTotal, PLUNDERABLE_KEYS, type PlunderLoot } from '../../common/src/plunder';
-import { carryingPercent } from '../../common/src/tech';
+import { carryingPercent, combatTechBonus } from '../../common/src/tech';
 import { loadTechLevels } from '../../common/src/tech-db';
 import { INTERCEPT_REACH, MOVING_KIND_INFO, cellDistance, isMovingKind } from '../../common/src/moving-target';
 import { loadMovingTarget, movingTargetView, rowIndexAt, type MovingTargetRow } from '../../common/src/moving-target-db';
@@ -116,11 +118,23 @@ export async function resolveInterceptArrival(
   // 接战：野战（无城墙），守军即目标的守军编成；v36（AISLG-114）随队武将加成（按部队规模折算）
   const defender = target.garrison ?? {};
   const hero = await loadMarchHeroBonus(client, march, armyTotal(troops));
-  const result = resolveBattle(troops, defender, { wallDefensePercent: 0, siege: false, attackerHero: hero?.engine ?? null });
+  const result = resolveBattle(troops, defender, {
+    wallDefensePercent: 0,
+    siege: false,
+    attackerHero: hero?.engine ?? null,
+    attackerTech: combatTechBonus(await loadTechLevels(client, march.account_id)),
+  });
   const naming = await loadCityNaming(client, march.from_city_id);
+  // v85（AISLG-212）：截击流寇 / 运粮商队——目标守军是 NPC；攻方伤兵与俘虏（胜时）进出发城
+  const interceptCasualties = splitBattleCasualties(result, false, true);
+  await recordPoolTroops(client, march.from_city_id, 'wounded', interceptCasualties.attacker.wounded);
+  if (interceptCasualties.winner === 'attacker') {
+    await recordPoolTroops(client, march.from_city_id, 'captive', interceptCasualties.captives);
+  }
   const reportId = await saveBattleReport(
     client, march.account_id, 'attacker', result.attackerWon, 'intercept', march.x, march.y, result,
     naming ? `${naming.username} · ${naming.cityName}` : '出征部队', `${label} Lv${target.level}`, 0, notifies, hero?.report ?? null,
+    null, null, null, interceptCasualties,
   );
   const heroSettle = await settleMarchHero(client, march, result, notifies);
   const common = {

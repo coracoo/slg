@@ -4,6 +4,7 @@
 // 校准后仍为占位的数值：野地等级分布、NPC 城池存量与驻防、行军速度。调整入口只在本文件。
 
 import type { FamousCityState } from './famous-city';
+import type { FactionKey } from './protocol-faction';
 import {
   RESOURCE_KEYS,
   TERRAIN_KINDS,
@@ -65,7 +66,7 @@ export const TERRAIN_INFO: Record<TerrainKind, TerrainInfo> = {
 /** 野地等级上限（占位决策，对齐旧游戏 10 级野地） */
 export const WILDERNESS_LEVEL_MAX = 10;
 /** 野地等级分布权重（Lv1..Lv10，低级多、高级少；占位） */
-const LEVEL_WEIGHTS = [20, 17, 14, 12, 10, 8, 7, 5, 4, 3];
+export const LEVEL_WEIGHTS = [20, 17, 14, 12, 10, 8, 7, 5, 4, 3];
 
 // ---- 野地战斗与收益（战斗编成在 battle.ts；此处为收益侧） ----
 
@@ -117,12 +118,15 @@ export function wildernessLoot(terrain: TerrainKind, level: number): Resources {
 export function wildernessPlunderPool(
   terrain: TerrainKind,
   level: number,
+  /** v72（AISLG-192）：掠夺科技加成百分数（每级 +4%，只放大野地池；NPC 城库存不变） */
+  lootPercent = 0,
 ): Partial<Record<'gold' | 'food' | 'wood' | 'stone' | 'iron', number>> {
   const pool: Partial<Record<'gold' | 'food' | 'wood' | 'stone' | 'iron', number>> = {};
   const resource = TERRAIN_INFO[terrain].resource;
   if (resource !== 'gold') {
-    pool[resource] = Math.max(0, level) * PLUNDER_POOL_RESOURCE_PER_LEVEL;
-    pool.gold = Math.max(0, level) * PLUNDER_POOL_GOLD_PER_LEVEL;
+    const factor = 1 + Math.max(0, lootPercent) / 100;
+    pool[resource] = Math.floor(Math.max(0, level) * PLUNDER_POOL_RESOURCE_PER_LEVEL * factor);
+    pool.gold = Math.floor(Math.max(0, level) * PLUNDER_POOL_GOLD_PER_LEVEL * factor);
   }
   return pool;
 }
@@ -234,6 +238,12 @@ export interface NpcCitySnapshot {
   famous?: FamousCityState;
   stock: Resources;
   buildings: Partial<Record<BuildingKind, number>>;
+  /** 势力归属（v99，AISLG-239）：被某方势力吞下的 NPC 城记在这里，守军与库存已按 1.5 倍写入；
+   *  普通 NPC 城无此字段，玩家占下后地块转城池、快照清空。见 common/src/faction.ts */
+  faction?: FactionKey;
+  /** v101（AISLG-241）：这座城是被势力吞下的玩家分城（建筑 / 库存原样保留，不乘 1.5）。
+   *  势力灭亡时按它决定「除回 1.5」还是「原样变回普通 NPC 城」 */
+  fromPlayer?: boolean;
 }
 
 /** 普通 NPC 城的初始快照（满编守军、初始库存与建筑）；放弃分城后地块按它回归 */

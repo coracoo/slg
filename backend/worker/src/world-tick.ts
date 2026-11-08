@@ -18,6 +18,12 @@ import { NOTIFY_CHANNEL } from '../../common/src/db';
 import { toFullArmyCounts } from '../../common/src/battle';
 import { loadNativeGarrison } from '../../common/src/native-garrison';
 import { famousEncounter } from '../../common/src/famous-city';
+import { getFactionEnabled } from '../../common/src/faction-config';
+import { factionLairAttackable } from '../../common/src/faction-db';
+import { loadFactionLairRow } from '../../common/src/faction-lair-db';
+import { factionLairScoutGarrison } from '../../common/src/faction-lair';
+import { resolveFactionLairBattle } from './faction-lair-battle';
+import type { FactionKey } from '../../common/src/protocol-faction';
 import type { NpcCitySnapshot } from '../../common/src/world';
 import { saveScoutIntel } from '../../common/src/battle-db';
 import { loadTileArmy, type TileRow } from '../../common/src/world-db';
@@ -35,20 +41,26 @@ import {
   type TileNotify,
   abortForAlly,
 } from './tick-shared';
-import { areAllies } from '../../common/src/alliance-db';
+import { cannotAttack } from '../../common/src/alliance-db';
 import { buildScoutIntel, resolveBattleArrival } from './battle-tick';
+import { settleAssistArrival } from './assist-tick';
 import { resolveOccupyArrival, resolvePlunderArrival } from './plunder-tick';
 import { resolveCampArrival } from './yt-camp';
 import { lockYt, newYtNotifies, publishYtNotifies, type YtNotifies } from './yt-event';
 import { campGarrison, loadCampAt } from '../../common/src/yellow-turban-db';
 import { movingNotifyPayload, resolveInterceptArrival, type MovingNotify } from './intercept-tick';
+import { settleCaravanArrival } from './market-tick';
 import { scaledMs } from '../../common/src/time-scale';
 import { readCargo } from '../../common/src/transport';
 import { loadTechLevels } from '../../common/src/tech-db';
-import { defenseExtraPercent } from '../../common/src/tech';
+import { defenseExtraPercent, scoutDetailOf } from '../../common/src/tech';
+import { degradeDefenses, loadCityDefenses } from '../../common/src/city-defense-db';
 import { famousWallExtraPercent } from '../../common/src/famous-effects';
 import { wallDefensePercent } from '../../common/src/battle';
 import { loadBuildingLevels } from '../../common/src/production';
+import { applyScoutDeception, withDeceptionMark } from './scout-deception';
+import { settleReturn } from './return-settle';
+import { claimRelicOnArrival } from './fog-relic-claim';
 
 const MARCH_BATCH_LIMIT = 50;
 
@@ -85,6 +97,13 @@ export async function processDueMarches(pool: pg.Pool): Promise<number> {
     let resolved = 0;
     for (const march of due.rows as MarchRow[]) {
       const troops = toFullArmyCounts(march.troops ?? {});
+      if (march.purpose === 'caravan') {
+        // v78（AISLG-196）：商队到达直接入账，不战斗、不锁地块
+        await settleCaravanArrival(client, march);
+        notifies.push({ reason: 'march_resolved', accountId: march.account_id, marchId: march.id });
+        resolved += 1;
+        continue;
+      }
       if (march.purpose === 'return') {
         await settleReturn(client, march, troops);
         notifies.push({ reason: 'march_resolved', accountId: march.account_id, marchId: march.id });
@@ -132,32 +151,6 @@ export async function processDueMarches(pool: pg.Pool): Promise<number> {
   }
 }
 
-/** 返程行军：城池生产结算到到达时刻，部队并入城内驻军 */
-async function settleReturn(
-  client: pg.PoolClient,
-  march: MarchRow,
-  troops: Partial<Record<TroopKind, number>>,
-): Promise<void> {
-  const { row } = await settleOwnerCity(client, march.from_city_id, march.arrive_at);
-  if (row) {
-    await troopsEnterCity(client, march.from_city_id, troops);
-    // v26（AISLG-79）：撤回 / 失效返程的运输货物随部队回到出发城（即时入账，不钳储量上限）
-    const cargo = readCargo(march.cargo);
-    if (cargo) {
-      await creditLoot(client, march.from_city_id, cargo);
-    }
-  }
-  // 城池行被删（重置）时部队随之消失；行军仍标记结算完成，避免重复处理
-  const upd = await client.query(
-    `UPDATE marches SET status = 'returned', resolved_at = clock_timestamp()
-     WHERE id = $1 AND status = 'marching' RETURNING id`,
-    [march.id],
-  );
-  if (upd.rowCount) {
-    await completeMarchEvent(client, march, 'returned', { troops });
-  }
-}
-
 /**
  * 出征 / 侦察 / 调兵 / 掠夺 / 占领到达的分发。出征城已在调用方按锁序锁定并把生产
  * 结算到到达时刻（settled）；本函数内不得再锁 cities。掠夺 / 占领（v16）委托
@@ -173,6 +166,40 @@ async function resolveArrival(
   movingNotifies: MovingNotify[],
   yt: YtNotifies,
 ): Promise<void> {
+  // v92（AISLG-224 复核）：迷雾中的盲打校验曾被拒绝（fog_denied）：到达一律原路返回，不战斗、不掠夺、不侦察
+  if (march.fog_denied) {
+    await abortMarchToReturn(client, march, troops, settled, notifies);
+    return;
+  }
+  // v99（AISLG-239）/ v101（AISLG-241）：势力老巢格不是普通野地——
+  // 本季未灭亡时可以打（一口一营的守城战）与侦察；已灭亡的废墟与旧版本遗留的其它任务一律原路返回。
+  if (tile?.faction_lair && getFactionEnabled()) {
+    const lairKey = tile.faction_lair as FactionKey;
+    if (!(await factionLairAttackable(client, lairKey))) {
+      await abortMarchToReturn(client, march, troops, settled, notifies);
+      return;
+    }
+    if (march.purpose === 'scout') {
+      await settleScoutArrival(client, march, troops, tile, settled, notifies);
+      return;
+    }
+    if (march.purpose === 'plunder') {
+      const lairNowRes = await client.query(`SELECT now() AS now`);
+      await resolveFactionLairBattle(client, {
+        march,
+        troops,
+        key: lairKey,
+        now: lairNowRes.rows[0].now as Date,
+        notifies,
+        settled,
+      });
+      return;
+    }
+    await abortMarchToReturn(client, march, troops, settled, notifies);
+    return;
+  }
+  // v93（AISLG-227）：遗迹格即领取（掠夺 / 占领 / 增援 / 侦察），先于原有结算，不看战斗结果
+  await claimRelicOnArrival(client, march);
   // v29（AISLG-76）：掠夺任务的目标格上有进行中的黄巾营地 / 老巢 → 走营地结算
   if (march.purpose === 'plunder' && tile?.kind === 'wilderness' && !tile.owner_city_id) {
     if (await loadCampAt(client, march.x, march.y)) {
@@ -191,6 +218,10 @@ async function resolveArrival(
   }
   if (march.purpose === 'scout') {
     await settleScoutArrival(client, march, troops, tile, settled, notifies);
+    return;
+  }
+  if (march.purpose === 'assist') {
+    await settleAssistArrival(client, march, troops, settled, notifies);
     return;
   }
   if (march.purpose === 'transfer') {
@@ -273,7 +304,7 @@ async function settleScoutArrival(
   // v67（AISLG-182）：出发后目标才成为盟友（同一联盟）：不侦察，原路返回
   if (tile.owner_city_id) {
     const ownerRow = await client.query(`SELECT account_id FROM cities WHERE id = $1`, [tile.owner_city_id]);
-    if (ownerRow.rowCount && (await areAllies(client, march.account_id, (ownerRow.rows[0] as { account_id: string }).account_id))) {
+    if (ownerRow.rowCount && (await cannotAttack(client, march.account_id, (ownerRow.rows[0] as { account_id: string }).account_id))) {
       await abortForAlly(client, march, troops, settled, notifies);
       return;
     }
@@ -283,10 +314,18 @@ async function settleScoutArrival(
   let garrison: Partial<Record<TroopKind, number>> = {};
   /** v38（AISLG-122）：玩家城侦察的城墙减伤（城墙 + 守方城防科技）；其余目标为 undefined */
   let pvpWallPercent: number | undefined;
+  /** v73（AISLG-193）：玩家城侦察的器械库存（尚未按侦察科技降级） */
+  let defenseStock: Awaited<ReturnType<typeof loadCityDefenses>> | null = null;
+  const attackerTechs = await loadTechLevels(client, march.account_id);
   if (tile.kind === 'wilderness' && !tile.owner_city_id) {
-    // v29（AISLG-76）：黄巾营地 / 老巢所在格——侦察到的是营地当前守军（含战后存量与老巢当前阶段）
-    const camp = await loadCampAt(client, tile.x, tile.y);
-    garrison = camp ? campGarrison(camp, new Date()) : await loadNativeGarrison(client, tile);
+    if (tile.faction_lair && getFactionEnabled()) {
+      // v101（AISLG-241）：老巢格——侦察到的是当前营的守军（残血按未回满的实况给）
+      garrison = factionLairScoutGarrison(await loadFactionLairRow(client, tile.faction_lair));
+    } else {
+      // v29（AISLG-76）：黄巾营地 / 老巢所在格——侦察到的是营地当前守军（含战后存量与老巢当前阶段）
+      const camp = await loadCampAt(client, tile.x, tile.y);
+      garrison = camp ? campGarrison(camp, new Date()) : await loadNativeGarrison(client, tile);
+    }
   } else if (tile.kind === 'npc_city') {
     const npc = tile.npc as NpcCitySnapshot | null;
     // 名城取当前阶段守军（外围 / 城守）；普通 NPC 城取驻防快照
@@ -301,6 +340,16 @@ async function settleScoutArrival(
     for (const row of armyRes.rows as { troop: TroopKind; count: number }[]) {
       garrison[row.troop] = row.count;
     }
+    // v74（AISLG-194）：协防部队计入侦察到的守军总数（外人只能看到总数，看不到是谁在协防）
+    const assistRes = await client.query(`SELECT troops FROM city_assist WHERE city_id = $1`, [tile.owner_city_id]);
+    for (const row of assistRes.rows as Array<{ troops: Partial<Record<TroopKind, number>> | null }>) {
+      for (const [kind, count] of Object.entries(row.troops ?? {})) {
+        const value = Math.max(0, Math.floor(count ?? 0));
+        if (value > 0) {
+          garrison[kind as TroopKind] = (garrison[kind as TroopKind] ?? 0) + value;
+        }
+      }
+    }
     const levels = await loadBuildingLevels(client, tile.owner_city_id);
     const ownerRes = await client.query(`SELECT account_id, famous_name FROM cities WHERE id = $1`, [tile.owner_city_id]);
     const ownerCity = ownerRes.rows[0] as { account_id: string; famous_name: string | null } | undefined;
@@ -309,6 +358,7 @@ async function settleScoutArrival(
       levels.wall ?? 0,
       (ownerCity ? defenseExtraPercent(await loadTechLevels(client, ownerCity.account_id)) : 0) + famousWallExtraPercent(ownerCity?.famous_name),
     );
+    defenseStock = await loadCityDefenses(client, tile.owner_city_id);
   } else {
     garrison = await loadTileArmy(client, tile.x, tile.y);
   }
@@ -318,8 +368,21 @@ async function settleScoutArrival(
     owner = naming ? { username: naming.username, cityName: naming.cityName } : null;
   }
   const nowRes = await client.query(`SELECT now() AS now`);
-  const at = (nowRes.rows[0].now as Date).toISOString();
-  const intel = buildScoutIntel(tile, toFullArmyCounts(garrison), owner, at, await loadTechLevels(client, march.account_id), pvpWallPercent);
+  const now = nowRes.rows[0].now as Date;
+  const at = now.toISOString();
+  // v86（AISLG-211）：欺敌先按倍数换算真实驻军再判识破，最后才走侦察科技降级（顺序固定；战斗仍用真实驻军）
+  const deception = tile.kind === 'city' && tile.owner_city_id
+    ? await applyScoutDeception(client, tile.owner_city_id, garrison, attackerTechs, now)
+    : { garrison, seen: null };
+  const intel = withDeceptionMark(buildScoutIntel(
+    tile,
+    toFullArmyCounts(deception.garrison),
+    owner,
+    at,
+    attackerTechs,
+    pvpWallPercent,
+    defenseStock ? degradeDefenses(defenseStock, scoutDetailOf(attackerTechs)) : null,
+  ), deception.seen);
   await saveScoutIntel(client, march.account_id, intel);
   await client.query(
     `UPDATE marches SET status = 'arrived', resolved_at = clock_timestamp() WHERE id = $1 AND status = 'marching'`,

@@ -4,7 +4,9 @@
 
 import type { ArmyCounts, InitiatorRole, Resources, TroopKind } from './protocol';
 import type { YtTileCampView } from './protocol-yt';
+import type { FactionTileView } from './protocol-faction';
 import type { BattleHeroView } from './protocol-hero';
+import type { DefenseScoutView, DefenseUseView } from './protocol-defense';
 
 /** 地形清单（v19 新增金矿 gold_mine）：平原 / 草原 / 森林 / 丘陵 / 荒漠 / 沼泽 / 湖泊 / 金矿 */
 export type TerrainKind = 'plain' | 'grass' | 'forest' | 'hill' | 'desert' | 'marsh' | 'lake' | 'gold_mine';
@@ -32,8 +34,15 @@ export interface TileOwnerView {
   username: string;
   cityId: string;
   cityName: string;
+  /** 占领者爵位（v76，AISLG-197） */
+  nobility: number;
+  nobilityName: string;
   /** 占领者与自己同属一个联盟（v67，AISLG-182）：盟友的地块不能攻击 / 侦察，地图单独着色；自己的地块为 false */
   ally: boolean;
+  /** v77（AISLG-195）：与占领者的关系 self / ally / friendly / hostile / neutral */
+  relation: 'self' | 'ally' | 'friendly' | 'hostile' | 'neutral';
+  /** v95（AISLG-226）：本账号现在能否向该占领者协防；解除友好冷却期内 relation 仍为 friendly，但为 false */
+  canAssist: boolean;
 }
 
 /** NPC 城池库存档位（v23 AISLG-55；相对该城初始库存，不给精确数值） */
@@ -48,6 +57,8 @@ export interface FamousEffectView {
 
 /** 名城标识与当前阶段（v24，AISLG-56） */
 export interface FamousTileView {
+  /** 名城首探者（v93）：迷雾关闭时缺省；尚无人首探为 null */
+  firstExplorer?: string | null;
   name: string;
   /** outer=外围阶段（须先清外围）；keeper=外围已清、可攻城守并占领 */
   stage: 'outer' | 'keeper';
@@ -59,8 +70,45 @@ export interface FamousTileView {
   effect: FamousEffectView | null;
 }
 
+/** 野地上的设施（v97，AISLG-232）：对所有人可见的部分——有望楼、几级 */
+export interface TileFacilityView {
+  kind: 'watchtower';
+  /** 已建成的等级（1..3） */
+  level: number;
+}
+
+/** 进行中的建造 / 升级（v97，AISLG-232；只有主人能看到） */
+export interface FacilityBuildingView {
+  /** 目标等级（1..3） */
+  toLevel: number;
+  /** 完成时刻（ISO 8601） */
+  finishAt: string;
+}
+
+/** 本城名下野地的设施（CityView.territory[].facility；含建造进度，主人可见） */
+export interface TerritoryFacilityView {
+  kind: 'watchtower';
+  /** 已建成的最高等级；正在新建第一级时为 0 */
+  level: number;
+  /** 已建成等级的视野半径（切比雪夫距离，格）；level 为 0 时为 0。
+   *  丘陵上的野地是**加成后的有效半径**（1 / 2 / 3 级 8 / 10 / 12，AISLG-233） */
+  visionRadius: number;
+  /** 进行中的建造 / 升级；没有则为 null */
+  building: FacilityBuildingView | null;
+}
+
 /** 地图窗口内一格的视图 */
 export interface TileView {
+  /** 遗迹（v93，AISLG-227）：已探索或视野内且未领取才有 */
+  relic: RelicTileView | null;
+  /** 名将处所（v93，AISLG-227）：已探索或视野内才有 */
+  heroSite: HeroSiteView | null;
+  /** 野地上的设施（v97，AISLG-232）：只要能看到这块地就能看到有望楼与它的等级（不含建造进度）；
+   *  没盖、或还在建第一级时为 null */
+  facility: TileFacilityView | null;
+  /** 势力归属（v99，AISLG-239）：被某方势力吞并的 NPC 城（isLair=false）或老巢地块（isLair=true）；
+   *  其余地块、开关关闭、已探索但不在视野内为 null */
+  faction: FactionTileView | null;
   x: number;
   y: number;
   terrain: TerrainKind;
@@ -86,6 +134,10 @@ export interface TileView {
   wildFamous: boolean;
   /** 野地储量（v61，AISLG-165）：仅野地有值；数值与预计时刻只对归属方与侦察过的账号给出 */
   reserve: ReserveView | null;
+  /** 战争迷雾（v92，AISLG-224）：visible 实时视野；explored 已探索（动态字段为 null / 0）。缺省按 visible */
+  fog?: 'explored' | 'visible';
+  /** 已探索时为上次看到的时间（ISO）；实时视野为 null */
+  seenAt?: string | null;
 }
 
 /** 野地储量视图（v61，AISLG-165）：档位对所有人可见，数值与预计时刻仅归属方与侦察过的账号可见 */
@@ -130,6 +182,12 @@ export interface TileDetailView extends TileView {
   plunderedAt: string | null;
   /** 在野名将情报（v54）：侦察后给出名字与属性 */
   wildFamousIntel: { scouted: boolean; name: string | null; attrs: { lead: number; force: number; wit: number } | null } | null;
+  /** 城防器械（v73 AISLG-193）：自己的城给精确库存，他人的城给侦察快照；其余为 null */
+  defenses: DefenseScoutView | null;
+  /** 协防部队（v74）：自己的城 / 盟友的城给 "谁在协防、带了多少兵"；其余为 null */
+  assists: import('./protocol-assist').AssistView[] | null;
+  /** 望楼的建造 / 升级进度（v97，AISLG-232）：只有占着这块地的城的主人看得到，其余为 null */
+  facilityBuilding: FacilityBuildingView | null;
 }
 
 /** 本城占领的野地（CityView.territory 元素） */
@@ -150,10 +208,12 @@ export interface TerritoryView {
   clusterSize: number;
   /** 连片产量加成（百分数：3–4 块 10 / ≥5 块 20；不足 3 块为 0） */
   clusterBonusPercent: number;
+  /** 这块地上的望楼（v97，AISLG-232）：等级、视野半径与进行中的建造 / 升级；没盖为 null */
+  facility: TerritoryFacilityView | null;
 }
 
 /** 出征任务（v16）：plunder 掠夺（缺省）/ occupy 占领；v26 transport 运输（目标限本账号另一座城，须带 cargo） */
-export type MarchTask = 'plunder' | 'occupy' | 'transport';
+export type MarchTask = 'plunder' | 'occupy' | 'transport' | 'assist';
 
 /** 行军视图 */
 export interface MarchView {
@@ -164,7 +224,7 @@ export interface MarchView {
   y: number;
   troops: ArmyCounts;
   /** v16 新增 plunder（掠夺）/ occupy（占领）/ reinforce（增援）；attack 仅存量在途行军 */
-  purpose: 'plunder' | 'occupy' | 'reinforce' | 'attack' | 'scout' | 'transfer' | 'transport' | 'intercept' | 'return';
+  purpose: 'plunder' | 'occupy' | 'reinforce' | 'attack' | 'scout' | 'transfer' | 'transport' | 'intercept' | 'return' | 'assist';
   status: 'marching' | 'arrived' | 'returned';
   initiator: InitiatorRole;
   startedAt: string;
@@ -178,6 +238,8 @@ export interface MarchView {
   ambushAt: string | null;
   /** 随队武将 id（v36 AISLG-114；返程沿用同一武将，回城后自然释放），其余 null */
   heroId: string | null;
+  /** 金蝉脱壳已用过（v86，AISLG-211）：同一支返程部队只能用一次 */
+  stratagemUsed: boolean;
 }
 
 /** 战报中一方的汇总（攻方 / 守方共用；v13） */
@@ -199,6 +261,12 @@ export interface BattleSideView {
   rangedUnits: number;
   /** 该方武将（v36 AISLG-114/115）：攻方 = 随队武将、守方 = 城守（仅守城战）；未配将 / 历史战报为 null / 缺省 */
   hero?: BattleHeroView | null;
+  /** 伤兵（v85 AISLG-212）：本方损失中进入伤兵营的部分（玩家一方各兵种 floor(20%)；NPC 为全 0）；阵亡 = losses − wounded − captured；历史战报缺省视为 0 */
+  wounded?: ArmyCounts;
+  /** 被胜方抓走的部分（v85；只含基础七兵种，败方才有；胜方 / 历史战报缺省视为 0） */
+  captured?: ArmyCounts;
+  /** 抓到的俘虏（v85；胜方为玩家时才有——从败方损失抓 10% 进胜方城的俘虏营；平局 / NPC 胜为缺省 0） */
+  captives?: ArmyCounts;
 }
 
 /** 战报的逐回合统计（v13） */
@@ -223,7 +291,7 @@ export interface BattleReportView {
   id: number;
   x: number;
   y: number;
-  kind: 'wilderness' | 'npc_city' | 'npc_raid' | 'city_raid' | 'intercept' | 'yellow_turban' | 'pvp_raid' | 'pvp_wilderness' | 'pvp_conquest';
+  kind: 'wilderness' | 'npc_city' | 'npc_raid' | 'city_raid' | 'intercept' | 'yellow_turban' | 'pvp_raid' | 'pvp_wilderness' | 'pvp_conquest' | 'battlefield' | 'faction_lair';
   role: 'attacker' | 'defender';
   won: boolean;
   rounds: number;
@@ -237,6 +305,10 @@ export interface BattleReportView {
   towerDamage?: number;
   /** 冲车破墙（v33 AISLG-86）：开战时城墙减伤原值 → 破墙后（百分数）；无冲车 / 非攻城战为缺省 */
   wallBreak?: { from: number; to: number };
+  /** 城防器械用量（v73 AISLG-193）：守城战实际用掉的器械，一种一项；无器械 / 未触发为缺省 */
+  defenses?: DefenseUseView[];
+  /** 协防方视角的自身伤亡（v74）：只有协防方的战报带本字段 */
+  assistLosses?: ArmyCounts;
   roundLog: BattleRoundLogEntryView[];
   /** Agent 点评（v23 AISLG-53）；尚无点评时为 null */
   comment: BattleReportCommentView | null;
@@ -303,6 +375,11 @@ export interface ScoutIntel {
   npcStock: Partial<Record<'gold' | 'wood' | 'food' | 'stone' | 'iron', number>> | null;
   /** 情报获取时间（ISO 8601） */
   scoutedAt: string;
+  /** 城防器械（v73 AISLG-193）：玩家城池才有；按侦察科技三档 */
+  defenses?: DefenseScoutView | null;
+  /** 欺敌识破标记（v86，AISLG-211）：目标城有欺敌效果且本次侦察识破时才有（此时 garrison 是真实值）；
+   *  没识破时没有任何标记，garrison 是按倍数换算后的假驻军。被识破不通知施计方 */
+  deception?: { stratagem: import('./protocol-stratagem').StratagemKind; name: string; seen: true };
 }
 
 /** GET_STATE 响应的 cities 元素：账号全部城池（主城在前） */
@@ -313,6 +390,9 @@ export interface CityRefView {
   x: number | null;
   y: number | null;
   isMain: boolean;
+  /** v76（AISLG-197）：城池称号与账号爵位 */
+  title: string;
+  nobility: { index: number; name: string };
 }
 
 /** GET_STATE 响应的 branch：分城名额（v24，AISLG-58） */
@@ -332,17 +412,67 @@ export interface WorldMapResponseData {
   y: number;
   w: number;
   h: number;
+  /** 战争迷雾开关 fog_enabled 的当前值（v97，AISLG-232）：关闭时望楼不产生视野效果 */
+  fogEnabled?: boolean;
   tiles: TileView[];
 }
 
+/** 视野内他人部队的规模档位（v96，AISLG-230）：小股 1–499 / 中军 500–4 999 / 大军 5 000+ */
+export type VisibleMarchScale = 'small' | 'medium' | 'large';
+
+/** 他人部队的主人关系（v96）：与地块 owner.relation 同一口径（解除友好冷却期内为 friendly） */
+export type VisibleMarchRelation = 'ally' | 'friendly' | 'hostile' | 'neutral';
+
+/** 视野内一支他人部队（v96，AISLG-230）：没有目标格 / 出发城 / 时刻 / 兵力 / 兵种 / 将领 / 任务类型 */
+export interface VisibleMarchView {
+  /** 行军 id，与来袭预警的 attackId（= 后端 marchId）匹配 */
+  id: string;
+  /** 当前位置（格坐标，1 位小数） */
+  x: number;
+  y: number;
+  /** 速度（格/秒），只用来外推图标位置 */
+  vx: number;
+  vy: number;
+  returning: boolean;
+  scale: VisibleMarchScale;
+  owner: { username: string; allianceName: string | null; relation: VisibleMarchRelation };
+}
+
+/** GET_VISIBLE_MARCHES 响应（v96） */
+export interface GetVisibleMarchesResponseData {
+  serverTime: string;
+  marches: VisibleMarchView[];
+}
+
 /** 小地图城池点位的归属：本方 / 他方玩家城池 / NPC 城池 / 未被占领的名城 */
-export type MapOverviewSide = 'own' | 'ally' | 'enemy' | 'npc' | 'famous';
+/** famous_rumor（v92）：未探索的名城在锚点上的大致方位 */
+export type MapOverviewSide =
+  | 'own' | 'ally' | 'friendly' | 'hostile' | 'enemy' | 'npc' | 'famous' | 'famous_rumor'
+  | 'relic' | 'hero_site' | 'hero_site_claimed';
+
+/** 遗迹（v93，AISLG-227）：未领取的遗迹；kind 与后端 RELIC_KINDS 一致 */
+export type RelicTier = 'common' | 'rare' | 'legendary';
+export type RelicKind = 'granary' | 'lumberyard' | 'quarry' | 'ironworks' | 'caravan' | 'battlefield' | 'treasury' | 'mausoleum';
+export interface RelicTileView {
+  tier: RelicTier;
+  kind: RelicKind;
+}
+
+/** 名将处所（v93，AISLG-227）：claimed = 名将已被招揽（已出山） */
+export interface HeroSiteView {
+  name: string;
+  hero: string;
+  claimed: boolean;
+}
 
 /** GET_MAP_OVERVIEW 响应（v58，AISLG-160）：城池点位 [x, y, side]，按 y 行 x 列排序；野地不返回 */
 export interface MapOverviewResponseData {
   size: number;
   at: string;
   cities: Array<[number, number, MapOverviewSide]>;
+  /** 迷雾开启时才有（v92）：已探索区块位图（base64，1250 字节）与探索进度（%） */
+  exploredChunks?: string;
+  exploredPercent?: number;
 }
 
 /** MARCH 请求载荷：troops 至少一种 > 0；task 为 v16 出征任务（缺省 plunder） */
@@ -370,7 +500,8 @@ export interface RecallGarrisonResponseData {
 
 /** PUSH_MARCH_STATE（op 2005）推送载荷 */
 export interface MarchStatePushData {
-  reason: 'march_started' | 'march_arrived' | 'march_returned';
+  /** march_time_changed=到达时刻被计谋改写（v86，AISLG-211：金蝉脱壳 / 八门金锁），march 为改后的行军 */
+  reason: 'march_started' | 'march_arrived' | 'march_returned' | 'march_time_changed';
   march: MarchView;
 }
 
@@ -384,6 +515,8 @@ export interface TileStatePushData {
     | 'garrison_reinforced'
     /** v40（AISLG-124）：分城被玩家占领易主 / 城防值被打掉一截 */
     | 'city_conquered'
-    | 'city_durability_hit';
+    | 'city_durability_hit'
+    /** v97（AISLG-232）：望楼建成 / 升级完成（望楼随野地毁掉时走 wilderness_lost） */
+    | 'facility_completed';
   tile: TileView;
 }

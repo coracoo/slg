@@ -137,7 +137,10 @@ export const TOPBAR_EN = {
   productionPrefix: 'Production',
   productionEmpty: 'None yet (takes effect once resource buildings are built)',
   // 净粮产量：毛产量 − 全军耗粮；耗粮为 0 时退回普通格式（由调用方分支）
-  foodNet: (label: string, net: number, upkeep: number) => `${label} ${net >= 0 ? '+' : ''}${net}/h (upkeep ${upkeep}/h)`,
+  foodNet: (label: string, net: number, upkeep: number) => {
+    const value = Math.round(net);
+    return `${label} ${value >= 0 ? '+' : ''}${value}/h (upkeep ${Math.round(upkeep)}/h)`;
+  },
   population: (current: number, cap: number, growthPerHour: number) => `Pop ${current}/${cap} (+${growthPerHour}/h)`,
   // 资源条目的悬浮提示：该资源的储量上限（达上限后停止生产）
   storageHint: (label: string, cap: number) => `${label} storage cap ${cap}`,
@@ -160,6 +163,12 @@ export const TOPBAR_EN = {
     'Once enabled, no one can attack you for the next 12 hours, and you cannot march against players (wilderness / NPC targets are unaffected). You can enable it only once per week, and it cannot be cancelled once started.',
   shieldConfirmSubmit: 'Confirm Enable',
   shieldConfirmCancel: 'Cancel',
+  // Ending the Truce Shield early (v71, AISLG-190): button and confirm dialog (cancel key reuses shieldConfirmCancel)
+  cancelShieldButton: 'End Early',
+  cancelShieldHint: 'End the Truce Shield early: you can be attacked and march again right away; this week’s free use is not refunded',
+  cancelShieldConfirmTitle: 'End Truce Shield early?',
+  cancelShieldConfirmBody: 'Others can attack you again right away, and you can march against players. This week’s free use is not refunded, and you cannot enable it again this week.',
+  cancelShieldConfirmSubmit: 'Confirm End',
   // 仓库快满提醒：≥80% 的资源警示行与悬浮提示（金币不参与，与离线日报同口径）
   storageFullLine: (detail: string) => `⚠ Storage almost full: ${detail}, production beyond the cap will be wasted`,
   storageFullItem: (label: string, percent: number, cap: number) =>
@@ -180,6 +189,24 @@ export const TOPBAR_EN = {
   discardSubmit: 'Confirm Abandon',
   discardBusy: 'Abandoning…',
   discardFallback: 'Failed to abandon the branch city, please try again later',
+  capitalTitle: 'Set as capital',
+  capitalLine1: (next: string, former: string) => `${next} becomes the capital, and ${former} becomes a branch city.`,
+  capitalLine2: 'The capital cannot be occupied, only plundered; the former capital, now a branch city, can be occupied by others.',
+  capitalLine3: (at: string) => `No further swap is allowed within 24 hours of setting a capital (next swap available after ${at}).`,
+  capitalLine4: (from: number, to: number, count: number) => `The branch quota changes from ${from} to ${to} (new capital's Government level ÷ 2); you currently have ${count} branch cities.`,
+  capitalTime: (iso: string) =>
+    new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Shanghai', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
+      .format(new Date(iso)),
+  capitalCancel: 'Cancel',
+  capitalSubmit: 'Confirm set as capital',
+  capitalBusy: 'Setting…',
+  capitalFallback: 'Failed to set the capital, please try again later',
+  capitalBlockedFamous: 'A famous city cannot be the capital (famous cities can always be occupied, so they can only be branch cities).',
+  capitalBlockedCooldown: (at: string) => `No further swap is allowed within 24 hours of setting a capital; available again after ${at}.`,
+  capitalBlockedAttack: 'Another player has troops heading to your cities or wilderness; set the capital after the attack ends.',
+  capitalBlockedDurability: 'This branch city’s durability is below 100; a damaged city cannot become the capital. Try again once it recovers.',
+  capitalBlockedLimit: (limit: number, count: number) => `After the swap you would have ${count} branch cities, above the new capital's limit of ${limit} (Government level ÷ 2). Upgrade that city's Government or abandon a branch city first.`,
+  capitalNoCapital: 'The selected city is already the capital.',
   renameBusy: 'Renaming…',
   self: 'You',
   switchAccount: 'Switch Account',
@@ -214,9 +241,9 @@ export const BUILD_QUEUE_EN = {
   waitingSettle: STATUS_EN.waitingSettle,
   activating: STATUS_EN.activating,
   remainingSeconds: STATUS_EN.remainingSeconds,
-  // 取消排队条目（全额返还成本；在建条目不可取消）
+  // 取消条目（排队中 / 建造中，全额返还成本）
   cancel: 'Cancel',
-  cancelTitle: 'Cancel this queued item — the cost is fully refunded',
+  cancelTitle: 'Cancel this item — the cost is fully refunded',
 } satisfies typeof COPY['buildQueue'];
 
 export const CITY_MAP_EN = {
@@ -283,9 +310,9 @@ export const RECRUIT_PANEL_EN = {
   waitingSettle: STATUS_EN.waitingSettle,
   activating: STATUS_EN.activating,
   remainingSeconds: STATUS_EN.remainingSeconds,
-  // 取消排队条目（全额返还资源与人口；征募中不可取消）
+  // 取消条目（排队中 / 征募中，全额返还资源与人口）
   cancel: 'Cancel',
-  cancelTitle: 'Cancel this queued item — resources and population fully refunded',
+  cancelTitle: 'Cancel this item — resources and population fully refunded',
   formTitle: 'Start Recruitment',
   troopLabel: 'Troop Type',
   countLabel: 'Count',

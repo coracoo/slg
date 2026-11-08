@@ -39,6 +39,7 @@ import {
   REQUEST_RENAME_CITY,
   REQUEST_RESET_ACCOUNT,
   REQUEST_DISCARD_CITY,
+  REQUEST_SET_CAPITAL,
 } from './protocol-doc-ops-city';
 import {
   PUSH_AGENT_PLAN,
@@ -50,6 +51,7 @@ import {
   REQUEST_GET_SERVER_BROADCASTS,
 } from './protocol-doc-ops-agent';
 import { PUSH_STARVATION_STATE } from './protocol-doc-ops-starvation';
+import { REQUEST_FACILITY_BUILD } from './protocol-doc-ops-facility';
 import {
   PUSH_HERO_STATE,
   REQUEST_ASSIGN_HERO,
@@ -76,7 +78,40 @@ import {
   REQUEST_GET_TECHS,
   REQUEST_RESEARCH_TECH,
 } from './protocol-doc-ops-tech';
-import { PUSH_RECRUIT_STATE, REQUEST_RECRUIT, REQUEST_CANCEL_RECRUIT } from './protocol-doc-ops-army';
+import { PUSH_RECRUIT_STATE, REQUEST_RECRUIT, REQUEST_CANCEL_RECRUIT, REQUEST_DISBAND_TROOPS } from './protocol-doc-ops-army';
+import { REQUEST_GET_TROOP_POOLS, REQUEST_RELEASE_TROOPS, REQUEST_RESTORE_TROOPS } from './protocol-doc-ops-troop-pools';
+import { PUSH_DEFENSE_STATE, REQUEST_CANCEL_DEFENSE_CRAFT, REQUEST_CRAFT_DEFENSE } from './protocol-doc-ops-defense';
+import { REQUEST_DISMISS_ASSIST } from './protocol-doc-ops-assist';
+import { PUSH_STRATAGEM, REQUEST_CAST_STRATAGEM, REQUEST_GET_STRATAGEMS } from './protocol-doc-ops-stratagem';
+import { PUSH_EXPLORATION_REPORT } from './protocol-doc-ops-fog';
+import { REQUEST_GET_VISIBLE_MARCHES } from './protocol-doc-ops-visible-marches';
+import { PUSH_FACTION_LAIR, PUSH_FACTION_SIEGE, REQUEST_GET_FACTIONS } from './protocol-doc-ops-faction';
+import { REQUEST_CLAIM_NOBILITY_SALARY, REQUEST_GET_NOBILITY } from './protocol-doc-ops-nobility';
+import { REQUEST_GET_LUOYANG, REQUEST_PUBLISH_DECREE } from './protocol-doc-ops-luoyang';
+import {
+  REQUEST_BUY_MARKET_ORDER,
+  REQUEST_CANCEL_MARKET_ORDER,
+  REQUEST_CREATE_MARKET_ORDER,
+  REQUEST_GET_MARKET,
+} from './protocol-doc-ops-market';
+import {
+  REQUEST_ALLIANCE_DIPLOMACY_END,
+  REQUEST_ALLIANCE_DIPLOMACY_HOSTILE,
+  REQUEST_ALLIANCE_DIPLOMACY_INVITE,
+  REQUEST_ALLIANCE_DIPLOMACY_RESPOND,
+  REQUEST_GET_ALLIANCE_DIPLOMACY,
+} from './protocol-doc-ops-diplomacy';
+import {
+  PUSH_BATTLEFIELD_STATE,
+  REQUEST_BUY_BATTLEFIELD_ITEM,
+  REQUEST_CHAIN_BATTLEFIELD_STRONGHOLD,
+  REQUEST_ENTER_BATTLEFIELD,
+  REQUEST_FIRE_BATTLEFIELD_STRONGHOLD,
+  REQUEST_GET_BATTLEFIELD,
+  REQUEST_MARCH_BATTLEFIELD_SQUAD,
+  REQUEST_SIGNUP_BATTLEFIELD,
+  REQUEST_SPLIT_BATTLEFIELD_SQUAD,
+} from './protocol-doc-ops-battlefield';
 import {
   PUSH_MARCH_STATE,
   PUSH_NPC_ATTACK_WARNING,
@@ -95,7 +130,7 @@ import {
   REQUEST_RECALL_MARCH,
   REQUEST_SCOUT,
 } from './protocol-doc-ops-battle';
-import { PUSH_ATTACK_WARNING, REQUEST_TRUCE } from './protocol-doc-ops-pvp';
+import { PUSH_ATTACK_WARNING, PVP_OP_DOCS } from './protocol-doc-ops-pvp';
 import { CHAT_OP_DOC } from './protocol-doc-ops-chat';
 import { ARENA_OP_DOCS } from './protocol-doc-ops-arena';
 import { STAR_TOWER_OP_DOCS } from './protocol-doc-ops-star-tower';
@@ -106,6 +141,10 @@ import { SEASON_OP_DOCS } from './protocol-doc-ops-season';
 import { HERO_GROWTH_OP_DOCS } from './protocol-doc-ops-hero-growth';
 import { REQUEST_GET_DAILY, REQUEST_CLAIM_DAILY, REQUEST_GET_SIGNIN, REQUEST_SIGNIN } from './protocol-doc-ops-quest';
 import { REQUEST_GET_QUESTS, REQUEST_CLAIM_QUEST, REQUEST_GET_ACTIVITIES, REQUEST_CLAIM_ACTIVITY } from './protocol-doc-ops-quests';
+import { GIFT_STATE_FIELDS } from './protocol-doc-gift';
+import { ITEMS_STATE_FIELDS, REQUEST_BUY_ITEM, REQUEST_GET_ITEMS } from './protocol-doc-ops-items';
+import { MOVE_CITY_STATE_FIELDS, REQUEST_MOVE_CITY } from './protocol-doc-ops-move-city';
+import { REQUEST_RANSOM_HERO } from './protocol-doc-ops-hero-loyalty';
 
 const REQUEST_GET_STATE: RequestOpDoc = {
   kind: 'request',
@@ -119,6 +158,8 @@ const REQUEST_GET_STATE: RequestOpDoc = {
     { name: 'city.id', type: 'string', desc: '城池 UUID。' },
     { name: 'city.name', type: 'string', desc: '城池名称，注册时创建的主城默认为「主城」，可用 RENAME_CITY 修改。' },
     { name: 'city.level', type: 'number', desc: '城池等级（v7 新增；v24 起 = 该城官府等级 levels.government，不另设升级系统；此前恒为 1）。官府升级，城池等级跟着升。' },
+    { name: 'city.title', type: 'string', desc: '城池称号（v76，AISLG-197）：按官府等级 1–4 城池 / 5–9 县城 / 10–14 郡城 / 15–19 州城 / 20+ 都城；都城只给主城，分城最高州城。无数值加成。' },
+    { name: 'city.nobility', type: 'object', desc: '账号爵位（v76，AISLG-197）：{ index（0 = 平民，索引见 GET_NOBILITY）, name }。' },
     { name: 'city.resources.gold', type: 'number', desc: '金（由官府自动生产）。' },
     { name: 'city.resources.wood', type: 'number', desc: '木。' },
     { name: 'city.resources.food', type: 'number', desc: '粮。' },
@@ -127,32 +168,42 @@ const REQUEST_GET_STATE: RequestOpDoc = {
     { name: 'city.deploy', type: 'object', desc: '在外部队数与上限（v30，AISLG-80）：{ count, limit }——count = 本城行军中（含返程、运输、侦察）+ 驻守野地（每块占领野地算一支）的部队数，不计城内驻军；limit = 校场等级（未建校场按 1）。count ≥ limit 时 MARCH / SCOUT 返回 DEPLOY_LIMIT；上线前已在外的部队不受影响。分城各算各的（带 cityId 查询）。' },
     { name: 'city.tower', type: 'object | null', desc: '箭塔数值（v30，AISLG-82）：{ damage 每回合固定伤害, range 射程 }；未建箭塔为 null。仅守城战（NPC 袭击主城）生效，战报 towerDamage 单独列出。' },
     { name: 'city.techs', type: 'object', desc: '账号科技等级（v27，AISLG-77；全账号所有城共享）：{ farming, carrying, marching, storage, scouting, defense }，0 = 未研究。农耕 / 储存已计入 city.production / city.storage，城防已计入 city.defenseBonus；负重与行军加成不在 city 里预计算，客户端预估时自行折算（完整科技表见 GET_TECHS）。' },
-    { name: 'city.buildings', type: 'object', desc: '**DEPRECATED（v3 遗留，勿用）**：按类型统计的已建数量，v5 单实例规则下恒为 0 或 1——切勿当作等级，解析城池建筑状态请一律读 city.levels。键集：{ farm, lumber_mill, quarry, iron_mine, house, government, barracks, warehouse, wall, academy, parade_ground, beacon, post_station, arrow_tower }（v7 起九种，v27 起加书院，v30 起再加校场 / 烽火台 / 驿站 / 箭塔共十四种）。' },
-    { name: 'city.levels', type: 'object', desc: '各建筑类型的当前等级（v5 新增）：0 = 未建造；产量、人口上限与仓储上限均按等级推导。' },
-    { name: 'city.costs', type: 'object', desc: '各建筑「下一步动作」成本（v6 新增，v25 起附时长）：{ build, upgrade, buildSeconds, upgradeSeconds }，按类型；未建时 build 为建造成本、upgrade 为 null，已建未满级时 upgrade 为升级成本（= 建造成本 × 当前等级）、build 为 null，满级成本均为 null；buildSeconds / upgradeSeconds（v25，AISLG-71）为对应动作的单级时长（秒，已按当前全局时间缩放折算），null 语义与对应成本字段一致。发起前可用它展示消耗与耗时并预判资源不足。' },
+    { name: 'city.buildings', type: 'object', desc: '**DEPRECATED（v3 遗留，勿用）**：按类型统计的已建数量，v5 单实例规则下恒为 0 或 1——切勿当作等级，解析城池建筑状态请一律读 city.levels。键集：{ farm, lumber_mill, quarry, iron_mine, house, government, barracks, warehouse, wall, academy, parade_ground, beacon, post_station, arrow_tower }（v7 起九种，v27 起加书院，v30 起再加校场 / 烽火台 / 驿站 / 箭塔共十四种）；v87 起分城不含 tavern / academy。' },
+    { name: 'city.levels', type: 'object', desc: '各建筑类型的当前等级（v5 新增）：0 = 未建造；产量、人口上限与仓储上限均按等级推导。v87（AISLG-217）：**分城不含 tavern / academy 两个键**（酒馆与书院只在主城建，分城的 city.levels / city.costs / city.buildings 都不下发这两项；主城照旧）。' },
+    { name: 'city.costs', type: 'object', desc: '各建筑「下一步动作」成本（v6 新增，v25 起附时长）：{ build, upgrade, buildSeconds, upgradeSeconds }，按类型；未建时 build 为建造成本、upgrade 为 null，已建未满级时 upgrade 为升级成本（= 建造成本 × 当前等级）、build 为 null，满级成本均为 null；buildSeconds / upgradeSeconds（v25，AISLG-71）为对应动作的单级时长（秒，已按当前全局时间缩放折算），null 语义与对应成本字段一致。发起前可用它展示消耗与耗时并预判资源不足。v87：分城不含 tavern / academy。' },
     { name: 'city.levelMax', type: 'object', desc: '各建筑的等级上限（v63 新增，AISLG-167）：{ 建筑类型: 上限 }，普通建筑 20；占有对应名城（city.famousName）时其主题建筑为 25——洛阳城墙、长安箭塔、官渡农田、成都铁矿、建业伐木场、邺城官府、许昌驿站、襄阳仓库。等级上限随城池走（换主人归新主人，与名城效果同口径）。失守后超出上限的存量等级按当前上限生效（产出、守城减伤、箭塔、仓库、升级判定一律按上限计，levelMax 与 levels 一致；库存不改，重新占领即恢复）。city.costs 的 upgrade 与连升（UPGRADE toLevel）都按此上限判定。' },
     { name: 'city.farms', type: 'number', desc: '**DEPRECATED（v3 遗留，勿用）**：兼容字段，= buildings.farm（0/1 已建标记）；等级请读 city.levels.farm。' },
     { name: 'city.production', type: 'object', desc: '当前小时产量（v3 新增，v7 起含 gold）：{ gold, food, wood, stone, iron }；四种生产资源各含 100/小时的基础产量（无对应建筑也产出），建筑产量按等级叠加；金币由官府（100×等级/小时，v19）与占领金矿生产（无基础产量）。产量随建筑建成即时生效。' },
     { name: 'city.population', type: 'object', desc: '人口现状（v7 新增，v8 规则确认，v19 数值修订）：{ current 当前人口, cap 上限（= 50 + 100 × 民房等级 × (民房等级 + 1)，无民房即基线 50）, growthPerHour 每小时增长（基准 = 10 × 民房等级 × (等级 + 1)，无民房为 0；实际 × 全局时间缩放） }；current ≥ cap 时停止增长（新号即 50/50 满编、增速 0，建民房后恢复增长）；征兵将消耗人口。' },
     { name: 'city.army', type: 'object', desc: '城内驻军（v11 新增）：{ porter, militia, scout, pikeman, swordsman, archer, cavalry, iron_cavalry, supply_wagon, ballista, siege_ram }（后四种为 v33 二期兵种），按兵种统计；征兵完成（recruit_completed）时累加。v64（AISLG-168）起键集再加 yulin_guard、danyang_soldier、baimao_soldier、huwei_guard、zhuge_crossbow、xiandeng_warrior、hubao_cavalry、xiliang_cavalry 八种名城专属兵（占领对应名城才能征募，失守后已练出的兵留在原主人手里）。' },
     { name: 'city.armyFoodUsePerHour', type: 'number', desc: '全军小时耗粮（v14 新增，实际值 × 全局时间缩放，与产出同幅）：城内驻军 1 倍 + 行军中/野地驻军 2 倍（单兵耗粮见各兵种 foodUse）。production.food 为毛产量，净粮 = production.food − 本值，可为负；结算把粮食扣到 0 为止、不记负债；**v34（AISLG-107）起断粮不再只是停止增长**：粮食为 0 且净产量为负时，每小时（缩放后）城内驻军每兵种减 10%（见 city.starveAt / city.mutinyNextAt 与 PUSH_STARVATION_STATE）。' },
+    { name: 'city.wounded / city.captives / city.deserters', type: 'object', desc: '伤兵营 / 俘虏营 / 逃兵营（v85 新增，AISLG-212）：各 = { troops 按兵种合计, earliestExpireAt 最早一批的过期时刻（ISO 8601，池子为空为 null；过期行读取时已过滤，到期即视为消失）}。伤兵 = 玩家一方每场世界地图战斗各兵种损失 × 20%，俘虏 = 胜方从败方损失抓的 10%（仅基础七兵种），逃兵 = 断粮哗变每小时减掉的 10%；三池不吃粮、不参战、不能被掠夺。处置用 RESTORE_TROOPS（治疗 / 招降 / 劝回）与 RELEASE_TROOPS（放弃 / 释放，仅 wounded / captive）。' },
+    { name: 'city.inBattle', type: 'boolean', desc: '是否有敌情（v84，AISLG-209）：本城或其名下野地正有行军在途指向（来袭 / 运输 / 占领 / 侦察），或有未结的 NPC 来袭。为 true 时 DISBAND_TROOPS 返回 CITY_IN_BATTLE（与放弃分城的判定同口径），客户端据此置灰遣散按钮。' },
     { name: 'city.starveAt', type: 'string | null', desc: '预计断粮时间（v34，AISLG-107；ISO 8601）：按当前粮食与净产量（粮毛产量 production.food − armyFoodUsePerHour）推算，已断粮 = 当前时刻，净产量不为负（不会断粮）为 null。距断粮不足 1 小时（缩放后）推送一次预警。' },
-    { name: 'city.mutinyNextAt', type: 'string | null', desc: '下一次断粮哗变时刻（v34）：已断粮（粮食 0 且净产量为负）时有值——到点本城城内驻军每个兵种减 10%（向上取整、至少 1 个，在外部队不受影响、不强制召回）；否则 null。'  },
+    { name: 'city.mutinyNextAt', type: 'string | null', desc: '下一次断粮哗变时刻（v34）：已断粮（粮食 0 且净产量为负）时有值——到点本城城内驻军每个兵种减 10%（向上取整、至少 1 个，在外部队不受影响、不强制召回；v85 AISLG-212 起减少的进本城逃兵营 city.deserters，断粮结束后可 50% 劝回）；否则 null。'  },
     { name: 'city.timeScale', type: 'number', desc: '当前部署的全局时间缩放（v20 新增，AISLG-38）：文档时长基准 ÷ 本值 = 实际耗时（钳 1 秒）、速率基准 × 本值。客户端需本地折算时长（如掠夺冷却剩余）时用本值，不要按文档数值硬算。' },
     { name: 'city.truceUntil', type: 'string | null', desc: '主城免战截止（v22 新增，AISLG-40）：主城被 NPC 袭击攻破后写入，免战期内（2 × 袭击基准间隔，随 timeScale 缩放）该主城不再进入袭击目标池；从未被攻破为 null。到期自动回到目标池，无事件通知——Agent 规划重建时可据此判断安全窗口。v38（AISLG-122）起被玩家攻破 / 被抢后同样写入（4 小时基准随缩放），玩家与 NPC 共用。' },
     { name: 'city.newbieUntil', type: 'string | null', desc: '新手保护截止（v38，AISLG-122，账号级）：注册后 3 天或任一城官府升到 8 级（v42 校准：原 5 级在加速服几分钟即达，形同虚设），先到为准；期内别人不能侦察 / 攻击你（NEWBIE_PROTECTED），你自己侦察 / 攻击其他玩家会立即失效（事件 newbie_protection_ended，打野地 / NPC 不触发）。已出保为 null。' },
     { name: 'city.shieldUntil', type: 'string | null', desc: '主动免战截止（v38，AISLG-122，账号级）：TRUCE 开启后 12 小时基准随缩放；开着时别人打不了你（含 NPC 袭击目标池跳过）、你也不能出兵打玩家（SELF_TRUCE_ACTIVE，打野地 / NPC 不受限）。未开启为 null。' },
     { name: 'city.shieldNextAt', type: 'string | null', desc: '下一次可开启主动免战的时刻（v38，AISLG-122；每周一次，ISO 8601）；当前可开启为 null。' },
     { name: 'city.durability', type: 'number | null', desc: '分城城防值（v40，AISLG-124）：0..100，被「占领」打赢一击 −35（冲车加成最多再 −15）、归零一击换主；免战结束后每小时回涨 10 至满（免战内不回涨）。主城为 null（永不被占领）。' },
-    { name: 'city.famousName / city.productionBonusPercent', type: 'string | null / number', desc: '名城分城标记（v24 新增，AISLG-56）：占领名城得到的分城带名城名（famousName）与独占产量加成百分数（productionBonusPercent，当前 20，已计入 production）；普通城为 null / 0。v64（AISLG-168）：占领名城的分城可征募该名城的专属兵（名城 → 兵种对照见 RECRUIT 的 summary），失守即失去征募资格。' },
+    { name: 'city.luoyangBonusPercent（v79 洛阳之主联盟 +5%，已计入 production）/ city.famousName / city.productionBonusPercent', type: 'string | null / number', desc: '名城分城标记（v24 新增，AISLG-56）：占领名城得到的分城带名城名（famousName）与独占产量加成百分数（productionBonusPercent，当前 20，已计入 production）；普通城为 null / 0。v64（AISLG-168）：占领名城的分城可征募该名城的专属兵（名城 → 兵种对照见 RECRUIT 的 summary），失守即失去征募资格。' },
     { name: 'city.famousEffect', type: 'object | null', desc: `名城独有效果（v62 新增，AISLG-166）：{ kind, percent, resources }，只有占领者享受、跟着城走（换主人归新主人，放弃 / 被占即失效）。洛阳守城城墙减伤 +5 个百分点、长安箭塔伤害 +20%、官渡 / 成都 / 建业 / 邺城辖下对应资源的野地产出 +25%、许昌自己城池之间的调兵 / 运输行军速度 +20%、襄阳仓库防掠夺保护额 +50%。普通城为 null。` },
     { name: 'city.guard', type: 'object | null', desc: '城守（v36 新增，AISLG-115）：该城任命的武将 { heroId, name, famous, lead, force, wit, level, bonusPercent }；未任为 null。产量加成（四资源非金，智力 × 0.1% 封顶 5%）已计入 production；守城战另享攻防加成（见 ASSIGN_HERO）。' },
     { name: 'city.recruitQueue', type: 'array', desc: '征兵队列（v11 新增）：第 1 项为征募中（status=recruiting，dueAt 非空），其余为排队（status=queued，dueAt 为 null）；已取消条目不在其中。' },
+    { name: 'city.assistIn', type: 'array', desc: '（v74，AISLG-194）驻扎在本城的盟友协防部队：{ id, accountId, username, fromCityId, fromCityName, troops（全兵种计数）, arrivedAt, initiator }。城主与盟友可见；外人侦察时只计入守军总数。' },
+    { name: 'city.assistOut', type: 'array', desc: '（v74）本城派出、正在盟友城里驻扎的协防部队：{ id, hostCityId, hostCityName, hostUsername, troops, arrivedAt }。占校场出征名额，可用 DISMISS_ASSIST 召回。' },
+    { name: 'city.assistCap', type: 'number', desc: '（v74）本城可接收的协防部队上限（当前 5 支；洛阳 10 支留待洛阳争夺需求）。' },
+    { name: 'city.defenses', type: 'object', desc: '城防器械（v73，AISLG-193）：{ cap 库存上限（城墙等级 × 60）, stock 四种器械已入库件数（trap / chevaux / rolling_log / boulder，恒含四个键）, total 合计, queue 打造队列（第 1 项 status=crafting、其余 queued；条目结构同 CRAFT_DEFENSE 的 craft） }。守城战开打时按需自动消耗，战报的 defenses 字段给出用量与杀伤。' },
     { name: 'city.defenseBonus', type: 'number', desc: '城墙守城防御加成（v11 新增；百分数数值，随城墙等级提升；v27 起含城防科技的额外百分点）：攻城战中守方位于城墙位的受击减免即按此值（机制见术语表「战斗」；具体结算算法不对外公开）。' },
     { name: 'city.marches', type: 'array', desc: '本城进行中的行军（v12 新增）：status=marching 的出征与返程条目，按到达时间排序；到达结算后不在其中（结果见 march_completed 事件与推送）。' },
-    { name: 'city.territory', type: 'array', desc: '本城占领的野地（v12 新增）：{ x, y, terrain, level, resource, bonusRate 占领加成/小时, gatherRate 驻军采集/小时, garrison 驻军总数, clusterSize 连片块数（v23 新增，AISLG-59）, clusterBonusPercent 连片产量加成百分数（v23 新增：3–4 块 10 / ≥5 块 20，不足 3 块为 0）, reserve 野地储量（v61 新增，AISLG-165；档位与当前储量 / 上限 / 预计采空或回满时刻，本城占领的地块恒给出数值）}；production 已计入 bonusRate、gatherRate 与连片加成——连片按同地形 + 上下左右相邻计算，占领 / 失守后按最新领地自动重算。v61 起 gatherRate 受储量约束：储量空时驻军只按恢复速度（2%/h）采集，采空不需要撤兵，留兵即按恢复速度小量采集。' },
-    { name: 'cities', type: 'array', desc: 'v12 新增：账号全部城池 { id, name, level, x, y, isMain }，主城在前；v24 起 level = 各城官府等级。未占领 NPC 城池时只有主城一座。' },
+    { name: 'city.territory', type: 'array', desc: '本城占领的野地（v12 新增）：{ x, y, terrain, level, resource, bonusRate 占领加成/小时, gatherRate 驻军采集/小时, garrison 驻军总数, clusterSize 连片块数（v23 新增，AISLG-59）, clusterBonusPercent 连片产量加成百分数（v23 新增：3–4 块 10 / ≥5 块 20，不足 3 块为 0）, reserve 野地储量（v61 新增，AISLG-165；档位与当前储量 / 上限 / 预计采空或回满时刻，本城占领的地块恒给出数值）, facility 这块地上的望楼（v97 新增，AISLG-232；{ kind（恒为 watchtower）, level 已建成等级 0..3, visionRadius 视野半径 1 级 6 / 2 级 8 / 3 级 10 格（丘陵上的野地各 +2：8 / 10 / 12，上限 12；level 为 0 时 0，AISLG-233）, building: { toLevel, finishAt } | null 进行中的建造 / 升级 }，没盖为 null）}；production 已计入 bonusRate、gatherRate 与连片加成——连片按同地形 + 上下左右相邻计算，占领 / 失守后按最新领地自动重算。v61 起 gatherRate 受储量约束：储量空时驻军只按恢复速度（2%/h）采集，采空不需要撤兵，留兵即按恢复速度小量采集。' },
+    ...GIFT_STATE_FIELDS,
+    ...ITEMS_STATE_FIELDS,
+    ...MOVE_CITY_STATE_FIELDS,
+    { name: 'cities', type: 'array', desc: 'v12 新增：账号全部城池 { id, name, level, x, y, isMain, title 城池称号, nobility 爵位 }，主城在前；v24 起 level = 各城官府等级。未占领 NPC 城池时只有主城一座。' },
     { name: 'branch', type: 'object', desc: 'v24 新增（AISLG-58）：分城名额 { count 现有分城数（不含主城）, limit 上限 = floor(主城官府等级 ÷ 2)（v57 由 ÷3 放宽）, minGovernment 占领 NPC 城所需的主城官府最低等级（3） }。名城（AISLG-56）同样计入。' },
+    { name: 'capitalSwap', type: 'object', desc: 'v82 新增（AISLG-205，设为主城）：{ cooldownUntil 设为主城的冷却截止（ISO 8601，冷却未结束才有值，否则 null）, underAttack 本账号任一城或野地正有他人玩家的掠夺 / 占领出征在途, blocked 逐分城的不可设原因 { [cityId]: FAMOUS_CITY_NOT_CAPITAL / CAPITAL_SWAP_DURABILITY_LOW / BRANCH_LIMIT_EXCEEDED }（未列出的分城可设） }。供前端置灰，权威判定仍在 SET_CAPITAL。' },
     { name: 'city.storage', type: 'object', desc: '储量上限（v7 新增，v8 规则确认；v22 AISLG-41 随全局缩放）：{ gold, food, wood, stone, iron }；四资源各自 = （10000 + 对应资源**建筑产量**（各生产建筑等级 × 每级速率之和，**不含**无建筑的 100/h 基础产量）× 100）× timeScale，金币 = 100 万 × timeScale——上限与产出同幅缩放，填满时长不受缩放影响：四资源恒为基准 100 小时；金币随官府等级与金矿占领加成变化（仅有官府产金时 = 10000 ÷ 官府等级 小时，官府 Lv4 时才是 2500 小时），请用 storage[k] ÷ production[k] 现算。达到上限后停止对应生产；已有超限存量不扣减。仓库不改变储量上限（v21 起防掠夺保护消费方已接入：NPC 袭击主城攻破后可掠量 = max(0, 存量 − 保护额)，保护量 4000×等级、四资源固定均分各 1000×等级；金币不受仓库保护，但 NPC 单次最多抢走存量的 5%（v41 AISLG-125）、玩家互掠为存量的 10%）。' },
     { name: 'city.queue', type: 'array', desc: '建造队列（v4 新增）：第 1 项为在建（status=building，dueAt 非空），其余为排队（status=queued，dueAt 为 null），按入队顺序；已取消的条目不在其中（CANCEL_BUILD 取消）。' },
     {
@@ -251,7 +302,7 @@ const REQUEST_GET_EVENTS: RequestOpDoc = {
     {
       name: 'events[].type',
       type: 'string',
-      desc: "事件类型：'build_started' | 'build_queued' | 'build_completed' | 'build_cancelled'（v7） | 'recruit_started' | 'recruit_queued' | 'recruit_completed' | 'recruit_cancelled'（v11） | 'march_started' | 'march_completed' | 'wilderness_occupied' | 'wilderness_lost' | 'npc_city_occupied' | 'npc_raid'（v12） | 'city_renamed'（v7） | 'account_reset'（v9，重置后事件流只剩这一条） | 'agent_connected' | 'agent_disconnected' | 'resource_exchanged'（v22，集市兑换成交，detail = { resource, amount, gold, rate }） | 'npc_attack_warning'（v23，NPC 袭击预警，detail = { x, y, target, terrain, level, armyMin, armyMax, arriveAt, attackId }） | 'starvation_warning' / 'mutiny'（v34，断粮预警 / 哗变） | 'hero_recruited' / 'hero_dismissed' / 'hero_arrears' / 'hero_wounded' / 'hero_level_up' / 'hero_granted' / 'guard_changed'（v36，AISLG-114/115/116，武将：招募 / 解雇 / 欠饷 / 重伤 / 升级 / 获得名将 / 城守任命）· 'wilderness_depleted'（v61，AISLG-165，名下野地储量采空，detail = { x, y, terrain, level, at }）。",
+      desc: "事件类型：'build_started' | 'build_queued' | 'build_completed' | 'build_cancelled'（v7） | 'recruit_started' | 'recruit_queued' | 'recruit_completed' | 'recruit_cancelled'（v11） | 'march_started' | 'march_completed' | 'wilderness_occupied' | 'wilderness_lost'（detail = { x, y, cause = npc_attack / recall / conquest / inactive（v98，AISLG-238，账号长期未上线被收回）, terrain, level }） | 'npc_city_occupied' | 'npc_raid'（v12） | 'city_renamed'（v7） | 'account_reset'（v9，重置后事件流只剩这一条） | 'agent_connected' | 'agent_disconnected' | 'gift_spent'（v89，礼金扣除，detail = { reason, amount, balance }）· 'item_granted' / 'item_used' / 'item_bought'（v90，AISLG-222，道具发放 { itemId, requested, granted, reason } / 消耗 { itemId, amount, left, reason } / 礼金购买 { itemId, count, price, cost, owned, gift }） | 'resource_exchanged'（v22，集市兑换成交，detail = { resource, amount, gold, rate }） | 'npc_attack_warning'（v23，NPC 袭击预警，detail = { x, y, target, terrain, level, armyMin, armyMax, arriveAt, attackId }；v100 起势力范围内的袭击另带 faction = { key, name, nameEn } 与 lair = { x, y }（出发老巢），见 PUSH_NPC_ATTACK_WARNING） | 'starvation_warning' / 'mutiny'（v34，断粮预警 / 哗变） | 'hero_recruited' / 'hero_dismissed' / 'hero_arrears' / 'hero_wounded' / 'hero_level_up' / 'hero_granted' / 'guard_changed'（v36，AISLG-114/115/116，武将：招募 / 解雇 / 欠饷 / 重伤 / 升级 / 获得名将 / 城守任命）· 'wilderness_depleted'（v61，AISLG-165，名下野地储量采空，detail = { x, y, terrain, level, at }）· 'truce_cancelled'（v71，AISLG-190，主动免战提前解除，detail = { until, cancelledAt }）· 'troops_disbanded'（v84，AISLG-209，遣散城内驻军，detail = { cityId, troops, refunded }）· 'hero_left'（v94，AISLG-228，名将下野，detail = { heroId, heroName, cause = loyalty / captive_expired }，胜方得结交资格时另有一条 qualified = true）/ 'hero_captured'（v94，名将被俘，主人与胜方各一条，detail = { heroId, heroName, ownerUsername, captorUsername, capturedUntil, ransomGold, side }）/ 'hero_ransomed'（v94，名将被赎回，detail = { heroId, heroName, ransomGold, taxShare, destroyed, side }）/ 'hero_loyalty_low'（v94，忠诚度降到 30 及以下，detail = { heroId, heroName, loyalty }）· 'faction_siege_warning'（v100，AISLG-240，势力围攻分城预警，detail = { siegeId, faction: { key, name, nameEn }, cityId, cityName, x, y, level, power, durability, beaconLevel, intel, armyMin, armyMax, arriveAt }）/ 'faction_siege'（v100，围攻结算，detail = { siegeId, faction, cityId, cityName, x, y, power, garrisonPower, rounds, losses, reportId, outcome = repelled / hit / swallowed, durability, damage?, durabilityAfter?, protectedUntil? }）/ 'faction_city_lost'（v100，城被势力吞下，detail = { cityId, cityName, x, y, faction, mainCityId, wildernessLost, facilitiesLost, reportId, siegeId }）。",
     },
     { name: 'events[].initiator', type: "'player' | 'agent' | null", desc: '发起事件的连接声明的登录类型。' },
     { name: 'events[].cityId', type: 'string | null', desc: '关联城池 id，无关联时为 null。' },
@@ -418,11 +469,58 @@ export const OP_DOC: Record<Op, OpDoc> = {
   [Op.RENAME_CITY]: withCityId(REQUEST_RENAME_CITY),
   [Op.RESET_ACCOUNT]: REQUEST_RESET_ACCOUNT,
   [Op.DISCARD_CITY]: REQUEST_DISCARD_CITY,
+  [Op.SET_CAPITAL]: REQUEST_SET_CAPITAL,
   [Op.AGENT_REPORT_PLAN]: REQUEST_AGENT_REPORT_PLAN,
   [Op.RECRUIT]: withCityId(REQUEST_RECRUIT),
   [Op.CANCEL_RECRUIT]: REQUEST_CANCEL_RECRUIT,
+  [Op.DISBAND_TROOPS]: withCityId(REQUEST_DISBAND_TROOPS),
+  // v85（AISLG-212）：伤兵 / 俘虏 / 逃兵的治疗 / 招降 / 劝回与放弃 / 释放
+  [Op.RESTORE_TROOPS]: withCityId(REQUEST_RESTORE_TROOPS),
+  [Op.RELEASE_TROOPS]: withCityId(REQUEST_RELEASE_TROOPS),
+  // v88（AISLG-218）：全账号伤兵营汇总（不需要 cityId——返回的就是全部城）
+  [Op.GET_TROOP_POOLS]: REQUEST_GET_TROOP_POOLS,
+  [Op.CRAFT_DEFENSE]: withCityId(REQUEST_CRAFT_DEFENSE),
+  [Op.CANCEL_DEFENSE_CRAFT]: REQUEST_CANCEL_DEFENSE_CRAFT,
+  [Op.DISMISS_ASSIST]: REQUEST_DISMISS_ASSIST,
+  [Op.GET_STRATAGEMS]: REQUEST_GET_STRATAGEMS,
+  [Op.GET_ITEMS]: REQUEST_GET_ITEMS,
+  [Op.BUY_ITEM]: REQUEST_BUY_ITEM,
+  [Op.MOVE_CITY]: REQUEST_MOVE_CITY,
+  [Op.RANSOM_HERO]: REQUEST_RANSOM_HERO,
+  [Op.CAST_STRATAGEM]: REQUEST_CAST_STRATAGEM,
+  [Op.PUSH_STRATAGEM]: PUSH_STRATAGEM,
+  [Op.PUSH_EXPLORATION_REPORT]: PUSH_EXPLORATION_REPORT,
+  [Op.GET_BATTLEFIELD]: REQUEST_GET_BATTLEFIELD,
+  [Op.SIGNUP_BATTLEFIELD]: REQUEST_SIGNUP_BATTLEFIELD,
+  [Op.ENTER_BATTLEFIELD]: REQUEST_ENTER_BATTLEFIELD,
+  [Op.SPLIT_BATTLEFIELD_SQUAD]: REQUEST_SPLIT_BATTLEFIELD_SQUAD,
+  [Op.MARCH_BATTLEFIELD_SQUAD]: REQUEST_MARCH_BATTLEFIELD_SQUAD,
+  [Op.BUY_BATTLEFIELD_ITEM]: REQUEST_BUY_BATTLEFIELD_ITEM,
+  [Op.FIRE_BATTLEFIELD_STRONGHOLD]: REQUEST_FIRE_BATTLEFIELD_STRONGHOLD,
+  [Op.CHAIN_BATTLEFIELD_STRONGHOLD]: REQUEST_CHAIN_BATTLEFIELD_STRONGHOLD,
+  [Op.GET_NOBILITY]: REQUEST_GET_NOBILITY,
+  [Op.CLAIM_NOBILITY_SALARY]: REQUEST_CLAIM_NOBILITY_SALARY,
+  [Op.ALLIANCE_DIPLOMACY_INVITE]: REQUEST_ALLIANCE_DIPLOMACY_INVITE,
+  [Op.ALLIANCE_DIPLOMACY_RESPOND]: REQUEST_ALLIANCE_DIPLOMACY_RESPOND,
+  [Op.ALLIANCE_DIPLOMACY_END]: REQUEST_ALLIANCE_DIPLOMACY_END,
+  [Op.ALLIANCE_DIPLOMACY_HOSTILE]: REQUEST_ALLIANCE_DIPLOMACY_HOSTILE,
+  [Op.GET_ALLIANCE_DIPLOMACY]: REQUEST_GET_ALLIANCE_DIPLOMACY,
+  [Op.GET_MARKET]: REQUEST_GET_MARKET,
+  [Op.CREATE_MARKET_ORDER]: REQUEST_CREATE_MARKET_ORDER,
+  [Op.BUY_MARKET_ORDER]: REQUEST_BUY_MARKET_ORDER,
+  [Op.CANCEL_MARKET_ORDER]: REQUEST_CANCEL_MARKET_ORDER,
+  [Op.GET_LUOYANG]: REQUEST_GET_LUOYANG,
+  [Op.PUBLISH_DECREE]: REQUEST_PUBLISH_DECREE,
+  [Op.PUSH_BATTLEFIELD_STATE]: PUSH_BATTLEFIELD_STATE,
   [Op.GET_WORLD_MAP]: REQUEST_GET_WORLD_MAP,
   [Op.GET_MAP_OVERVIEW]: REQUEST_GET_MAP_OVERVIEW,
+  // 视野内的他人部队（v96，AISLG-230）：玩家与 Agent 同一接口、同一套裁剪
+  [Op.GET_VISIBLE_MARCHES]: REQUEST_GET_VISIBLE_MARCHES,
+  // 五方势力（v99，AISLG-239）：只读；老巢坐标对全服公开，不做迷雾裁剪
+  [Op.GET_FACTIONS]: REQUEST_GET_FACTIONS,
+  // 势力围攻分城（v100，AISLG-240）：预警 / 打输 / 扣城防 / 城被吞
+  [Op.PUSH_FACTION_SIEGE]: PUSH_FACTION_SIEGE,
+  [Op.PUSH_FACTION_LAIR]: PUSH_FACTION_LAIR,
   [Op.GET_TILE]: REQUEST_GET_TILE,
   [Op.MARCH]: withCityId(REQUEST_MARCH),
   [Op.EXCHANGE]: withCityId(REQUEST_EXCHANGE),
@@ -440,7 +538,7 @@ export const OP_DOC: Record<Op, OpDoc> = {
   [Op.RECRUIT_HERO]: withCityId(REQUEST_RECRUIT_HERO),
   [Op.DISMISS_HERO]: withCityId(REQUEST_DISMISS_HERO),
   [Op.ASSIGN_HERO]: withCityId(REQUEST_ASSIGN_HERO),
-  [Op.TRUCE]: REQUEST_TRUCE,
+  ...PVP_OP_DOCS,
   [Op.WX_QR_CREATE]: REQUEST_WX_QR_CREATE,
   [Op.WX_SCAN]: REQUEST_WX_SCAN,
   [Op.WX_CONFIRM]: REQUEST_WX_CONFIRM,
@@ -460,6 +558,7 @@ export const OP_DOC: Record<Op, OpDoc> = {
   [Op.PUSH_CITY_STATE]: PUSH_CITY_STATE,
   [Op.PUSH_AGENT_PLAN]: PUSH_AGENT_PLAN,
   [Op.PUSH_RECRUIT_STATE]: PUSH_RECRUIT_STATE,
+  [Op.PUSH_DEFENSE_STATE]: PUSH_DEFENSE_STATE,
   [Op.PUSH_MARCH_STATE]: PUSH_MARCH_STATE,
   [Op.PUSH_TILE_STATE]: PUSH_TILE_STATE,
   [Op.PUSH_BATTLE_REPORT]: PUSH_BATTLE_REPORT,
@@ -497,4 +596,6 @@ export const OP_DOC: Record<Op, OpDoc> = {
   ...ALLIANCE_OP_DOCS,
   // 联盟地图标记（v69，AISLG-184）：条目在 protocol-doc-ops-alliance-mark.ts；玩家与 Agent 通用，收录进对外 Agent 文档
   ...ALLIANCE_MARK_OP_DOCS,
+  // 野地设施（望楼，v97，AISLG-232）：条目在 protocol-doc-ops-facility.ts，玩家与 Agent 通用，收录进对外 Agent 文档
+  [Op.FACILITY_BUILD]: REQUEST_FACILITY_BUILD,
 };

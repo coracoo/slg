@@ -6,6 +6,8 @@
 import { BUILDING_KINDS, RESOURCE_KEYS, type BuildingKind, type KindActionCosts, type Resources } from './protocol';
 import { FAMOUS_THEME_LEVEL_MAX, famousThemeBuildingOf } from './famous-effects';
 import { getTimeScale, scaledRate } from './time-scale';
+import { EXCHANGE_INPUT_PER_GOLD, exchangeGoldFor } from './exchange';
+export { EXCHANGE_INPUT_PER_GOLD, exchangeGoldFor } from './exchange';
 
 /** 建筑建成后的经济产出；非生产建筑为 null（军营的征兵、城墙的守城加成属后续玩法） */
 export type ProducesKind = 'food' | 'wood' | 'stone' | 'iron' | 'gold';
@@ -20,6 +22,9 @@ export interface BuildingInfo {
   produces: ProducesKind | null;
   /** 建造成本（占位数值） */
   cost: Resources;
+  /** 只在主城可建造 / 可升级（v87，AISLG-217）：酒馆（武将上限取主城那座）与书院（科技门槛按主城那座）。
+   *  分城的 BUILD / UPGRADE 返回 BUILDING_MAIN_ONLY，不扣资源、不入队；分城的 CityView 也不下发这两项 */
+  mainOnly?: boolean;
 }
 
 /**
@@ -101,6 +106,8 @@ export const BUILDING_INFO: Record<BuildingKind, BuildingInfo> = {
     short: '院',
     produces: null,
     cost: { gold: 180, wood: 100, food: 0, stone: 50, iron: 0 },
+    // v87（AISLG-217）：科技是账号级效果，书院只在主城建造
+    mainOnly: true,
   },
   parade_ground: {
     kind: 'parade_ground',
@@ -136,8 +143,22 @@ export const BUILDING_INFO: Record<BuildingKind, BuildingInfo> = {
     short: '酒',
     produces: null,
     cost: { gold: 260, wood: 120, food: 0, stone: 60, iron: 40 },
+    // v87（AISLG-217）：武将上限取主城酒馆等级、候选也只有一份，酒馆只在主城建造
+    mainOnly: true,
   },
 };
+
+/**
+ * 仅主城可建造 / 可升级的建筑（v87，AISLG-217）：酒馆与书院。两者的效果本来就是账号级的
+ * （科技全账号生效、武将上限取主城酒馆等级），分城建了无用，因此只在主城建造。
+ * 判定入口只有一处：发起建造 / 升级共用的 judgeMainCityOnly。
+ */
+export const MAIN_CITY_ONLY_KINDS: readonly BuildingKind[] = ['tavern', 'academy'];
+
+/** 该建筑是否只能在主城建造 / 升级（v87） */
+export function isMainCityOnlyBuilding(kind: BuildingKind): boolean {
+  return BUILDING_INFO[kind].mainOnly === true;
+}
 
 /** 兼容导出：农场成本（协议文档示例引用） */
 export const FARM_COST: Resources = BUILDING_INFO.farm.cost;
@@ -289,18 +310,20 @@ export function buildTimeBasis(): { seconds: number; scale: number } {
   return { seconds: DEFAULT_BUILD_SECONDS, scale: getTimeScale() };
 }
 
-/** 新建时长（秒）= max(1, floor(基准 ÷ scale)) */
-export function buildSeconds(): number {
-  return upgradeSeconds(1);
+/** 新建时长（秒）= max(1, floor(基准 ÷ scale))；reducePercent 为「建筑」科技折扣（v72，每级 3%） */
+export function buildSeconds(reducePercent = 0): number {
+  return upgradeSeconds(1, reducePercent);
 }
 
 /**
  * 升级时长（秒）：占位公式 = 建造时长 × 升级倍数（upgradeLevelFactor：1~10 级 Lv1→2 为 2 倍时长，
- * 以此类推线性；10 级以后每级 ×1.3，v31），全局缩放作用于总时长：max(1, floor(基准 × 倍数 ÷ scale))。
+ * 以此类推线性；10 级以后每级 ×1.3，v31），再按「建筑」科技折扣缩短（v72，v72 AISLG-192），
+ * 全局缩放作用于总时长：max(1, floor(基准 × 倍数 × (1 − reducePercent/100) ÷ scale))。
  */
-export function upgradeSeconds(currentLevel: number): number {
+export function upgradeSeconds(currentLevel: number, reducePercent = 0): number {
   const { seconds, scale } = buildTimeBasis();
-  return Math.max(1, Math.floor((seconds * upgradeLevelFactor(currentLevel)) / scale));
+  const factor = 1 - Math.min(100, Math.max(0, reducePercent)) / 100;
+  return Math.max(1, Math.floor((seconds * upgradeLevelFactor(currentLevel) * factor) / scale));
 }
 
 /** 升级成本（占位公式 = 建造成本 × 升级倍数 upgradeLevelFactor，逐项取整；1~10 级线性不变，10 级以后每级 ×1.3） */
@@ -320,7 +343,11 @@ export function upgradeCost(kind: BuildingKind, currentLevel: number): Resources
  * v25（AISLG-71）另附各动作时长（秒，已按当前 timeScale 折算），null 语义与对应成本字段一致。
  * 只按等级推导，不反映队列状态（队满/在队等阻断由客户端按钮层处理）。
  */
-export function actionCosts(levels: Record<BuildingKind, number>, famousName?: string | null): Record<BuildingKind, KindActionCosts> {
+export function actionCosts(
+  levels: Record<BuildingKind, number>,
+  famousName?: string | null,
+  reducePercent = 0,
+): Record<BuildingKind, KindActionCosts> {
   const result = {} as Record<BuildingKind, KindActionCosts>;
   for (const kind of BUILDING_KINDS) {
     const level = levels[kind] ?? 0;
@@ -328,8 +355,8 @@ export function actionCosts(levels: Record<BuildingKind, number>, famousName?: s
     result[kind] = {
       build: level === 0 ? { ...BUILDING_INFO[kind].cost } : null,
       upgrade: upgradable ? upgradeCost(kind, level) : null,
-      buildSeconds: level === 0 ? buildSeconds() : null,
-      upgradeSeconds: upgradable ? upgradeSeconds(level) : null,
+      buildSeconds: level === 0 ? buildSeconds(reducePercent) : null,
+      upgradeSeconds: upgradable ? upgradeSeconds(level, reducePercent) : null,
     };
   }
   return result;
@@ -343,7 +370,9 @@ export type BuildDeniedCode =
   /** 该类型尚未建造，不能升级 */
   | 'BUILDING_NOT_BUILT'
   /** 已达等级上限（MAX_BUILDING_LEVEL） */
-  | 'BUILDING_LEVEL_MAX';
+  | 'BUILDING_LEVEL_MAX'
+  /** 该建筑只能在主城建造 / 升级（v87，AISLG-217：酒馆与书院） */
+  | 'BUILDING_MAIN_ONLY';
 
 export type StartBuildVerdict =
   | { ok: true; cost: Resources; /** 建造目标等级恒为 1 */ level: 1; /** start=立即开工；queued=进入排队 */ mode: 'start' | 'queued' }
@@ -457,6 +486,17 @@ function judgeQueue(
   return { ok: false, code: 'QUEUE_FULL' };
 }
 
+/**
+ * 建造 / 升级共用的「仅主城」校验（v87，AISLG-217）：酒馆 / 书院在分城一律拒绝，
+ * 返回 BUILDING_MAIN_ONLY（不扣资源、不入队）。调用方只在这里判一次，不在各处散落。
+ */
+export function judgeMainCityOnly(
+  kind: BuildingKind,
+  isMainCity: boolean,
+): { ok: false; code: 'BUILDING_MAIN_ONLY' } | null {
+  return !isMainCity && isMainCityOnlyBuilding(kind) ? { ok: false, code: 'BUILDING_MAIN_ONLY' } : null;
+}
+
 /** 扣减建造成本（纯函数，不修改入参） */
 export function applyCost(resources: Resources, cost: Resources): Resources {
   const next = { ...resources };
@@ -473,12 +513,6 @@ export function applyCost(resources: Resources, cost: Resources): Resources {
  * 定位是「过满资源的可持续出口」而非套利通道：四资源换金的产出比官府产金低一个量级，
  * 不构成最优策略，只为满仓资源保底变现（同时缓解储量顶满后的产出作废）。
  */
-export const EXCHANGE_INPUT_PER_GOLD = 4;
-
-/** 兑换所得金币 = floor(amount ÷ 汇率)；不足 1 金返回 0（协议层按 INVALID_PARAMS 拒绝） */
-export function exchangeGoldFor(amount: number): number {
-  return Math.floor(Math.max(0, amount) / EXCHANGE_INPUT_PER_GOLD);
-}
 
 /** 到期完成的状态推进（纯函数）：Worker 依据它的结果写库；对建筑类型不敏感 */
 export function completeBuild(build: { status: string; level: number }): {

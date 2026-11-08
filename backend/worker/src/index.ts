@@ -14,25 +14,44 @@
 import { createPool, ensureSchema, readDbConfig } from '../../common/src/db';
 import { ensureWorld } from '../../common/src/world-db';
 import { getTimeScale, refreshTimeScale, timeScaleStale } from '../../common/src/time-scale';
-import { processDueBuilds, processDueRecruits } from './queue-tick';
+import { processDueBuilds, processDueDefenseCrafts, processDueRecruits } from './queue-tick';
 import { processDueMarches } from './world-tick';
+import { processFogExploration } from './fog-tick';
+import { fogConfigStale, refreshFogEnabled } from '../../common/src/fog-config';
 import { processDueNpcAttacks } from './npc-attack';
 import { startNpcRaidTimer } from './npc-raid-timer';
+import { startFactionTimer } from './faction-tick';
+import { startFactionSiegeTimer } from './faction-siege-tick';
+import { startFactionLairTimer } from './faction-lair-tick';
+import { factionConfigStale, refreshFactionEnabled } from '../../common/src/faction-config';
 import { processDueResearch } from './tech-tick';
 import { processMovingTargets } from './moving-tick';
 import { processYellowTurban } from './yt-tick';
 import { processStarvation } from './starvation-tick';
+import { processTroopPools } from './troop-pool-tick';
 import { processDueReserves } from './reserve-tick';
+import { processDueFacilities } from './facility-tick';
 import { processHeroSalaries } from './hero-salary-tick';
 import { processHeroTraining } from './hero-training-tick';
+import { processHeroLoyalty } from './hero-loyalty-tick';
 import { processArenaRewards } from './arena-tick';
 import { processAlliances } from './alliance-tick';
+import { processInactiveTerritories } from './inactive-tick';
+import { processBattlefield } from './battlefield-tick';
+import { processMarketOrders } from './market-tick';
+import { processLuoyang } from './luoyang-tick';
+import { refreshLuoyangHolder } from '../../common/src/luoyang-db';
 import { LEADERBOARD_REFRESH_MS, refreshLeaderboards } from './leaderboard-tick';
 import { processSeasonTick } from './season-tick';
 import { isSeasonResetting, trackWorkerJob } from './season-busy';
 import { startDbProbe, startLoopLagMonitor } from '../../common/src/diag-probe';
+import { ALL_DUE, probeDueWork, type DueProbe } from './due-probe';
+import { purgeExpiredStratagems } from '../../common/src/stratagem-db';
 
 const TICK_MS = Number(process.env.WORKER_TICK_MS || 1000);
+/** 计谋过期行清理的最小间隔（读取侧惰性忽略，清理只为控表大小） */
+const STRATAGEM_PURGE_MS = 60 * 1000;
+let lastStratagemPurge = 0;
 
 async function main(): Promise<void> {
   const { host, port, database } = readDbConfig();
@@ -41,8 +60,12 @@ async function main(): Promise<void> {
   // 启动迁移、世界生成与换季（整图重灌）跑长语句，走维护池（超时放宽）；其余 tick 仍用 pool
   const maintenancePool = createPool('slg-worker-maint', 2, { maintenance: true });
   await ensureSchema(maintenancePool);
+  // v99（AISLG-239）：五方势力总开关要在世界生成前预热——ensureWorld 里按它决定放不放老巢
+  await refreshFactionEnabled(pool).catch(() => undefined);
   // v12：世界生成幂等（与 API 并发由咨询锁串行化），Worker 只依赖已存在的表
   await ensureWorld(maintenancePool);
+  // v79（AISLG-200）：启动时刷新一次洛阳之主缓存（易主路径之外，兼容部署前已有的洛阳）
+  await refreshLuoyangHolder(maintenancePool).catch(() => undefined);
   // v20：全局时间缩放从 settings 预热（AISLG-38），此后定期刷新（切换无需重启）
   await refreshTimeScale(pool).catch(() => undefined);
   console.log(`slg-worker started, tick=${TICK_MS}ms, time_scale=${getTimeScale()}`);
@@ -55,6 +78,14 @@ async function main(): Promise<void> {
     if (timeScaleStale()) {
       void refreshTimeScale(pool).catch(() => undefined);
     }
+    // 战争迷雾开关缓存过期则后台刷新（AISLG-224）
+    if (fogConfigStale()) {
+      void refreshFogEnabled(pool).catch(() => undefined);
+    }
+    // 五方势力总开关（AISLG-239，v99）：缓存过期则后台刷新（失败保旧值，下个 tick 再试）
+    if (factionConfigStale()) {
+      void refreshFactionEnabled(pool).catch(() => undefined);
+    }
     try {
       // AISLG-134：换季（到点重置 / 预告）。换季在本 tick 内串行执行；换季完成则结束本 tick
       if ((await processSeasonTick(pool, Date.now(), maintenancePool)) === 'reset') {
@@ -63,21 +94,43 @@ async function main(): Promise<void> {
     } catch (err) {
       console.error('worker season tick failed:', err instanceof Error ? err.message : err);
     }
+    // AISLG-208：一条合并探针代替逐队列空转。探针失败时取 ALL_DUE 兜底，退回改前的逐步骤自检。
+    let due: DueProbe;
     try {
-      const done = await processDueBuilds(pool);
-      if (done > 0) {
-        console.log(`completed ${done} build(s)`);
-      }
+      due = await probeDueWork(pool);
     } catch (err) {
-      console.error('worker tick failed:', err instanceof Error ? err.message : err);
+      console.error('worker due probe failed, falling back to per-step checks:', err instanceof Error ? err.message : err);
+      due = ALL_DUE;
     }
-    try {
-      const recruitsDone = await processDueRecruits(pool);
-      if (recruitsDone > 0) {
-        console.log(`completed ${recruitsDone} recruit(s)`);
+    if (due.builds) {
+      try {
+        const done = await processDueBuilds(pool);
+        if (done > 0) {
+          console.log(`completed ${done} build(s)`);
+        }
+      } catch (err) {
+        console.error('worker tick failed:', err instanceof Error ? err.message : err);
       }
-    } catch (err) {
-      console.error('worker recruit tick failed:', err instanceof Error ? err.message : err);
+    }
+    if (due.recruits) {
+      try {
+        const recruitsDone = await processDueRecruits(pool);
+        if (recruitsDone > 0) {
+          console.log(`completed ${recruitsDone} recruit(s)`);
+        }
+      } catch (err) {
+        console.error('worker recruit tick failed:', err instanceof Error ? err.message : err);
+      }
+    }
+    if (due.defenseCrafts) {
+      try {
+        const defenseDone = await processDueDefenseCrafts(pool);
+        if (defenseDone > 0) {
+          console.log(`completed ${defenseDone} defense craft(s)`);
+        }
+      } catch (err) {
+        console.error('worker defense craft tick failed:', err instanceof Error ? err.message : err);
+      }
     }
     try {
       // v34（AISLG-107）：断粮预警 / 哗变（粮食为 0 且净产量为负时城内驻军逐小时减员）
@@ -86,16 +139,41 @@ async function main(): Promise<void> {
       console.error('worker starvation tick failed:', err instanceof Error ? err.message : err);
     }
     try {
-      // v61（AISLG-165）：野地储量到点采空——按预计采空时刻结算归属方城池（采空事件与推送在结算中产生）
-      await processDueReserves(pool);
+      // v85（AISLG-212）：伤兵 / 俘虏 / 逃兵过期清理（读取侧也过滤，这里周期删行兜底）
+      await processTroopPools(pool);
     } catch (err) {
-      console.error('worker reserve tick failed:', err instanceof Error ? err.message : err);
+      console.error('worker troop pool tick failed:', err instanceof Error ? err.message : err);
+    }
+    if (due.reserves) {
+      try {
+        // v61（AISLG-165）：野地储量到点采空——按预计采空时刻结算归属方城池（采空事件与推送在结算中产生）
+        await processDueReserves(pool);
+      } catch (err) {
+        console.error('worker reserve tick failed:', err instanceof Error ? err.message : err);
+      }
+    }
+    if (due.facilities) {
+      try {
+        // v97（AISLG-232）：望楼（野地设施）到点建成 / 升级完成（事件 facility_completed + 推送地块变化）
+        const facilitiesDone = await processDueFacilities(pool);
+        if (facilitiesDone > 0) {
+          console.log(`completed ${facilitiesDone} facility build(s)`);
+        }
+      } catch (err) {
+        console.error('worker facility tick failed:', err instanceof Error ? err.message : err);
+      }
     }
     try {
       // v36（AISLG-114）：武将俸禄——每小时（随缩放）从主城扣，金币不足记欠饷
       await processHeroSalaries(pool);
     } catch (err) {
       console.error('worker hero salary tick failed:', err instanceof Error ? err.message : err);
+    }
+    try {
+      // v94（AISLG-228）：名将忠诚度——每 24 小时（随缩放）−10，0 下野；囚禁到期未赎回则下野、胜方得结交资格
+      await processHeroLoyalty(pool);
+    } catch (err) {
+      console.error('worker hero loyalty tick failed:', err instanceof Error ? err.message : err);
     }
     try {
       // v54（AISLG-144）：武将历练到点结算——经验到账（离线也结算），升级得自由点数
@@ -116,6 +194,36 @@ async function main(): Promise<void> {
       console.error('worker alliance tick failed:', err instanceof Error ? err.message : err);
     }
     try {
+      // v98（AISLG-238）：本人和 Agent 都 7 天没上线的账号，名下野地全部收回（内部节流到每小时）
+      const reclaimed = await processInactiveTerritories(pool);
+      if (reclaimed.accounts > 0) {
+        console.log(`reclaimed ${reclaimed.tiles} wilderness tile(s) from ${reclaimed.accounts} inactive account(s)`);
+      }
+    } catch (err) {
+      console.error('worker inactive territory tick failed:', err instanceof Error ? err.message : err);
+    }
+    try {
+      // v79（AISLG-200）：洛阳窗口回满城防 / 预告 / 开始 / 结束播报（内部节流到 5 秒）
+      await processLuoyang(pool);
+    } catch (err) {
+      console.error('worker luoyang tick failed:', err instanceof Error ? err.message : err);
+    }
+    try {
+      // v78（AISLG-196）：交易所 48 小时过期挂单自动撤单退款（内部节流到 10 秒）
+      const expired = await processMarketOrders(pool);
+      if (expired > 0) {
+        console.log(`expired ${expired} market order(s)`);
+      }
+    } catch (err) {
+      console.error('worker market tick failed:', err instanceof Error ? err.message : err);
+    }
+    try {
+      // v75（AISLG-198）：剧本战场——日程 / 耗粮 / 积分 / 风向节流到 5 秒；行军按探针每秒结算
+      await processBattlefield(pool, due.battlefieldMovements);
+    } catch (err) {
+      console.error('worker battlefield tick failed:', err instanceof Error ? err.message : err);
+    }
+    try {
       // v29（AISLG-76）：黄巾之乱——起事 / 坐大 / 大营发兵 / 到时限收场
       await processYellowTurban(pool);
     } catch (err) {
@@ -127,31 +235,52 @@ async function main(): Promise<void> {
     } catch (err) {
       console.error('worker moving target tick failed:', err instanceof Error ? err.message : err);
     }
-    try {
-      // v27（AISLG-77）：到期的科技研究结算（等级账号共享，生效前按旧等级切分各城产量）
-      const researchDone = await processDueResearch(pool);
-      if (researchDone > 0) {
-        console.log(`completed ${researchDone} research(es)`);
+    if (due.research) {
+      try {
+        // v27（AISLG-77）：到期的科技研究结算（等级账号共享，生效前按旧等级切分各城产量）
+        const researchDone = await processDueResearch(pool);
+        if (researchDone > 0) {
+          console.log(`completed ${researchDone} research(es)`);
+        }
+      } catch (err) {
+        console.error('worker research tick failed:', err instanceof Error ? err.message : err);
       }
-    } catch (err) {
-      console.error('worker research tick failed:', err instanceof Error ? err.message : err);
+    }
+    if (due.marches) {
+      try {
+        const marchesDone = await processDueMarches(pool);
+        if (marchesDone > 0) {
+          console.log(`resolved ${marchesDone} march(es)`);
+        }
+      } catch (err) {
+        console.error('worker march tick failed:', err instanceof Error ? err.message : err);
+      }
     }
     try {
-      const marchesDone = await processDueMarches(pool);
-      if (marchesDone > 0) {
-        console.log(`resolved ${marchesDone} march(es)`);
-      }
+      // v92（AISLG-224）：行军去程结算后的探索写入与探索简报（开关关闭时同样记录，不丢数据）
+      await processFogExploration(pool);
     } catch (err) {
-      console.error('worker march tick failed:', err instanceof Error ? err.message : err);
+      console.error('worker fog tick failed:', err instanceof Error ? err.message : err);
     }
-    try {
-      // v23（AISLG-57）：到期的 NPC 袭击到达结算（预警期间增援的部队一并参战）
-      const attacksDone = await processDueNpcAttacks(pool);
-      if (attacksDone > 0) {
-        console.log(`resolved ${attacksDone} npc attack(s)`);
+    if (due.npcAttacks) {
+      try {
+        // v23（AISLG-57）：到期的 NPC 袭击到达结算（预警期间增援的部队一并参战）
+        const attacksDone = await processDueNpcAttacks(pool);
+        if (attacksDone > 0) {
+          console.log(`resolved ${attacksDone} npc attack(s)`);
+        }
+      } catch (err) {
+        console.error('worker npc attack tick failed:', err instanceof Error ? err.message : err);
       }
-    } catch (err) {
-      console.error('worker npc attack tick failed:', err instanceof Error ? err.message : err);
+    }
+    // v86（AISLG-211）：清理过期的计谋城效果与免疫行（每分钟最多一次）
+    if (Date.now() - lastStratagemPurge >= STRATAGEM_PURGE_MS) {
+      lastStratagemPurge = Date.now();
+      try {
+        await purgeExpiredStratagems(pool);
+      } catch (err) {
+        console.error('worker stratagem purge failed:', err instanceof Error ? err.message : err);
+      }
     }
   };
 
@@ -171,6 +300,12 @@ async function main(): Promise<void> {
 
   // NPC 袭击发起定时器（v23 AISLG-57）：见 npc-raid-timer.ts
   const stopRaidTimer = startNpcRaidTimer(pool);
+  // 五方势力的吞城定时器（v99 AISLG-239）：见 faction-tick.ts（换季进行中不吞城）
+  const stopFactionTimer = startFactionTimer(pool);
+  // 五方势力的围攻定时器（v100 AISLG-240）：见 faction-siege-tick.ts（发起围攻与到期结算）
+  const stopFactionSiegeTimer = startFactionSiegeTimer(pool);
+  // 老巢定时器（v101 AISLG-241）：每天刷新每营战力 + 24 小时没人进攻恢复 1 营（见 faction-lair-tick.ts）
+  const stopFactionLairTimer = startFactionLairTimer(pool);
 
   // 排行榜快照（v23 AISLG-61）：每 10 分钟整榜重算（数值与玩家页面同源，
   // 查询读快照，不做实时全表统计）；启动时先算一次，榜很快可用
@@ -193,6 +328,9 @@ async function main(): Promise<void> {
     stopProbe.stop();
     stopLoopLag();
     stopRaidTimer();
+    stopFactionTimer();
+    stopFactionSiegeTimer();
+    stopFactionLairTimer();
     await pool.end();
     process.exit(0);
   };

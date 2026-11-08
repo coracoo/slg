@@ -116,6 +116,9 @@ export const WORLD_MAP_EN = {
   attackPowerLine: (power: number) => `Formation Power ${power}`,
   taskTitle: 'March Task',
   taskPlunder: 'Plunder',
+  taskAssistHint:
+    'Assist: troops station in an ally city after arrival and fight alongside the host garrison in a siege (losses split by each side’s pre-battle count); they occupy one Parade Ground slot, cost 2× field food from the origin city, and can be recalled anytime. Max 5 assist parties per city and 1 per account per city',
+  confirmAssist: 'Confirm march · Assist',
   taskPlunderHint:
     'On victory, troops carry resources back by load (terrain resource × 1500 × level; no gold). Ownership ' +
     'is unchanged and the troops return home. The target then enters a plunder cooldown (shortened by the ' +
@@ -132,8 +135,12 @@ export const WORLD_MAP_EN = {
     "The target is a Branch City of this account: on arrival the formation merges into that city's garrison (no battle)",
   transferSubmit: 'Transfer',
   recallTitle: 'Garrison Management',
-  recallHint: 'Recalling abandons the occupation (the bonus stops immediately); troops march back to the city',
-  recallSubmit: 'Recall all garrisons',
+  recallHint: 'A partial recall keeps the occupation but leaves at least 1 troop on the tile; a full recall abandons the occupation',
+  recallSubmit: 'Recall selected',
+  recallAllSubmit: 'Recall all (abandon occupation)',
+  recallPickFirst: 'Enter the number of troops to recall first',
+  recallWouldEmptyBtn: 'Would empty the tile; use Recall all instead',
+  recallWouldEmpty: 'The selected troops would empty the garrison: a partial recall must leave at least 1 troop; use the button below to recall everything (abandons the occupation)',
   recallBusy: 'Recalling…',
   marchesTitle: 'Marches in Progress',
   marchesEmpty: 'No marches',
@@ -195,6 +202,8 @@ export const LEADERBOARD_EN = {
   territory: 'Territories',
   plunder: 'Total Plunder',
   model: 'Model Leaderboard',
+  nobility: 'Nobility',
+  exploration: 'Exploration',
   updatedAt: (time: string) => `Snapshot ${time}`,
   rankColumn: 'Rank',
   playerColumn: 'Player',
@@ -252,6 +261,7 @@ export const OFFLINE_REPORT_EN = {
   troopsLostRow: (n: number) => `${n} troops lost`,
   npcRaidsRow: (n: number) => `${n} NPC raids`,
   wildernessLostRow: (n: number) => `${n} wilderness tiles lost to NPC attacks`,
+  wildernessInactiveRow: (n: number) => `${n} wilderness tiles reclaimed for long inactivity`,
   statusTitle: 'Status',
   statusCalm: 'All resource levels normal',
   storageFullRow: (label: string, percent: number) =>
@@ -309,6 +319,7 @@ export const BATTLE_REPORT_EN = {
   sideMine: 'Our side',
   sideEnemy: 'Enemy side',
   location: (x: number, y: number) => `(${x},${y})`,
+  locate: 'Locate',
   roundsMeta: (rounds: number) => `${rounds} rounds`,
   endWiped: 'Defenders wiped out',
   endAttackerWiped: 'Attackers wiped out',
@@ -335,6 +346,10 @@ export const BATTLE_REPORT_EN = {
     `Round ${round}: our side dealt ${mineDamage} and lost ${mineKilled}; enemy side dealt ${enemyDamage} and lost ${enemyKilled}`,
   returnNote: 'Surviving troops head back with the return march and enter the city only on arrival',
   noTroops: 'No troops',
+  // v85 (AISLG-212): pools line — our wounded / captured and the captives the winner took (shown only when non-zero; fallen = losses − wounded − captured)
+  poolWounded: (n: number) => `Wounded ${n}`,
+  poolCaptured: (n: number) => `Captured ${n}`,
+  poolCaptives: (n: number) => `Captives taken ${n}`,
   loading: 'Loading battle report…',
   loadFailed: 'Failed to load the battle report (it may have been cleared)',
 } satisfies typeof COPY['battleReport'];

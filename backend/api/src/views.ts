@@ -8,14 +8,18 @@ import {
   TROOP_KINDS,
   isMarchPurpose,
   type BuildingCounts,
+  type BuildingKind,
   type BuildView,
   type CityView,
   type InitiatorRole,
+  type KindActionCosts,
   type MarchView,
   type RecruitView,
   type Resources,
   type TerritoryView,
   type TroopKind,
+  type TroopPoolKind,
+  type TroopPoolView,
 } from '../../common/src/protocol';
 import {
   loadArmyFoodUsePerHour,
@@ -28,14 +32,15 @@ import {
   type ProducedResource,
 } from '../../common/src/production';
 import { loadCityGuard } from '../../common/src/hero-db';
+import { loadCityTroopPools } from '../../common/src/troop-pools-db';
 import { guardProductionPercent } from '../../common/src/hero';
 import {
   wallBasePercent,
-  actionCosts,
   buildingLevelMaxes,
   popCap,
   populationGrowthPerHour,
 } from '../../common/src/rules';
+import { cityActionCosts, cityBuildingRecords } from '../../common/src/main-only-view';
 import { toFullArmyCounts } from '../../common/src/battle';
 import {
   TERRAIN_INFO,
@@ -45,6 +50,7 @@ import {
   type TerritoryRow,
 } from '../../common/src/world';
 import { loadTerritory } from '../../common/src/world-db';
+import { loadCityFacilities, territoryFacilityView, type FacilityRow } from '../../common/src/facility-db';
 import {
   advanceTile,
   applyReserveUpdates,
@@ -52,16 +58,31 @@ import {
   territoryDisplayRates,
 } from '../../common/src/wilderness-reserve';
 import { reserveViewFrom } from './reserve-view';
+import { cityTitle, nobilityName } from '../../common/src/nobility';
 import { getTimeScale } from '../../common/src/time-scale';
 import { selfTruceNextAvailableAt, settleDurability } from '../../common/src/protection';
 import { cityLevelOf } from '../../common/src/branch-city';
 import { FAMOUS_PRODUCTION_BONUS_PERCENT } from '../../common/src/famous-city';
 import { readCargo } from '../../common/src/transport';
+import { cityInBattle } from '../../common/src/city-battle';
 import { projectStarvation } from '../../common/src/starvation';
 import { deployLimit, towerStats } from '../../common/src/building-effects';
 import { famousEffectView, famousTowerPercent, famousWallExtraPercent } from '../../common/src/famous-effects';
-import { defenseExtraPercent, type TechLevels } from '../../common/src/tech';
+import { constructionReductionPercent, defenseExtraPercent, repairPercent, type TechLevels } from '../../common/src/tech';
+import { defenseCap } from '../../common/src/city-defense';
+import {
+  defenseCraftView,
+  defenseStockTotal,
+  loadCityDefenses,
+  loadDefenseCrafts,
+  type DefenseCraftRow,
+} from '../../common/src/city-defense-db';
+import { assistCap } from '../../common/src/city-assist';
+import { loadAssistsFromCity, loadCityAssists } from '../../common/src/city-assist-db';
+import type { AssistOutView, AssistView } from '../../common/src/protocol-assist';
 import { loadTechLevels } from '../../common/src/tech-db';
+import { cityStratagemView, loadActiveCityEffects } from '../../common/src/stratagem-db';
+import type { CityStratagemView } from '../../common/src/protocol-stratagem';
 import { currentCityId } from './city-scope';
 
 export interface BuildRow {
@@ -146,6 +167,11 @@ export interface MarchRow {
   account_id: string;
   from_city_id: string;
   x: number;
+  /** 迷雾（AISLG-224 复核）：盲打校验被拒（到达原路返回）；撤回时的实际位置与时刻 */
+  fog_denied?: boolean;
+  fog_turn_x?: number | null;
+  fog_turn_y?: number | null;
+  fog_turn_at?: Date | null;
   y: number;
   troops: Partial<Record<TroopKind, number>> | null;
   purpose: string;
@@ -162,6 +188,8 @@ export interface MarchRow {
   ambush_at?: Date | null;
   /** v36（AISLG-114）：随队武将 id（返程行军沿用，回城后自然释放），其余为 null */
   hero_id?: string | null;
+  /** v86（AISLG-211）：金蝉脱壳已用（同一支返程部队只能用一次），其余为 false */
+  stratagem_used?: boolean;
 }
 
 export function marchView(row: MarchRow): MarchView {
@@ -181,6 +209,8 @@ export function marchView(row: MarchRow): MarchView {
     cargo: readCargo(row.cargo),
     ambushAt: row.ambush_at ? new Date(row.ambush_at).toISOString() : null,
     heroId: row.hero_id ?? null,
+    // v86（AISLG-211）：金蝉脱壳用过就置灰（同一支返程部队只能用一次）
+    stratagemUsed: row.stratagem_used === true,
   };
 }
 
@@ -205,12 +235,22 @@ export interface CitySnapshot {
   queue: BuildRow[];
   /** 征募中在前，排队按入队顺序 */
   recruitQueue: RecruitRow[];
+  /** 城防器械库存（v73，恒含四个键）与打造队列 */
+  defenseStock: Record<string, number>;
+  defenseCrafts: DefenseCraftRow[];
+  /** 协防（v74）：驻扎在本城的盟友部队与本城派出的部队 */
+  assistsIn: AssistView[];
+  assistsOut: AssistOutView[];
   /** 本城进行中的行军（v12） */
   marches: MarchRow[];
   /** 本城占领的野地（v12，含驻军总数） */
   territory: TerritoryRow[];
+  /** 本城名下野地上的望楼（v97，AISLG-232）：键 "x,y"，按地块取用 */
+  facilities: Map<string, FacilityRow>;
   /** 独占产量加成（百分数，v24 AISLG-56：名城分城 +20%）与名城名；普通城为 0 / null */
   productionBonusPercent: number;
+  /** 洛阳之主联盟的全员产量加成（v79，AISLG-200；0 或 5） */
+  luoyangBonusPercent: number;
   famousName: string | null;
   /** 城守产量加成（百分数，v36 AISLG-115：四资源非金）与城守武将；未任为 0 / null */
   guardProductionPercent: number;
@@ -225,6 +265,8 @@ export interface CitySnapshot {
   newbieUntil: Date | null;
   /** 主动免战截止（v38 AISLG-122，账号级）：TRUCE 开启后写入；未开启为 null */
   shieldUntil: Date | null;
+  /** 声望与爵位（v76，AISLG-197）：账号当前爵位序号（0 = 平民） */
+  nobility: number;
   /** 上次开启主动免战的时刻（v38；周窗口判定用） */
   shieldUsedAt: Date | null;
   /** 分城城防值原始列（v40 AISLG-124；主城为 null；展示前需经 settleDurability 惰性结算） */
@@ -232,6 +274,12 @@ export interface CitySnapshot {
   durabilitySettledAt: Date | null;
   /** 账号主城 id（v40：城防值只属于分城） */
   mainCityId: string;
+  /** 是否有敌情（v84，AISLG-209）：本城或其名下野地正有行军在途指向，或有未结的 NPC 来袭 */
+  inBattle: boolean;
+  /** 伤兵 / 俘虏 / 逃兵三池（v85，AISLG-212） */
+  troopPools: Record<TroopPoolKind, TroopPoolView>;
+  /** 生效中的计谋效果（v86，AISLG-211）：欺敌 / 十面埋伏 / 趁火打劫 */
+  stratagems: CityStratagemView;
 }
 
 /** 在已开启的事务内锁定城池行并结算生产；调用方负责 BEGIN / COMMIT */
@@ -260,6 +308,11 @@ export async function lockCitySnapshot(
   const levels = await loadBuildingLevels(client, row.id);
   const techs = await loadTechLevels(client, accountId);
   const territory = await loadTerritory(client, row.id);
+  // v97（AISLG-232）：本城名下野地上的望楼（等级 / 视野半径 / 进行中的建造）
+  const facilities = new Map<string, FacilityRow>();
+  for (const facility of await loadCityFacilities(client, row.id)) {
+    facilities.set(`${facility.x},${facility.y}`, facility);
+  }
   const armyFoodUsePerHour = await loadArmyFoodUsePerHour(client, row.id);
   // v36（AISLG-115）：城守（产量加成 + 守城加成的数据源）
   const guard = await loadCityGuard(client, row.id);
@@ -280,13 +333,24 @@ export async function lockCitySnapshot(
     [row.id],
   );
   const army = await loadCityArmy(client, row.id);
+  // v85（AISLG-212）：伤兵 / 俘虏 / 逃兵三池（过期行在读取侧过滤）
+  const troopPools = await loadCityTroopPools(client, row.id);
+  // v84（AISLG-209）：敌情判定（行军指向本城或其名下野地 / 未结的 NPC 来袭），与遣散、放弃分城同一口径
+  const inBattle = await cityInBattle(client, row.id);
+  // v86（AISLG-211）：本城生效中的计谋效果（欺敌 / 十面埋伏 / 趁火打劫；过期的行惰性忽略）
+  const stratagems = cityStratagemView(await loadActiveCityEffects(client, row.id, row.db_now));
   // v38（AISLG-122）：账号级保护状态（新手保护 / 主动免战）
   const accountRes = await client.query(
-    `SELECT newbie_until, self_truce_until, self_truce_used_at FROM accounts WHERE id = $1`,
+    `SELECT a.newbie_until, a.self_truce_until, a.self_truce_used_at, a.nobility,
+            COALESCE(al.luoyang_holder, false) AS luoyang_holder
+     FROM accounts a
+     LEFT JOIN alliance_members am ON am.account_id = a.id
+     LEFT JOIN alliances al ON al.id = am.alliance_id
+     WHERE a.id = $1`,
     [accountId],
   );
   const accountRow = accountRes.rows[0] as
-    | { newbie_until: Date | null; self_truce_until: Date | null; self_truce_used_at: Date | null }
+    | { newbie_until: Date | null; self_truce_until: Date | null; self_truce_used_at: Date | null; nobility: number; luoyang_holder: boolean }
     | undefined;
   const recruitRes = await client.query(
     `SELECT * FROM recruits
@@ -294,6 +358,10 @@ export async function lockCitySnapshot(
      ORDER BY CASE status WHEN 'recruiting' THEN 0 ELSE 1 END, started_at, id`,
     [row.id],
   );
+  const defenseStock = await loadCityDefenses(client, row.id);
+  const defenseCrafts = await loadDefenseCrafts(client, row.id);
+  const assistsIn = await loadCityAssists(client, row.id);
+  const assistsOut = await loadAssistsFromCity(client, row.id);
   const marchRes = await client.query(
     `SELECT * FROM marches
      WHERE from_city_id = $1 AND status = 'marching'
@@ -315,6 +383,7 @@ export async function lockCitySnapshot(
     truceUntil: row.truce_until,
     newbieUntil: accountRow?.newbie_until ?? null,
     shieldUntil: accountRow?.self_truce_until ?? null,
+    nobility: Math.max(0, Number(accountRow?.nobility ?? 0)),
     shieldUsedAt: accountRow?.self_truce_used_at ?? null,
     durability: row.durability,
     durabilitySettledAt: row.durability_settled_at,
@@ -322,6 +391,7 @@ export async function lockCitySnapshot(
     mutinyNextAt: row.mutiny_next_at,
     famousName: row.famous_name,
     productionBonusPercent: row.famous_name ? FAMOUS_PRODUCTION_BONUS_PERCENT : 0,
+    luoyangBonusPercent: accountRow?.luoyang_holder ? 5 : 0,
     guardProductionPercent: guard ? guardProductionPercent(guard.wit) : 0,
     guardHero: guard
       ? { id: guard.id, name: guard.name, famous: guard.famous, lead: guard.lead, force: guard.force, wit: guard.wit, level: guard.level }
@@ -332,35 +402,35 @@ export async function lockCitySnapshot(
     population: settled.population,
     army,
     armyFoodUsePerHour,
+    inBattle,
+    troopPools,
+    stratagems,
     queue: queueRes.rows as BuildRow[],
     recruitQueue: recruitRes.rows as RecruitRow[],
+    defenseStock,
+    defenseCrafts,
+    assistsIn,
+    assistsOut,
     marches: marchRes.rows as MarchRow[],
     territory,
+    facilities,
   };
 }
 
-/** 本城在外部队数（v30，AISLG-80）：进行中的行军（含返程）+ 本城占领野地的驻军（每块野地算一支） */
-export function deployCountOf(snap: Pick<CitySnapshot, 'marches' | 'territory'>): number {
-  return snap.marches.length + snap.territory.length;
+/** 本城在外部队数（v30，AISLG-80）：进行中的行军（含返程）+ 本城占领野地的驻军（每块野地算一支）；交易所商队不带兵，不占名额 */
+export function deployCountOf(snap: Pick<CitySnapshot, 'marches' | 'territory'> & { assistsOut?: unknown[] }): number {
+  const troopMarches = snap.marches.filter((march) => march.purpose !== 'caravan').length;
+  return troopMarches + snap.territory.length + (snap.assistsOut?.length ?? 0);
 }
 
 /** 按建筑类型展开数量（0/1）与等级两张映射（v7 起为九种建筑） */
-function kindRecords(levels: BuildingLevels): { buildings: BuildingCounts; levels: BuildingCounts } {
-  const buildings = {} as BuildingCounts;
-  const levelRecord = {} as BuildingCounts;
-  for (const kind of BUILDING_KINDS) {
-    const level = levels[kind] ?? 0;
-    buildings[kind] = level > 0 ? 1 : 0;
-    levelRecord[kind] = level;
-  }
-  return { buildings, levels: levelRecord };
-}
-
 export function toCityView(snap: CitySnapshot): CityView {
   const queue = snap.queue.map(buildView);
-  const records = kindRecords(snap.levels);
+  // v87（AISLG-217）：主城 = 账号最早创建的城；分城的建筑清单 / 等级 / 成本不含酒馆与书院
+  const isMainCity = snap.cityId === snap.mainCityId;
+  const records = cityBuildingRecords(snap.levels, isMainCity);
   const production = productionPerHour(
-    snap.levels, territoryDisplayRates(snap.territory), snap.productionBonusPercent, snap.techs, snap.guardProductionPercent,
+    snap.levels, territoryDisplayRates(snap.territory), snap.productionBonusPercent + snap.luoyangBonusPercent, snap.techs, snap.guardProductionPercent,
   );
   const roundedProduction = {} as Record<ProducedResource, number>;
   for (const key of Object.keys(production) as Array<keyof typeof production>) {
@@ -373,15 +443,18 @@ export function toCityView(snap: CitySnapshot): CityView {
     name: snap.name,
     // v24（AISLG-58）：城池等级 = 该城官府等级（原 cities.level 恒为 1，不再作为口径）
     level: cityLevelOf(snap.levels.government),
+    // v76（AISLG-197）：城池称号（按官府等级；都城只给主城）与账号爵位
+    title: cityTitle(snap.levels.government, snap.cityId === snap.mainCityId),
+    nobility: { index: snap.nobility, name: nobilityName(snap.nobility) },
     resources: snap.resources,
     // v5 单实例：数量恒为 0/1；等级才是权威状态
     buildings: records.buildings,
     levels: records.levels,
     // v6：下一步动作成本（未建=建造成本，已建未满级=升级成本）
-    costs: actionCosts(snap.levels, snap.famousName),
+    costs: cityActionCosts(snap.levels, isMainCity, snap.famousName, constructionReductionPercent(snap.techs)),
     // v63（AISLG-167）：各建筑等级上限；名城主题建筑为 25，其余 20
     levelMax: buildingLevelMaxes(snap.famousName),
-    farms: records.buildings.farm,
+    farms: records.buildings.farm ?? 0,
     production: roundedProduction,
     population: {
       current: snap.population,
@@ -390,8 +463,16 @@ export function toCityView(snap: CitySnapshot): CityView {
     },
     storage: storageCaps(snap.levels, snap.techs),
     army: { ...snap.army },
+    // v85（AISLG-212）：伤兵 / 俘虏 / 逃兵（池子为空时三组 troops 全 0、earliestExpireAt 为 null）
+    wounded: snap.troopPools.wounded,
+    captives: snap.troopPools.captive,
+    deserters: snap.troopPools.deserter,
     // v14：军队小时耗粮（production.food 为毛产量；净粮 = production.food − 本值）
-    armyFoodUsePerHour: snap.armyFoodUsePerHour,
+    armyFoodUsePerHour: Math.round(snap.armyFoodUsePerHour),
+    // v84（AISLG-209）：敌情（遣散按钮据此置灰；服务端仍以 CITY_IN_BATTLE 复核）
+    inBattle: snap.inBattle,
+    // v86（AISLG-211）：生效中的计谋效果（欺敌 / 十面埋伏 / 趁火打劫）
+    stratagems: snap.stratagems,
     // v20：全局时间缩放（AISLG-38）——客户端本地折算时长（冷却剩余等）用
     timeScale: getTimeScale(),
     truceUntil: snap.truceUntil ? snap.truceUntil.toISOString() : null,
@@ -405,14 +486,28 @@ export function toCityView(snap: CitySnapshot): CityView {
     durability:
       snap.cityId === snap.mainCityId
         ? null
-        : settleDurability(snap.durability, snap.durabilitySettledAt, snap.truceUntil, new Date()),
+        : snap.famousName === '洛阳'
+          ? Math.max(0, Math.min(100, Number(snap.durability ?? 100)))
+          : settleDurability(snap.durability, snap.durabilitySettledAt, snap.truceUntil, new Date(), repairPercent(snap.techs)),
     famousName: snap.famousName,
     productionBonusPercent: snap.productionBonusPercent,
+    luoyangBonusPercent: snap.luoyangBonusPercent,
     famousEffect: famousEffectView(snap.famousName),
     guard: snap.guardHero
       ? { heroId: snap.guardHero.id, ...snap.guardHero, bonusPercent: snap.guardProductionPercent }
       : null,
     recruitQueue: snap.recruitQueue.map(recruitView),
+    // v73（AISLG-193）：城防器械库存与打造队列（上限 = 城墙等级 × 60，四种器械共用）
+    defenses: {
+      cap: defenseCap(snap.levels.wall ?? 0),
+      stock: { trap: 0, chevaux: 0, rolling_log: 0, boulder: 0, ...snap.defenseStock } as Record<'trap' | 'chevaux' | 'rolling_log' | 'boulder', number>,
+      total: defenseStockTotal(snap.defenseStock),
+      queue: snap.defenseCrafts.map(defenseCraftView),
+    },
+    // v74（AISLG-194）：协防列表（城主 / 派出方各自可见）与接收上限
+    assistIn: snap.assistsIn,
+    assistOut: snap.assistsOut,
+    assistCap: assistCap(snap.famousName),
     defenseBonus: wallBasePercent(snap.levels.wall) + defenseExtraPercent(snap.techs) + famousWallExtraPercent(snap.famousName),
     techs: { ...snap.techs },
     // v30（AISLG-80）：在外部队 = 行军中（含返程）+ 驻守野地；上限 = 校场等级（未建按 1）
@@ -436,6 +531,8 @@ export function toCityView(snap: CitySnapshot): CityView {
         clusterSize: sizes.get(`${tile.x},${tile.y}`) ?? 1,
         clusterBonusPercent: Math.round((clusterBonusMultiplier(sizes.get(`${tile.x},${tile.y}`) ?? 1) - 1) * 100),
         reserve: reserveViewFrom(step, true),
+        // 视野半径按地块地形给有效的（丘陵上的野地 +2）：与 fog-db 的实际视野同一口径（AISLG-233）
+        facility: territoryFacilityView(snap.facilities.get(`${tile.x},${tile.y}`) ?? null, tile.terrain),
       };
     }),
     queue,

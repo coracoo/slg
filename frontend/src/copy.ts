@@ -145,7 +145,10 @@ const TOPBAR = {
   productionPrefix: '产量',
   productionEmpty: '暂无（建造资源建筑后生效）',
   /** 净粮产量（v14）：毛产量 − 全军耗粮；耗粮为 0 时退回普通格式（由调用方分支） */
-  foodNet: (label: string, net: number, upkeep: number) => `${label} ${net >= 0 ? '+' : ''}${net}/h（耗粮 ${upkeep}/h）`,
+  foodNet: (label: string, net: number, upkeep: number) => {
+    const value = Math.round(net);
+    return `${label} ${value >= 0 ? '+' : ''}${value}/h（耗粮 ${Math.round(upkeep)}/h）`;
+  },
   population: (current: number, cap: number, growthPerHour: number) =>
     `人口 ${current}/${cap}（+${growthPerHour}/h）`,
   /** 资源条目的悬浮提示：该资源的储量上限（达上限后停止生产） */
@@ -169,6 +172,12 @@ const TOPBAR = {
     '开启后 12 小时内别人打不了你，你也不能出兵打玩家（打野地 / NPC 不受影响）。本周只能开一次，开启后无法撤销。',
   shieldConfirmSubmit: '确认开启',
   shieldConfirmCancel: '取消',
+  /** 提前解除主动免战（v71，AISLG-190）：按钮、确认框（取消键复用 shieldConfirmCancel） */
+  cancelShieldButton: '提前解除',
+  cancelShieldHint: '提前解除主动免战：解除后立即可被攻击、也可出兵；本周免费次数不返还',
+  cancelShieldConfirmTitle: '提前解除免战？',
+  cancelShieldConfirmBody: '解除后别人立即可以攻击你，你也能出兵打玩家；本周的免费次数不返还，本周不能再开。',
+  cancelShieldConfirmSubmit: '确认解除',
   /** 仓库快满提醒（AISLG-73）：≥80% 的资源警示行与悬浮提示（金币不参与，与离线日报同口径） */
   storageFullLine: (detail: string) => `⚠ 仓库快满：${detail}，超出上限的产出会作废`,
   storageFullItem: (label: string, percent: number, cap: number) =>
@@ -188,6 +197,27 @@ const TOPBAR = {
   discardSubmit: '确认放弃',
   discardBusy: '放弃中…',
   discardFallback: '放弃分城失败，请稍后重试',
+  capitalTitle: '设为主城',
+  capitalLine1: (next: string, former: string) => `${next} 将成为主城，${former} 将变为分城。`,
+  capitalLine2: '主城不会被占领，只会被掠夺；变为分城的原主城之后可以被他人占领。',
+  capitalLine3: (at: string) => `设为主城后 24 小时内不能再次更换（可更换时间：${at} 之后）。`,
+  capitalLine4: (from: number, to: number, count: number) => `分城数上限将由 ${from} 变为 ${to}（按新主城官府等级 ÷ 2），当前分城数 ${count}。`,
+  capitalTime: (iso: string) => {
+    // 北京时间的「X月X日 HH:mm」，与其它定时提示口径一致
+    const parts = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date(iso));
+    const pick = (type: string) => parts.find((part) => part.type === type)?.value ?? '';
+    return `${pick('month')}月${pick('day')}日 ${pick('hour')}:${pick('minute')}`;
+  },
+  capitalCancel: '取消',
+  capitalSubmit: '确认设为主城',
+  capitalBusy: '设置中…',
+  capitalFallback: '设为主城失败，请稍后重试',
+  capitalBlockedFamous: '名城不能设为主城（名城永远可被占领，只能是分城）。',
+  capitalBlockedCooldown: (at: string) => `设为主城后 24 小时内不能再次更换，${at} 后可更换。`,
+  capitalBlockedAttack: '有他人玩家的出征正奔向你的城或野地，等来袭结束后再设为主城。',
+  capitalBlockedDurability: '该分城城防值未满 100，被打残的城不能设为主城，等城防回满后再试。',
+  capitalBlockedLimit: (limit: number, count: number) => `换完后分城数 ${count} 将超过新主城的上限 ${limit}（官府 ÷ 2）。先升级该城官府，或放弃一座分城。`,
+  capitalNoCapital: '当前选中的已是主城。',
   renameBusy: '改名中…',
   self: '本人',
   switchAccount: '切换账号',
@@ -221,9 +251,9 @@ const BUILD_QUEUE = {
   waitingSettle: STATUS.waitingSettle,
   activating: STATUS.activating,
   remainingSeconds: STATUS.remainingSeconds,
-  /** 取消排队条目（全额返还成本；在建条目不可取消） */
+  /** 取消条目（排队中 / 建造中，全额返还成本；v71 AISLG-190 起在建也可取消） */
   cancel: '取消',
-  cancelTitle: '取消该排队条目，全额返还成本',
+  cancelTitle: '取消该条目，全额返还成本',
 };
 
 const CITY_MAP = {
@@ -290,9 +320,9 @@ const RECRUIT_PANEL = {
   waitingSettle: STATUS.waitingSettle,
   activating: STATUS.activating,
   remainingSeconds: STATUS.remainingSeconds,
-  /** 取消排队条目（全额返还资源与人口；征募中不可取消） */
+  /** 取消条目（排队中 / 征募中，全额返还资源与人口；v71 AISLG-190 起征募中也可取消） */
   cancel: '取消',
-  cancelTitle: '取消该排队条目，全额返还资源与人口',
+  cancelTitle: '取消该条目，全额返还资源与人口',
   formTitle: '发起征兵',
   troopLabel: '兵种',
   countLabel: '数量',
@@ -409,6 +439,8 @@ const WORLD_MAP = {
   taskTitle: '出征任务',
   taskPlunder: '掠夺',
   taskPlunderHint: '胜利按负重携回资源（地形资源 × 1500 × 等级，v19 校准；无金币），不改归属、部队返程；目标有掠夺冷却（时长随全局加速缩短）',
+  taskAssistHint: '协防：部队到达后驻扎在盟友城里，守城时与城主驻军一起参战（伤亡按开战数量比例分摊）；占本城校场出征名额，耗粮按野外 2 倍由出发城承担，随时可召回。每座城最多 5 支协防、同一账号对同一座城最多 1 支',
+  confirmAssist: '确认协防',
   taskOccupy: '占领',
   taskOccupyHint: (limit: number, owned: number) => `胜利后幸存部队驻守并获得加成（占领上限 = 官府等级 ${limit}，当前 ${owned}）`,
   taskCarryLine: (carry: number) => `编队负重 ${carry}`,
@@ -421,8 +453,12 @@ const WORLD_MAP = {
   transferSubmit: '调兵',
   /** 召回 */
   recallTitle: '驻军管理',
-  recallHint: '召回将放弃占领（加成立即停止），部队返程回城',
-  recallSubmit: '召回全部驻军',
+  recallHint: '部分撤回不放弃占领，但地块至少要留 1 个兵；全部撤回会放弃占领',
+  recallSubmit: '撤回所选',
+  recallAllSubmit: '全部撤回（放弃占领）',
+  recallPickFirst: '请先填写要撤回的数量',
+  recallWouldEmptyBtn: '会撤空，请改用全部撤回',
+  recallWouldEmpty: '所选数量会撤空整块驻军：部分撤回至少要留 1 个兵；想全部撤回请用下方按钮（会放弃占领）',
   recallBusy: '召回中…',
   /** 行军与领地列表 */
   marchesTitle: '进行中行军',
@@ -489,6 +525,8 @@ const LEADERBOARD = {
   territory: '领地数量',
   plunder: '累计掠夺',
   model: '模型榜',
+  nobility: '爵位榜',
+  exploration: '探索榜',
   updatedAt: (time: string) => `快照 ${time}`,
   rankColumn: '名次',
   playerColumn: '玩家',
@@ -547,6 +585,7 @@ const OFFLINE_REPORT = {
   troopsLostRow: (n: number) => `部队减员 ${n}`,
   npcRaidsRow: (n: number) => `NPC 袭击 ${n} 次`,
   wildernessLostRow: (n: number) => `被 NPC 攻破 ${n} 块野地`,
+  wildernessInactiveRow: (n: number) => `长期未上线，被收回 ${n} 块野地`,
   statusTitle: '现状',
   statusCalm: '各项资源水位正常',
   storageFullRow: (label: string, percent: number) => `仓库${label}快满了（${percent}%），产出正在作废`,
@@ -605,6 +644,8 @@ const BATTLE_REPORT = {
   sideMine: '我方',
   sideEnemy: '敌方',
   location: (x: number, y: number) => `(${x},${y})`,
+  /** 坐标旁的「定位」：关闭弹窗、地图居中选中该格（AISLG-203；剧本战场战报不显示） */
+  locate: '定位',
   roundsMeta: (rounds: number) => `${rounds} 回合`,
   endWiped: '守方全灭',
   endAttackerWiped: '攻方全灭',
@@ -630,6 +671,10 @@ const BATTLE_REPORT = {
     `第 ${round} 回合：我方输出 ${mineDamage}、阵亡 ${mineKilled}；敌方输出 ${enemyDamage}、阵亡 ${enemyKilled}`,
   returnNote: '幸存部队随返程行军回城，到达后才入城',
   noTroops: '无兵力',
+  /** 池子行（v85，AISLG-212）：本方伤兵 / 被俘与胜方抓到的俘虏（仅非零时显示；阵亡 = 损失 − 伤兵 − 被俘） */
+  poolWounded: (n: number) => `伤兵 ${n}`,
+  poolCaptured: (n: number) => `被俘 ${n}`,
+  poolCaptives: (n: number) => `抓到俘虏 ${n}`,
   /** 按 id 反查（事件流入口）的加载态 */
   loading: '战报加载中…',
   loadFailed: '战报加载失败（可能已被清理）',
@@ -693,6 +738,11 @@ const EVENTS_PANEL = {
   viewReport: '战报',
   /** 侦察完成事件携带 intel（v23 AISLG-62）：点击打开侦察报告弹窗 */
   viewScoutReport: '侦察',
+  /** 多城时行内的城池名称标签（AISLG-213）：查不到该城（已放弃 / 名城被占走）时的占位与悬停提示 */
+  cityGone: '原城池',
+  cityGoneHint: '该城已不在名下',
+  /** 城池标签的悬停提示：全名 + 点击切城 */
+  cityTagHint: (name: string) => `${name}（点击切换到该城）`,
 };
 
 const LOGIN = {
@@ -750,7 +800,8 @@ const ERRORS = {
     buildingExists: '该类型建筑已存在或正在建造/升级中，不可重复发起',
     buildingNotBuilt: '该类型尚未建造，请先建造再升级',
     buildingLevelMax: '建筑已达等级上限，无法继续升级',
-    buildNotCancellable: '只能取消排队中的建造任务',
+    buildingMainOnly: '酒馆与书院只能建在主城，请切回主城再建造或升级',
+    buildNotCancellable: '建造任务不存在、不属于本账号或已完成 / 已取消',
     invalidParams: '建筑类型不合法',
     fallback: '发起建造失败',
   },
@@ -767,9 +818,24 @@ const ERRORS = {
     insufficientResources: '资源不足以支付本次征募（当前资源见顶栏）',
     insufficientPopulation: '人口不足以征募该数量（人口随时间增长，民房提高上限）',
     queueFull: '征兵队列已满，等队首完成后可再发起',
-    notCancellable: '只能取消排队中的征兵任务',
+    notCancellable: '征兵任务不存在、不属于本账号或已完成 / 已取消',
     invalidParams: '征兵参数不合法（兵种未知或数量越界）',
     fallback: '发起征兵失败',
+  },
+  // v84（AISLG-209）：遣散士兵
+  disband: {
+    insufficientTroops: '要遣散的数量超过城内该兵种现有驻军（在外部队与野地驻军不算）',
+    cityInBattle: '本城或其名下野地正有行军在途 / 有 NPC 来袭未结，暂不能遣散',
+    invalidParams: '遣散参数不合法（兵种未知，或数量不是正整数）',
+    fallback: '遣散失败，请重试',
+  },
+  // v85（AISLG-212）：伤兵 / 俘虏 / 逃兵的治疗 / 招降 / 劝回
+  pools: {
+    invalidParams: '数量超过池内现有，或参数不合法（兵种未知、数量不是正整数）',
+    insufficientResources: '资源不足以支付这次治疗 / 招降 / 劝回（当前资源见顶栏）',
+    insufficientPopulation: '人口不足以招降这么多俘虏（人口随时间增长，民房提高上限）',
+    cityStarving: '本城正在断粮，断粮结束后才能劝回逃兵',
+    fallback: '操作失败，请重试',
   },
   exchange: {
     insufficientResources: '持有的该资源不够这次兑换',
@@ -780,6 +846,8 @@ const ERRORS = {
     targetNotAttackable: '该目标当前不可出征（玩家城池或他人占领的地块；玩家对抗随后续阶段开放）',
     insufficientTroops: '城内兵力不足以派出该编队（行军中的部队不在城内）',
     tileNotOccupied: '该地块未被本账号占领，无法召回驻军',
+    garrisonWouldEmpty: '部分撤回不能撤空地块驻军，地块至少要留 1 个兵（想全部撤回请用“全部撤回”，会放弃占领）',
+    insufficientGarrison: '撤回数量超过该地块的现有驻军，请按兵种核对数量',
     invalidParams: '出征参数不合法（坐标越界、编队为空或任务值非法）',
     plunderCooldown: '该地块已被成功掠夺，处于掠夺冷却（占领不受冷却限制）',
     taskInvalidForTarget: '该任务不适用于此目标（NPC 城池仅支持掠夺）',
@@ -818,8 +886,17 @@ const SESSION = {
   recruitFailedFallback: '发起征兵失败',
   cancelRecruitRejected: (message: string) => `取消征兵被拒绝（${message}）`,
   cancelRecruitFailedFallback: '取消征兵失败',
+  // v84（AISLG-209）：遣散
+  troopsDisbanded: (troops: string, refund: string) => `遣散 ${troops}，返还 ${refund}`,
+  troopsDisbandedRejected: (message: string) => `遣散被拒绝（${message}）`,
+  // v85（AISLG-212）：伤兵 / 俘虏 / 逃兵的治疗 / 招降 / 劝回与放弃 / 释放
+  troopsRestored: (label: string, troops: string, cost: string) => `${label} ${troops}，花费 ${cost}`,
+  troopsRestoredRejected: (message: string) => `治疗 / 招降 / 劝回被拒绝（${message}）`,
+  troopsReleased: (label: string, troops: string) => `${label} ${troops}，不返还任何东西`,
+  troopsReleasedRejected: (message: string) => `放弃 / 释放被拒绝（${message}）`,
   marchStarted: (x: number, y: number, dueClock: string) => `部队出征 → (${x},${y})，预计 ${dueClock} 到达`,
   recallStarted: (x: number, y: number, dueClock: string) => `驻军自 (${x},${y}) 启程返城，预计 ${dueClock} 到达，占领已放弃`,
+  recallPartialStarted: (x: number, y: number, dueClock: string) => `部分驻军自 (${x},${y}) 启程返城，预计 ${dueClock} 到达，占领保留`,
   scoutStarted: (x: number, y: number, count: number, dueClock: string) =>
     `斥候 ×${count} 侦察 (${x},${y})，预计 ${dueClock} 到达（情报随事件送达）`,
   exchanged: (resourceLabel: string, amount: number, gold: number) =>
@@ -867,6 +944,10 @@ const TRUCE_COPY = {
     return `本周的免战已用过（每周一次），约 ${hours} 小时后再开`;
   },
   errFallback: '开启免战失败，请稍后重试',
+  cancelledText: '主动免战已提前解除（本周次数不返还）',
+  errNotActive: '没有生效中的主动免战，无需解除',
+  errPassive: '城池处于被动免战中（被攻破 / 被抢后的保护），不能主动解除',
+  cancelFallback: '提前解除免战失败，请稍后重试',
 };
 
 export const COPY = {

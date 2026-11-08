@@ -6,11 +6,12 @@ import type pg from 'pg';
 import { NOTIFY_CHANNEL } from '../../common/src/db';
 import { EventType, type InitiatorRole } from '../../common/src/protocol';
 import { insertEvent } from '../../common/src/events';
-import { MAX_ACTIVE_BUILDS, buildTimeBasis, completeBuild, upgradeSeconds } from '../../common/src/rules';
-import { MAX_ACTIVE_RECRUITS } from '../../common/src/troops';
+import { completeBuild, upgradeSeconds } from '../../common/src/rules';
 import { loadTerritory } from '../../common/src/world-db';
-import { getTimeScale } from '../../common/src/time-scale';
+import { activateQueuedBuilds, activateQueuedDefenseCrafts, activateQueuedRecruits } from '../../common/src/queue-activate';
 import { NEWBIE_GOVERNMENT_LEVEL } from '../../common/src/protection';
+import { defenseCap } from '../../common/src/city-defense';
+import { addCityDefenseStock, defenseCraftView, defenseStockTotal, loadCityDefenses, type DefenseCraftRow } from '../../common/src/city-defense-db';
 import {
   loadArmyFoodUsePerHour,
   loadBuildingLevels,
@@ -149,34 +150,12 @@ export async function processDueBuilds(pool: pg.Pool): Promise<number> {
       }
     }
 
-    // 队列激活：完成让出在建位后（也兜底覆盖异常遗留的空位），把各城最早的排队建造
-    // 转入在建并重算时间；每城最多激活到 MAX_ACTIVE_BUILDS 条。
-    // 时长按条目区分：建造（level=1）用建造时长，升级（level>1）= 建造时长 × 当前等级；
-    // 全局缩放与 1 秒下限作用于总时长（与 rules.upgradeSeconds 同口径，AISLG-38 复核修复）。
+    // 队列激活：完成让出在建位后（也兜底覆盖异常遗留的空位），把各城最早的排队建造转入在建
+    // （共用写法见 common/src/queue-activate.ts，API 取消在建条目时同样调用）。
     const activated: BuildRow[] = [];
     if (done.length > 0) {
-      const buildBasis = buildTimeBasis();
-      const act = await client.query(
-        `UPDATE builds b SET status = 'building',
-            started_at = clock_timestamp(),
-            due_at = clock_timestamp() + make_interval(secs => GREATEST(1, FLOOR(
-              $1::float8 * (CASE
-                WHEN b.level <= 10 THEN (CASE WHEN b.level > 1 THEN b.level - 1 ELSE 1 END)
-                ELSE 9 * power(1.3::float8, b.level - 10) END) / $3::float8)))
-         WHERE b.id IN (
-           SELECT id FROM (
-             SELECT q.id, row_number() OVER (PARTITION BY q.city_id ORDER BY q.started_at, q.id) AS rn
-             FROM builds q
-             WHERE q.status = 'queued'
-               AND NOT EXISTS (
-                 SELECT 1 FROM builds a WHERE a.city_id = q.city_id AND a.status = 'building'
-               )
-           ) ranked WHERE ranked.rn <= $2
-         )
-         RETURNING *`,
-        [buildBasis.seconds, MAX_ACTIVE_BUILDS, buildBasis.scale],
-      );
-      for (const row of act.rows as BuildRow[]) {
+      const act = await activateQueuedBuilds<BuildRow>(client, null);
+      for (const row of act) {
         await insertEvent(client, {
           accountId: row.account_id,
           cityId: row.city_id,
@@ -272,30 +251,11 @@ export async function processDueRecruits(pool: pg.Pool): Promise<number> {
       }
     }
 
-    // 队首激活：把各城最早的排队征兵转入征募中，时长按条目的单兵时长快照 × 数量重算
+    // 队首激活：把各城最早的排队征兵转入征募中（共用写法见 common/src/queue-activate.ts）
     const activated: RecruitRow[] = [];
     if (done.length > 0) {
-      // v22（AISLG-39）：征募时长 = max(1, 基准单兵 × 数量 ÷ time_scale)——下限作用于
-      // 总时长（unit_seconds 快照为未缩放基准）；显式 RECRUIT_UNIT_SECONDS 覆盖时不缩放
-      const recruitScale = Number.isFinite(Number(process.env.RECRUIT_UNIT_SECONDS)) ? 1 : getTimeScale();
-      const act = await client.query(
-        `UPDATE recruits r SET status = 'recruiting',
-            started_at = clock_timestamp(),
-            due_at = clock_timestamp() + make_interval(secs => GREATEST(1, FLOOR(r.unit_seconds * r.count / $1::float8)))
-         WHERE r.id IN (
-           SELECT id FROM (
-             SELECT q.id, row_number() OVER (PARTITION BY q.city_id ORDER BY q.started_at, q.id) AS rn
-             FROM recruits q
-             WHERE q.status = 'queued'
-               AND NOT EXISTS (
-                 SELECT 1 FROM recruits a WHERE a.city_id = q.city_id AND a.status = 'recruiting'
-               )
-           ) ranked WHERE ranked.rn <= $2
-         )
-         RETURNING *`,
-        [recruitScale, MAX_ACTIVE_RECRUITS],
-      );
-      for (const row of act.rows as RecruitRow[]) {
+      const act = await activateQueuedRecruits<RecruitRow>(client, null);
+      for (const row of act) {
         await insertEvent(client, {
           accountId: row.account_id,
           cityId: row.city_id,
@@ -320,6 +280,100 @@ export async function processDueRecruits(pool: pg.Pool): Promise<number> {
       await pool.query('SELECT pg_notify($1, $2)', [
         NOTIFY_CHANNEL,
         JSON.stringify({ reason: 'recruit_started', recruitId: row.id, accountId: row.account_id }),
+      ]);
+    }
+    return done.length;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+
+/**
+ * 处理一批到期打造并入库（v73，AISLG-193）；完成后激活各城排队的下一条。
+ * 锁序与征兵一致：defense_crafts（SKIP LOCKED）→ cities。打造不改生产速率，生产结算只为对齐锚点。
+ */
+export async function processDueDefenseCrafts(pool: pg.Pool): Promise<number> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const due = await client.query(
+      `SELECT * FROM defense_crafts
+       WHERE status = 'crafting' AND due_at <= now()
+       ORDER BY due_at
+       LIMIT $1
+       FOR UPDATE SKIP LOCKED`,
+      [BATCH_LIMIT],
+    );
+    const done: DefenseCraftRow[] = [];
+    for (const row of due.rows as DefenseCraftRow[]) {
+      const cityRes = await client.query(
+        `SELECT id, gold, wood, food, stone, iron, settled_at,
+                gold_rem, food_rem, wood_rem, stone_rem, iron_rem, population, population_rem
+         FROM cities WHERE id = $1 FOR UPDATE`,
+        [row.city_id],
+      );
+      const cityRow = cityRes.rows[0] as CityProductionRow | undefined;
+      if (cityRow && row.due_at) {
+        const levels = await loadBuildingLevels(client, row.city_id);
+        const territory = await loadTerritory(client, row.city_id);
+        const armyFoodUsePerHour = await loadArmyFoodUsePerHour(client, row.city_id);
+        const target = row.due_at > cityRow.settled_at ? row.due_at : cityRow.settled_at;
+        await settleCityProduction(client, cityRow, levels, target, territory, armyFoodUsePerHour);
+      }
+      const upd = await client.query(
+        `UPDATE defense_crafts SET status = 'completed', completed_at = clock_timestamp()
+         WHERE id = $1 AND status = 'crafting'
+         RETURNING *`,
+        [row.id],
+      );
+      if (upd.rowCount === 1) {
+        const kind = row.kind as import('../../common/src/city-defense').DefenseKind;
+        await addCityDefenseStock(client, row.city_id, kind, row.count);
+        const levels = await loadBuildingLevels(client, row.city_id);
+        const stock = await loadCityDefenses(client, row.city_id);
+        await insertEvent(client, {
+          accountId: row.account_id,
+          cityId: row.city_id,
+          buildId: row.id,
+          type: EventType.DEFENSE_CRAFT_COMPLETED,
+          initiator: row.initiator as InitiatorRole,
+          detail: { kind, count: row.count, stock, cap: defenseCap(levels.wall ?? 0), total: defenseStockTotal(stock) },
+        });
+        done.push({ ...(upd.rows[0] as DefenseCraftRow), kind });
+      }
+    }
+
+    const activated: DefenseCraftRow[] = [];
+    if (done.length > 0) {
+      const act = await activateQueuedDefenseCrafts<DefenseCraftRow>(client, null);
+      for (const row of act) {
+        await insertEvent(client, {
+          accountId: row.account_id,
+          cityId: row.city_id,
+          buildId: row.id,
+          type: EventType.DEFENSE_CRAFT_STARTED,
+          initiator: row.initiator as InitiatorRole,
+          detail: { kind: row.kind, count: row.count, cost: row.cost ?? {}, fromQueue: true, dueAt: row.due_at ? row.due_at.toISOString() : undefined },
+        });
+        activated.push(row);
+      }
+    }
+
+    await client.query('COMMIT');
+    for (const row of done) {
+      await pool.query('SELECT pg_notify($1, $2)', [
+        NOTIFY_CHANNEL,
+        JSON.stringify({ reason: 'defense_changed', change: 'craft_completed', craftId: row.id, accountId: row.account_id }),
+      ]);
+    }
+    for (const row of activated) {
+      await pool.query('SELECT pg_notify($1, $2)', [
+        NOTIFY_CHANNEL,
+        JSON.stringify({ reason: 'defense_changed', change: 'craft_started', craftId: row.id, accountId: row.account_id }),
       ]);
     }
     return done.length;

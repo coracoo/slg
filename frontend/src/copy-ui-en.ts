@@ -16,17 +16,17 @@ export const MODAL_COPY_EN = {
 } satisfies typeof MODAL_COPY;
 
 export const NAV_COPY_EN = {
+  // 手机（< 1024）底部导航短标签（AISLG-214）：「Star Tower」放不下，用「Tower」
   pages: {
     overview: { label: 'Overview', icon: 'O' },
     map: { label: 'Map', icon: 'M' },
     city: { label: 'City', icon: 'C' },
     army: { label: 'Army', icon: 'A' },
     growth: { label: 'Growth', icon: 'G' },
-    starTower: { label: 'Star Tower', icon: 'T' },
+    starTower: { label: 'Star Tower', icon: 'T', shortLabel: 'Tower' },
     intel: { label: 'Intel', icon: 'I' },
     agent: { label: 'Agent', icon: 'AI' },
   },
-  cityMenuTitle: 'Switch City',
   cityLoading: 'Loading…',
   cityMain: 'Main City',
   cityBranch: 'Branch City',
@@ -38,6 +38,7 @@ export const NAV_COPY_EN = {
   accountShort: 'Me',
   rename: 'Rename City',
   discardBranch: 'Abandon Branch City',
+  setCapital: 'Set as capital',
   settings: 'Account Settings',
   switchAccount: 'Switch Account',
   reset: 'Reset Account',
@@ -55,7 +56,10 @@ export const TOP_COPY_EN = {
   exchange: 'Market',
   leaderboard: 'Board',
   fullTip: (percent: number) => `Storage ${percent}% full`,
-  net: (rate: number) => `${rate >= 0 ? '+' : ''}${rate}/h`,
+  net: (rate: number) => {
+    const value = Math.round(rate);
+    return `${value >= 0 ? '+' : ''}${value}/h`;
+  },
   popLabel: 'Population',
   // 中文 '人' 是紧凑人口的单位后缀；英文紧凑格只放数字（完整含义由人口悬浮模板表达），单位留空。
   popShort: '',
@@ -95,7 +99,7 @@ export const SEASON_COPY_EN = {
     title: 'Season ending soon',
     stage: { 'T-1d': '1 day left', 'T-1h': '1 hour left', 'T-10m': '10 minutes left' } as Record<string, string>,
     body: (id: number, endsAt: string) =>
-      `Season ${id} ends at ${endsAt}. The server will pause briefly and reset the world (map, cities, armies, heroes). Accounts, tokens and linked logins are kept, and the top of each board goes into the Hall of Fame.`,
+      `Season ${id} ends at ${endsAt}. The server will pause briefly and reset the world (map, cities, armies, heroes). Accounts, tokens and linked logins are kept, and the top of each board goes into the Hall of Fame. Gift credits reset with the season change.`,
     hint: 'Plan your marches, builds and recruits before the reset',
     confirm: 'Got it',
   },
@@ -113,7 +117,7 @@ export const HALL_COPY_EN = {
   loading: 'Loading…',
   loadFailed: 'Hall of Fame failed to load, try again later',
   more: 'More',
-  kinds: { power: 'Power', territory: 'Territory', plunder: 'Plunder', model: 'Model', arena: 'Arena', starTower: 'Star Tower', alliance: 'Alliance' } as Record<string, string>,
+  kinds: { power: 'Power', territory: 'Territory', plunder: 'Plunder', model: 'Model', arena: 'Arena', starTower: 'Star Tower', alliance: 'Alliance', nobility: 'Nobility', exploration: 'Exploration', luoyang: 'Luoyang' } as Record<string, string>,
   rankColumn: 'Rank',
   playerColumn: 'Player',
   modelColumn: 'Model',

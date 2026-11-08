@@ -8,10 +8,14 @@ import { insertSeason } from '../../common/src/season-insert';
 import { SCHEMA_LOCK_ID } from '../../common/src/db';
 import { getCurrentSeason, notifySeasonEvent, setMaintenance, type SeasonRow } from '../../common/src/season-db';
 import { seasonLengthDays } from '../../common/src/season-seed';
-import { generateWorldTiles, WORLD_SEED } from '../../common/src/world';
+import { generateWorldTiles, WORLD_SEED, WORLD_SIZE } from '../../common/src/world';
 import { insertWorldTiles } from '../../common/src/world-db';
 import { ensureFamousCities } from '../../common/src/famous-city-db';
+import { ensureFactions } from '../../common/src/faction-db';
+import { getFactionEnabled } from '../../common/src/faction-config';
+import { alignFactionStartedAtForSeason } from '../../common/src/faction-start';
 import { placeWildFamousIn } from '../../common/src/wild-famous-db';
+import { ensureRelics } from '../../common/src/fog-relic-db';
 import { ensureArenaNpcs, lockArena } from '../../common/src/arena-db';
 import { refreshTimeScale } from '../../common/src/time-scale';
 import { refreshLeaderboards } from './leaderboard-tick';
@@ -120,9 +124,12 @@ export async function runSeasonReset(pool: pg.Pool, options: SeasonResetOptions 
       await enter('clear');
       await client.query(`TRUNCATE ${RESET_TABLES.join(', ')}`);
       await client.query(
+        `UPDATE alliances SET luoyang_holder = false, decree_kind = NULL, decree_until = NULL, decree_next_at = NULL`,
+      );
+      await client.query(
         `UPDATE accounts
-         SET season_id = NULL, plunder_total = 0, newbie_until = NULL,
-             self_truce_until = NULL, self_truce_used_at = NULL, last_online_at = NULL`,
+         SET season_id = NULL, plunder_total = 0, prestige = 0, nobility = 0, newbie_until = NULL,
+             self_truce_until = NULL, self_truce_used_at = NULL, last_online_at = NULL, gift = 0`,
       );
       await enter('world');
       const seed = nextWorldSeed(old.seed);
@@ -130,7 +137,11 @@ export async function runSeasonReset(pool: pg.Pool, options: SeasonResetOptions 
       // 整表重灌后立即收集统计信息：否则新图刚上线的前几分钟查询计划按空表估算（同事务内 ANALYZE 合法）
       await client.query(`ANALYZE world_tiles`);
       await ensureFamousCities(client);
+      // 五方势力（v99，AISLG-239）：开关打开时按新世界重新放老巢并吞下开季 25 格（factions 已随 RESET_TABLES 清空）
+      await ensureFactions(client);
       await placeWildFamousIn(client);
+      // 战争迷雾遗迹（v93，AISLG-227）：按新世界重新生成（表已随 RESET_TABLES 清空），同一事务内
+      await ensureRelics(client, seed, WORLD_SIZE);
       await lockArena(client);
       await ensureArenaNpcs(client);
       await enter('season');
@@ -144,6 +155,10 @@ export async function runSeasonReset(pool: pg.Pool, options: SeasonResetOptions 
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
         [JSON.stringify({ scale: timeScale })],
       );
+      // 五方势力的启用时间（AISLG-243，v102）：势力的天数从 max(本季开始时间, 启用时间) 算。换季开了势力就把
+      // 启用时间对齐到新赛季开始时间（与开季放老巢同一时刻，天数从第 1 天算）；没开则删掉记录，
+      // 否则下个赛季中途打开开关会被误判成「已经启用过」而不放老巢。
+      await alignFactionStartedAtForSeason(client, startAt, getFactionEnabled());
       await setMaintenance(client, null);
       await enter('commit');
       return {

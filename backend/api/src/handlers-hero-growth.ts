@@ -1,7 +1,7 @@
 // 武将培养的处理逻辑（v54，AISLG-144）：ALLOCATE_HERO_POINTS（加点）/ RESET_HERO_POINTS（洗点）/
-// TRAIN_HERO（历练）/ GIFT_HERO（赏赐）。规则见 common/src/hero-growth.ts，占用判定与每日计数见
-// hero-growth-db.ts。锁序与 RECRUIT_HERO 一致：先主城行（花金币的操作），再武将行。
-// 历练只登记结束时刻，到点经验由 Worker 的 hero-training-tick 结算。
+// TRAIN_HERO（历练）/ GIFT_HERO（赏赐）/ CANCEL_TRAINING（取消历练，v71 AISLG-190）。规则见
+// common/src/hero-growth.ts，占用判定与每日计数见 hero-growth-db.ts。锁序与 RECRUIT_HERO 一致：先主城行
+//（花金币的操作），再武将行。历练只登记结束时刻，到点经验由 Worker 的 hero-training-tick 结算。
 
 import pg from 'pg';
 import { Op, type ErrorCode, type InitiatorRole } from '../../common/src/protocol';
@@ -15,7 +15,9 @@ import {
   startTraining,
   usedDailyCount,
 } from '../../common/src/hero-growth-db';
-import { heroBusyMarchMap, heroGuardMaps } from '../../common/src/hero-db';
+import { heroBusyMarchMap, heroGuardMaps, isCaptive } from '../../common/src/hero-db';
+import { loyaltyAfterGift } from '../../common/src/hero-loyalty';
+import { setLoyalty } from '../../common/src/hero-loyalty-db';
 import type { HeroOnlyResponseData, HeroView } from '../../common/src/protocol-hero';
 import { respondError, respondOk } from './frames';
 import type { HandlerContext } from './handlers';
@@ -59,7 +61,7 @@ function finish(
   seq: number | undefined,
   accountId: string,
   view: HeroView,
-  reason: 'points_changed' | 'training_started' | 'gifted',
+  reason: 'points_changed' | 'training_started' | 'training_cancelled' | 'gifted',
   role: InitiatorRole,
 ): void {
   const body: HeroOnlyResponseData = { hero: view };
@@ -97,18 +99,18 @@ export async function handleAllocateHeroPoints(
     await client.query('BEGIN');
     const hero = await lockOwnHero(client, accountId, heroId);
     if (!hero) {
-      return fail(ctx, conn, client, op, seq, 'HERO_NOT_FOUND');
+      return await fail(ctx, conn, client, op, seq, 'HERO_NOT_FOUND');
     }
     const busy = await heroBusyCode(client, accountId, hero);
     if (busy) {
-      return fail(ctx, conn, client, op, seq, busy);
+      return await fail(ctx, conn, client, op, seq, busy);
     }
     const check = validatePointsRequest(points, hero.free_points);
     if (check === 'invalid') {
-      return fail(ctx, conn, client, op, seq, 'INVALID_PARAMS');
+      return await fail(ctx, conn, client, op, seq, 'INVALID_PARAMS');
     }
     if (check === 'insufficient') {
-      return fail(ctx, conn, client, op, seq, 'HERO_POINTS_INSUFFICIENT', { freePoints: hero.free_points });
+      return await fail(ctx, conn, client, op, seq, 'HERO_POINTS_INSUFFICIENT', { freePoints: hero.free_points });
     }
     const res = await client.query(
       `UPDATE account_heroes SET lead = lead + $2, force = force + $3, wit = wit + $4, free_points = free_points - $5
@@ -148,23 +150,23 @@ export async function handleResetHeroPoints(
     const snap = capitalId ? await lockCitySnapshot(client, accountId, capitalId) : null;
     const hero = await lockOwnHero(client, accountId, heroId);
     if (!hero) {
-      return fail(ctx, conn, client, op, seq, 'HERO_NOT_FOUND');
+      return await fail(ctx, conn, client, op, seq, 'HERO_NOT_FOUND');
     }
     const busy = await heroBusyCode(client, accountId, hero);
     if (busy) {
-      return fail(ctx, conn, client, op, seq, busy);
+      return await fail(ctx, conn, client, op, seq, busy);
     }
     const allocated = allocatedPoints(heroAttrs(hero), heroBaseAttrs(hero));
     if (allocated <= 0) {
-      return fail(ctx, conn, client, op, seq, 'HERO_NOTHING_TO_RESET');
+      return await fail(ctx, conn, client, op, seq, 'HERO_NOTHING_TO_RESET');
     }
     if (usedDailyCount(hero, 'reset') >= RESET_DAILY_LIMIT) {
-      return fail(ctx, conn, client, op, seq, 'HERO_DAILY_LIMIT', { limit: RESET_DAILY_LIMIT });
+      return await fail(ctx, conn, client, op, seq, 'HERO_DAILY_LIMIT', { limit: RESET_DAILY_LIMIT });
     }
     const cost = resetCost(hero.level);
     if (!snap || snap.resources.gold < cost) {
       // 用本事务已锁住的快照回包：另开连接读城池会等本事务持有的城池行锁，自己把自己死锁
-      return fail(ctx, conn, client, op, seq, 'INSUFFICIENT_RESOURCES', snap ? { city: toCityView(snap) } : undefined);
+      return await fail(ctx, conn, client, op, seq, 'INSUFFICIENT_RESOURCES', snap ? { city: toCityView(snap) } : undefined);
     }
     await client.query(`UPDATE cities SET gold = gold - $2 WHERE id = $1`, [snap.cityId, cost]);
     await bumpDailyCount(client, hero, 'reset');
@@ -205,11 +207,11 @@ export async function handleTrainHero(
     await client.query('BEGIN');
     const hero = await lockOwnHero(client, accountId, heroId);
     if (!hero) {
-      return fail(ctx, conn, client, op, seq, 'HERO_NOT_FOUND');
+      return await fail(ctx, conn, client, op, seq, 'HERO_NOT_FOUND');
     }
     const busy = await heroBusyCode(client, accountId, hero);
     if (busy) {
-      return fail(ctx, conn, client, op, seq, busy);
+      return await fail(ctx, conn, client, op, seq, busy);
     }
     await startTraining(client, hero, tier);
     const res = await client.query(`SELECT * FROM account_heroes WHERE id = $1`, [hero.id]);
@@ -246,22 +248,78 @@ export async function handleGiftHero(
     const snap = capitalId ? await lockCitySnapshot(client, accountId, capitalId) : null;
     const hero = await lockOwnHero(client, accountId, heroId);
     if (!hero) {
-      return fail(ctx, conn, client, op, seq, 'HERO_NOT_FOUND');
+      return await fail(ctx, conn, client, op, seq, 'HERO_NOT_FOUND');
+    }
+    // v94（AISLG-228）：囚禁中不能赏赐；在野名将的赏赐同时 +10 忠诚度（上限 100）
+    if (isCaptive(hero)) {
+      return await fail(ctx, conn, client, op, seq, 'HERO_CAPTURED');
     }
     if (usedDailyCount(hero, 'gift') >= GIFT_DAILY_LIMIT) {
-      return fail(ctx, conn, client, op, seq, 'HERO_DAILY_LIMIT', { limit: GIFT_DAILY_LIMIT });
+      return await fail(ctx, conn, client, op, seq, 'HERO_DAILY_LIMIT', { limit: GIFT_DAILY_LIMIT });
     }
     if (!snap || snap.resources.gold < GIFT_GOLD) {
       // 用本事务已锁住的快照回包：另开连接读城池会等本事务持有的城池行锁，自己把自己死锁
-      return fail(ctx, conn, client, op, seq, 'INSUFFICIENT_RESOURCES', snap ? { city: toCityView(snap) } : undefined);
+      return await fail(ctx, conn, client, op, seq, 'INSUFFICIENT_RESOURCES', snap ? { city: toCityView(snap) } : undefined);
     }
     await client.query(`UPDATE cities SET gold = gold - $2 WHERE id = $1`, [snap.cityId, GIFT_GOLD]);
     await bumpDailyCount(client, hero, 'gift');
     await grantHeroExp(client, hero.id, GIFT_EXP);
+    if (hero.loyalty !== null) {
+      await setLoyalty(client, hero, loyaltyAfterGift(hero.loyalty));
+    }
     const res = await client.query(`SELECT * FROM account_heroes WHERE id = $1`, [hero.id]);
     const view = await viewAfter(client, accountId, res.rows[0] as AccountHeroRow);
     await client.query('COMMIT');
     finish(ctx, conn, op, seq, accountId, view, 'gifted', role);
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * CANCEL_TRAINING（v71，AISLG-190）：取消进行中的历练——武将立刻回家，不给经验（已过去的时间作废，历练本就不花金币）。
+ * 与到点结算并发：武将行锁（lockOwnHero）串行化，条件 UPDATE 要求 train_until 仍在未来，
+ * Worker 的 settleTraining 先提交则这里报 TRAINING_NOT_CANCELLABLE（经验已到账），反之先取消则 Worker 不再结算。
+ */
+export async function handleCancelTraining(
+  ctx: HandlerContext,
+  conn: ConnInfo,
+  op: number,
+  seq: number | undefined,
+  data: Record<string, unknown> | undefined,
+): Promise<void> {
+  const heroId = data?.heroId;
+  if (typeof heroId !== 'string' || !UUID_RE.test(heroId)) {
+    respondError(ctx.registry, conn, op, seq, 'INVALID_PARAMS');
+    return;
+  }
+  const accountId = conn.accountId as string;
+  const role = conn.role as InitiatorRole;
+  const client = await ctx.pool.connect();
+  try {
+    await client.query('BEGIN');
+    const hero = await lockOwnHero(client, accountId, heroId);
+    if (!hero) {
+      return await fail(ctx, conn, client, op, seq, 'HERO_NOT_FOUND');
+    }
+    if (isCaptive(hero)) {
+      return await fail(ctx, conn, client, op, seq, 'HERO_CAPTURED');
+    }
+    const upd = await client.query(
+      `UPDATE account_heroes SET train_until = NULL, train_tier = NULL, train_exp = NULL
+       WHERE id = $1 AND account_id = $2 AND train_until > now()
+       RETURNING *`,
+      [hero.id, accountId],
+    );
+    if (!upd.rowCount) {
+      return await fail(ctx, conn, client, op, seq, 'TRAINING_NOT_CANCELLABLE');
+    }
+    const view = await viewAfter(client, accountId, upd.rows[0] as AccountHeroRow);
+    await client.query('COMMIT');
+    finish(ctx, conn, op, seq, accountId, view, 'training_cancelled', role);
   } catch (err) {
     await client.query('ROLLBACK').catch(() => undefined);
     throw err;

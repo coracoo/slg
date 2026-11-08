@@ -1,8 +1,8 @@
 # SLG · Selfhost 自托管版
 
-SLG 是可由玩家或 AI Agent 游玩的三国策略游戏。本分支合入 [athlan20/slg 的上游版本](https://github.com/athlan20/slg/tree/248a7bc200239c65f1fe065813d633ee1c93dfad)，保留新版玩法，补充面向 NAS / 私有服务器的自托管支持。
+SLG 是可由玩家或 AI Agent 游玩的三国策略游戏。本分支合入 [athlan20/slg 的上游版本](https://github.com/athlan20/slg/tree/906ddd1ba05856915f091cdade893e0d3463c32a)，保留新版玩法，补充面向 NAS / 私有服务器的自托管支持。
 
-游戏介绍、截图与玩法见 [上游中文说明](https://github.com/athlan20/slg/blob/248a7bc200239c65f1fe065813d633ee1c93dfad/README.md)；原项目：[athlan20/slg](https://github.com/athlan20/slg)。
+游戏介绍、截图与玩法见 [上游中文说明](https://github.com/athlan20/slg/blob/906ddd1ba05856915f091cdade893e0d3463c32a/README.md)；原项目：[athlan20/slg](https://github.com/athlan20/slg)。
 
 ## 本分支提供什么
 
@@ -13,13 +13,16 @@ SLG 是可由玩家或 AI Agent 游玩的三国策略游戏。本分支合入 [a
 
 ## 本次上游更新
 
-**2026-10-25 本次按维护者要求先发布待部署验收的合并版本。17 个依赖真实 PostgreSQL 的测试套件未运行，Docker 镜像/运行时和浏览器端到端验证未完成；这不代表可直接升级生产存档，也不改变后续自动更新须先通过验证的要求。**
+**2026-11-08：本次按维护者要求，仅进行静态判断与合并后发布，未运行测试。合入协议 v102 / MCP 0.2.6；这不是已通过运行验证或生产存档升级验收的版本。**
 
-- 合入协议 v70 / MCP 0.1.6，包含联盟、联盟聊天与标记、赛季和名人堂功能。
-- API 启动时会自动执行新增表和列的迁移；请先在隔离 PostgreSQL 16 数据库验证旧存档升级，再部署到原卷。
-- 赛季首次播种的结束时间需在升级前核对；不要直接照抄上游的示例日期，也不要执行 `end-now`。
-- 同一数据库同一时刻只运行一个 Worker；原有 Compose 仍是单 Worker 服务。
-- 更新详情见 [赛季说明](docs/season-system.md)、[联盟说明](docs/alliance-system.md) 和 [上游发布说明](deploy/2026-10-25/README.md)。上游的发版、公告及 npm 发布步骤不属于自托管升级必做项。
+- 保留本地注册开关、已有账号登录、同源 WebSocket、Docker 两文件部署和可配置 npm 镜像。数据库仍为 PostgreSQL 16，原卷、端口和默认配置不变。
+- 上游新增联盟外交、协防、城防、战场、伤兵与俘虏池、计谋、道具和迁城、战争迷雾与探索奖励、名将忠诚度、望楼和五方势力等。详细规则以 [Agent API](docs/agent-api.md) 及上游发布说明为准。
+- **升级后长期不活跃账号会失去野地**：本人和 Agent 都超过现实时间 7 天未活跃时，Worker 每小时检查并收回全部野地、销毁望楼且不退款；驻军回到所属城，城池与城内资源保留。Worker 启动约一小时后开始首轮检查，旧存档中已超过阈值的账号也适用。
+- **名将有忠诚度和被俘规则**：在野名将忠诚度耗尽或被俘逾期可能离队。请阅读 [11 月 6 日说明](deploy/2026-11-06/announcement-zh.md) 和 [11 月 7 日说明](deploy/2026-11-07/announcement-zh.md)。
+- 五方势力受 `faction_enabled` 控制，默认关闭；启用后可能围攻并吞并普通分城。v102 从当季启用当天计算势力天数，满 7 天后才开始围攻，见 [11 月 8 日说明](deploy/2026-11-08/announcement-zh.md)。本次不修改该开关。
+- API 启动会执行表结构及存量数据迁移，包括主城酒馆/书院合并与队列退款、礼金、迷雾和势力相关数据。请先备份，并在隔离 PostgreSQL 16 数据库检查旧存档升级。
+- 同一数据库同一时刻只运行一个 Worker。不要照抄过期赛季日期，不要误执行 `end-now`。
+- 本分支不导入上游 GitHub Actions 工作流；上游公告、npm 发布及正式服务部署步骤不属于本次仓库同步。
 
 ## 部署
 
@@ -49,7 +52,7 @@ SLG 是可由玩家或 AI Agent 游玩的三国策略游戏。本分支合入 [a
 - PostgreSQL 使用 `postgres:16-alpine`，沿用原卷；不要直接切换现有数据库的主版本。
 - 网页端口 `8424`，可通过 `SLG_PORT` 修改；`SLG_BIND_IP` 默认 `0.0.0.0`，请按需限制网络访问。
 - npm 默认使用 `https://registry.npmmirror.com`，可通过 `NPM_REGISTRY` 覆盖。这不保证 GitHub 或容器镜像仓库在国内可达。
-- 默认构建源码固定为 [`ac52b1f4526dc3a2f93d2a3822d51a01d24e6460`](https://github.com/coracoo/slg/commit/ac52b1f4526dc3a2f93d2a3822d51a01d24e6460)，可通过 `SLG_SOURCE_REF` 指定新的已验证完整 40 位提交 SHA。
+- 默认构建源码固定为 [`ac52b1f4526dc3a2f93d2a3822d51a01d24e6460`](https://github.com/coracoo/slg/commit/ac52b1f4526dc3a2f93d2a3822d51a01d24e6460)，可通过 `SLG_SOURCE_REF` 指定已发布的完整 40 位提交 SHA；固定版本不代表已经通过测试。
 
 HTTPS 请在外层可信反向代理配置，并启用 WebSocket 转发；使用 OAuth 时，将 `FRONTEND_URL` 和回调地址设为实际访问地址。
 
@@ -64,19 +67,17 @@ HTTPS 请在外层可信反向代理配置，并启用 WebSocket 转发；使用
 
 ## 如何跟进上游
 
-上游同步由仓库外部的 dot 云端定时任务执行：每天北京时间（Asia/Shanghai）上午 10 点左右检查，实际运行可能在一小时内浮动，不使用 GitHub Actions。任务直接将 `athlan20/slg` 的 `main` 合入本仓库 `selfhost`，本仓库 `main` 保持原样；在云端合并、测试与验证通过后才推送，并通过后续配置提交将部署文件固定到新的已验证完整源码 SHA。
+上游同步只维护 `selfhost`，不修改本仓库 `main`，不使用 GitHub Actions。具体执行范围以维护者最新授权为准；本次依明确指示不以运行测试作为发布门槛，发布记录应如实注明未测试。
 
-没有上游新版本时静默跳过。定时运行不保证每次都能成功发布：遇到合并冲突、测试失败或关键验证不可用时停止发布，并通知阻断原因。
+没有上游新版本时静默跳过。无法判断合并、不能保护自托管改动、发现并发更新，或无法确保不触发 Actions 时停止发布并说明原因。源码合并提交之后，再以配置提交将部署文件固定到该完整源码 SHA，不使用可变分支名。
 
-**NAS 部署仍由你手动完成。** 获取更新后的 `Dockerfile` 与 `compose.yaml`，按升级指南核对配置、备份并完成隔离验证，再手动构建和启动。若 `.env` 中设置了 `SLG_SOURCE_REF`，它会覆盖部署文件的默认值，需同步核对。
-
-备用手动更新方法：将 `athlan20/slg` 的 `main` 合入 `selfhost`、处理冲突并验证，再将部署配置的 `SLG_SOURCE_REF` 固定为新的完整 40 位源码 SHA，重新构建和启动。
+**NAS 部署仍由你手动完成。** 获取更新后的 `Dockerfile` 与 `compose.yaml`，按升级指南核对配置和备份，再决定是否构建和启动。若 `.env` 中设置了 `SLG_SOURCE_REF`，它会覆盖部署文件的默认值，需同步核对。
 
 仅拉取新 README、重启容器或执行 `docker compose pull`，不会自动更新固定 SHA 构建的应用源码。不要把 `SLG_SOURCE_REF` 改成可变分支名。
 
 ## 验证范围与文档
 
-已通过后端非数据库测试 529 项、前端单元测试 7 项、TypeScript 检查、同源前端生产构建及 Docker 后端编译配置检查。**17 个数据库测试套件因缺少隔离 PostgreSQL 未运行；Docker 镜像构建/运行时未验证；浏览器测试因云端进程套接字限制未能启动。** 正式升级前仍须完成隔离 PostgreSQL 16 迁移、容器运行和浏览器端到端验收。本次仅更新仓库，未操作 NAS。
+本次只做提交来源、三方合并、自托管差异和发布引用的静态核对。**未运行后端全量单测/类型检查、前端类型检查/单测/生产构建、Docker 后端编译、Docker 镜像或运行时、PostgreSQL 16 迁移及浏览器端到端测试。** 旧版本的测试结果不能代表本版本。此次仅更新仓库，未操作 NAS 或正式数据库；部署前请保留备份并自行决定隔离验收。
 
 - [详细部署、备份与迁移指南](README.Selfhost.zh-CN.md)
 - [Agent API](docs/agent-api.md) · [MCP 配置](mcp/README.md)

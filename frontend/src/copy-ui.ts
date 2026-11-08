@@ -1,5 +1,11 @@
 // 导航外壳与公共件文案（页面标题 / 导航 / 分页 / 弹窗 / 账号菜单 / 底栏等）。
 
+import type { PageKey } from './state/usePage';
+
+/** 一个导航项的文案：label 是全尺寸文案（桌面侧栏、顶栏标题、tooltip 用）；
+ *  shortLabel 只在手机（< 1024）底部导航用（那一行要放下 12 个入口，只改显示文字，不改桌面端），缺省回落到 label。 */
+export type NavPageCopy = { label: string; icon: string; shortLabel?: string };
+
 export const PAGED_COPY = {
   total: (n: number) => `共 ${n} 条`,
   prev: '上一页',
@@ -13,17 +19,17 @@ export const MODAL_COPY = {
 };
 
 export const NAV_COPY = {
+  // AISLG-214：手机底部导航 12 个入口平分一行，「将星塔」三个字放不下 → 手机短标签「将星」
   pages: {
     overview: { label: '总览', icon: '览' },
     map: { label: '地图', icon: '图' },
     city: { label: '城池', icon: '城' },
     army: { label: '军队', icon: '兵' },
     growth: { label: '养成', icon: '养' },
-    starTower: { label: '将星塔', icon: '塔' },
+    starTower: { label: '将星塔', icon: '塔', shortLabel: '将星' },
     intel: { label: '情报', icon: '报' },
     agent: { label: 'Agent', icon: 'A' },
-  },
-  cityMenuTitle: '切换城池',
+  } as Record<PageKey, NavPageCopy>,
   cityLoading: '加载中…',
   cityMain: '主城',
   cityBranch: '分城',
@@ -35,6 +41,7 @@ export const NAV_COPY = {
   accountShort: '我',
   rename: '城池改名',
   discardBranch: '放弃分城',
+  setCapital: '设为主城',
   settings: '账号设置',
   switchAccount: '切换账号',
   reset: '重置账号',
@@ -51,7 +58,10 @@ export const TOP_COPY = {
   exchange: '集市',
   leaderboard: '榜',
   fullTip: (percent: number) => `仓库已满 ${percent}%`,
-  net: (rate: number) => `${rate >= 0 ? '+' : ''}${rate}/h`,
+  net: (rate: number) => {
+    const value = Math.round(rate);
+    return `${value >= 0 ? '+' : ''}${value}/h`;
+  },
   popLabel: '人口',
   popShort: '人',
   popCap: (cap: number) => `上限 ${cap}`,
@@ -93,7 +103,7 @@ export const SEASON_COPY = {
     title: '换季预告',
     stage: { 'T-1d': '还剩 1 天', 'T-1h': '还剩 1 小时', 'T-10m': '还剩 10 分钟' } as Record<string, string>,
     body: (id: number, endsAt: string) =>
-      `第 ${id} 赛季将于 ${endsAt} 结束，届时服务端会短暂停服并重置世界（地图、城池、军队、武将等）。账号、令牌与第三方绑定保留，各榜前列会留在名人堂。`,
+      `第 ${id} 赛季将于 ${endsAt} 结束，届时服务端会短暂停服并重置世界（地图、城池、军队、武将等）。账号、令牌与第三方绑定保留，各榜前列会留在名人堂。礼金将随换季清零。`,
     hint: '换季前请把行军、建造与征兵安排好',
     confirm: '知道了',
   },
@@ -114,7 +124,7 @@ export const HALL_COPY = {
   loading: '加载中…',
   loadFailed: '名人堂加载失败，稍后再试',
   more: '更多',
-  kinds: { power: '力量', territory: '领土', plunder: '掠夺', model: '模型', arena: '竞技场', starTower: '将星塔', alliance: '联盟' } as Record<string, string>,
+  kinds: { power: '力量', territory: '领土', plunder: '掠夺', model: '模型', arena: '竞技场', starTower: '将星塔', alliance: '联盟', nobility: '爵位', exploration: '探索', luoyang: '洛阳' } as Record<string, string>,
   rankColumn: '名次',
   playerColumn: '玩家',
   modelColumn: '模型',

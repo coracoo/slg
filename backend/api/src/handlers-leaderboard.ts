@@ -9,6 +9,8 @@
 
 import { LEADERBOARD_KINDS, type LeaderboardKind } from '../../common/src/protocol';
 import { getMembership } from '../../common/src/alliance-db';
+import { nobilityName } from '../../common/src/nobility';
+import { getFogEnabled } from '../../common/src/fog-config';
 import { readString, respondError, respondOk } from './frames';
 import type { HandlerContext } from './handlers';
 import type { ConnInfo } from './connections';
@@ -30,6 +32,11 @@ export async function handleGetLeaderboard(
     return;
   }
   const kind = kindRaw as LeaderboardKind;
+  // 探索榜（v93）：迷雾关闭时不重算也不返回（空榜）
+  if (kind === 'exploration' && !getFogEnabled()) {
+    respondOk(ctx.registry, conn, op, seq, { kind, updatedAt: new Date().toISOString(), entries: [], me: null });
+    return;
+  }
   if (kind === 'model') {
     await respondModelLeaderboard(ctx, conn, op, seq);
     return;
@@ -49,13 +56,14 @@ export async function handleGetLeaderboard(
     return;
   }
   const rows = await ctx.pool.query(
-    `SELECT rank, account_id, username, city_name, value, agent_model
-     FROM leaderboard_snapshots
-     WHERE kind = $1 AND computed_at = $2
-     ORDER BY rank ASC`,
+    `SELECT s.rank, s.account_id, s.username, s.city_name, s.value, s.agent_model, a.nobility
+     FROM leaderboard_snapshots s
+     LEFT JOIN accounts a ON a.id = s.account_id
+     WHERE s.kind = $1 AND s.computed_at = $2
+     ORDER BY s.rank ASC`,
     [kind, computedAt],
   );
-  const entries = (rows.rows as Array<{ rank: number; account_id: string; username: string; city_name: string; value: string | number; agent_model: string | null }>).map(
+  const entries = (rows.rows as Array<{ rank: number; account_id: string; username: string; city_name: string; value: string | number; agent_model: string | null; nobility: number | null }>).map(
     (row) => ({
       rank: row.rank,
       accountId: row.account_id,
@@ -64,11 +72,13 @@ export async function handleGetLeaderboard(
       value: Number(row.value),
       agentOnline: ctx.registry.agentConnections(row.account_id).length > 0,
       agentModel: row.agent_model,
+      nobility: Math.max(0, Number(row.nobility ?? 0)),
+      nobilityName: nobilityName(Number(row.nobility ?? 0)),
     }),
   );
   const accountId = conn.accountId as string;
   const mine = entries.find((entry) => entry.accountId === accountId) ?? null;
-  const me = mine ? { rank: mine.rank, value: mine.value } : null;
+  const me = mine ? { rank: mine.rank, value: mine.value, nobility: mine.nobility, nobilityName: mine.nobilityName } : null;
   respondOk(ctx.registry, conn, op, seq, {
     kind,
     updatedAt: computedAt.toISOString(),

@@ -1,6 +1,6 @@
 /** 侧栏（docs/frontend-nav-layout.md 第 3 节）：顶部城池切换（下拉，列出全部城池）、七个导航项（图标 + 名字 + 角标）、
  *  底部账号按钮（带本人连接状态灯；菜单：城池改名 / 切换账号 / 重置账号 / 皮肤四选一）。
- *  1024–1279 收成 60px 图标栏；< 1024 变底部图标栏（城池切换与集市 / 榜收进账号菜单）。
+ *  1024–1279 收成 60px 图标栏；< 1024 变底部图标栏（集市 / 榜收进账号菜单；城池切换在手机顶栏胶囊，AISLG-191）。
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -13,6 +13,8 @@ import type { CityList } from '../../state/useCityList';
 import { PAGE_KEYS, type PageKey } from '../../state/usePage';
 import { LanguageSwitcher } from '../LanguageSwitcher';
 import { ThemeSwitcher } from '../ThemeSwitcher';
+import { CityMenu } from './CityMenu';
+import { GiftRow } from './GiftRow';
 
 /** 各导航项的角标：count = 数字；hot = 红色（总览的 NPC 来袭） */
 export type NavBadges = Partial<Record<PageKey, { count: number; hot?: boolean }>>;
@@ -34,6 +36,10 @@ interface SidebarProps {
   onReset: () => void;
   /** 放弃当前选中的分城（v57，AISLG-153）；菜单项只在选中分城时出现 */
   onDiscardBranch: () => void;
+  /** 迁城（v91，AISLG-220）：当前选中的城（主城或分城）迁到空野地，菜单项在选中城池时出现 */
+  onMoveCity: () => void;
+  /** 把当前选中的分城设为主城（v82，AISLG-205）；菜单项只在选中分城时出现，不可设原因在确认框内说明 */
+  onSetCapital: () => void;
   onExchange: () => void;
   onLeaderboard: () => void;
   /** 手机端底部图标栏的聊天入口（AISLG-138）：点开全屏聊天；角标为私聊未读数 */
@@ -46,6 +52,8 @@ interface SidebarProps {
   /** 联盟入口（v66 起，AISLG-186）：红点数为盟主 / 副盟主的待审批数 + 自己待处理的邀请数；点开联盟面板 */
   allianceBadge: number;
   onOpenAlliance: () => void;
+  /** 账号菜单「背包 / 商店」（v90，AISLG-222）：打开背包与商店弹窗 */
+  onOpenItems: () => void;
 }
 
 /** 连接状态灯样式与文字（文字用户可见，按当前语言取文案包，不能放模块常量） */
@@ -63,7 +71,7 @@ function connectionLamp(connection: ConnectionStatus): { lamp: string; label: st
 export function Sidebar(props: SidebarProps) {
   const copy = useCopy();
   const lang = useLang();
-  const { COPY, CITY_COPY, NAV_COPY, EXTRA_AUTH, CHAT_COPY, ANNOUNCEMENT_COPY, ALLIANCE_COPY } = copy;
+  const { COPY, NAV_COPY, EXTRA_AUTH, CHAT_COPY, ANNOUNCEMENT_COPY, ALLIANCE_COPY, ITEM_COPY, MOVE_CITY_COPY } = copy;
   const { page, onNavigate, badges, cityList, switching, onSelectCity, account, connection, cityLoaded, chatOpen, chatUnread, onToggleChat, announcementUnread, onOpenAnnouncements, allianceBadge, onOpenAlliance } = props;
   const [cityOpen, setCityOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -150,7 +158,15 @@ export function Sidebar(props: SidebarProps) {
         <span className="text-faint max-xl:hidden">▾</span>
       </button>
       {cityOpen ? (
-        <CityMenu cityList={cityList} onChoose={chooseCity} className="left-1 top-[52px] max-lg:hidden" />
+        <CityMenu
+          cityList={cityList}
+          onChoose={chooseCity}
+          onLocate={() => {
+            setCityOpen(false);
+            setAccountOpen(false);
+          }}
+          className="absolute left-1 top-[52px] z-30 max-lg:hidden"
+        />
       ) : null}
 
       <nav role="导航-菜单" className="flex min-h-0 flex-1 flex-col gap-0.5 max-lg:flex-row max-lg:justify-around">
@@ -177,7 +193,9 @@ export function Sidebar(props: SidebarProps) {
               >
                 {item.icon}
               </b>
-              <span className="max-xl:hidden max-lg:inline">{item.label}</span>
+              {/* 手机（< 1024）底部导航用短标签（"将星塔" → "将星"），≥ 1280 宽侧栏仍用全称（AISLG-214） */}
+              <span className="nav-label hidden max-lg:inline max-lg:whitespace-nowrap max-lg:tracking-tighter">{item.shortLabel ?? item.label}</span>
+              <span className="nav-label-full max-xl:hidden">{item.label}</span>
               {badge && badge.count > 0 ? (
                 <i
                   role={`导航-${NAV_COPY_ZH.pages[key].label}-角标`}
@@ -202,7 +220,8 @@ export function Sidebar(props: SidebarProps) {
           <b className="grid h-[22px] w-[22px] shrink-0 place-items-center rounded border border-line text-[12px] font-semibold">
             {ANNOUNCEMENT_COPY.launcher.label.slice(0, 1)}
           </b>
-          <span className="max-xl:hidden max-lg:inline">{ANNOUNCEMENT_COPY.launcher.label}</span>
+          <span className="nav-label hidden max-lg:inline max-lg:whitespace-nowrap">{ANNOUNCEMENT_COPY.launcher.label}</span>
+          <span className="nav-label-full max-xl:hidden">{ANNOUNCEMENT_COPY.launcher.label}</span>
           {announcementUnread > 0 ? (
             <i
               role="导航-公告-角标"
@@ -223,7 +242,8 @@ export function Sidebar(props: SidebarProps) {
           <b className="grid h-[22px] w-[22px] shrink-0 place-items-center rounded border border-line text-[12px] font-semibold">
             {ALLIANCE_COPY.launcher.label.slice(0, 1)}
           </b>
-          <span className="max-xl:hidden max-lg:inline">{ALLIANCE_COPY.launcher.label}</span>
+          <span className="nav-label hidden max-lg:inline max-lg:whitespace-nowrap">{ALLIANCE_COPY.launcher.label}</span>
+          <span className="nav-label-full max-xl:hidden">{ALLIANCE_COPY.launcher.label}</span>
           {allianceBadge > 0 ? (
             <i
               role="导航-联盟-角标"
@@ -245,7 +265,8 @@ export function Sidebar(props: SidebarProps) {
           <b className="grid h-[22px] w-[22px] shrink-0 place-items-center rounded border border-line text-[12px] font-semibold">
             {CHAT_COPY.launcher.label.slice(0, 1)}
           </b>
-          <span className="max-lg:inline">{CHAT_COPY.launcher.label}</span>
+          <span className="nav-label max-lg:inline max-lg:whitespace-nowrap">{CHAT_COPY.launcher.label}</span>
+          {/* 聊天入口只在 < 1024 出现，不需要全称副本 */}
           {chatUnread > 0 ? (
             <i
               role="导航-聊天-角标"
@@ -279,7 +300,7 @@ export function Sidebar(props: SidebarProps) {
             setCityOpen(false);
             setAccountOpen((open) => !open);
           }}
-          className="flex w-full cursor-pointer items-center gap-2 rounded-[5px] border border-line bg-panel-2 px-2.5 py-1.5 text-left text-[12px] hover:border-accent-dim hover:text-accent max-xl:justify-center max-xl:px-0 max-lg:h-full max-lg:w-12 max-lg:flex-col max-lg:gap-0.5 max-lg:py-1 max-lg:text-[10.5px]"
+          className="flex w-full cursor-pointer items-center gap-2 rounded-[5px] border border-line bg-panel-2 px-2.5 py-1.5 text-left text-[12px] hover:border-accent-dim hover:text-accent max-xl:justify-center max-xl:px-0 max-lg:h-full max-lg:flex-col max-lg:gap-0.5 max-lg:py-1 max-lg:text-[10.5px]"
         >
           <i
             role="顶栏-本人在线状态"
@@ -289,7 +310,7 @@ export function Sidebar(props: SidebarProps) {
           <span role="侧栏-账号" className="min-w-0 flex-1 truncate max-xl:hidden max-lg:hidden">
             {account ?? NAV_COPY.account}
           </span>
-          <span className="hidden max-xl:inline max-lg:inline">{NAV_COPY.accountShort}</span>
+          <span className="nav-label hidden max-xl:inline max-lg:inline">{NAV_COPY.accountShort}</span>
           <span className="text-faint max-xl:hidden max-lg:hidden">▾</span>
         </button>
         {accountOpen ? (
@@ -297,33 +318,18 @@ export function Sidebar(props: SidebarProps) {
             role="账号菜单"
             className="absolute bottom-[calc(100%+4px)] left-0 z-30 flex w-[220px] flex-col rounded-md border border-line bg-panel-2 p-1 shadow-2xl max-lg:bottom-[calc(100%+8px)] max-lg:left-auto max-lg:right-0"
           >
+            <GiftRow gift={cityList.gift} />
             {cityLoaded ? menuItem('账号菜单-城池改名', NAV_COPY.rename, props.onRename) : null}
+            {cityLoaded && current !== null && !current.isMain ? menuItem('账号菜单-设为主城', NAV_COPY.setCapital, props.onSetCapital) : null}
             {cityLoaded && current !== null && !current.isMain ? menuItem('账号菜单-放弃分城', NAV_COPY.discardBranch, props.onDiscardBranch, 'text-st-error') : null}
+            {cityLoaded && current !== null ? menuItem('账号菜单-迁城', MOVE_CITY_COPY.menu, props.onMoveCity) : null}
+            {menuItem('账号菜单-背包商店', ITEM_COPY.menu, props.onOpenItems)}
             {menuItem('账号菜单-账号设置', NAV_COPY.settings, props.onSettings)}
             {menuItem('账号菜单-切换账号', NAV_COPY.switchAccount, props.onSwitchAccount)}
             {menuItem('账号菜单-重置账号', NAV_COPY.reset, props.onReset, 'text-st-error')}
             <div className="hidden max-lg:block">
               {menuItem('账号菜单-集市', NAV_COPY.exchangeMobile, props.onExchange)}
               {menuItem('账号菜单-排行榜', NAV_COPY.leaderboardMobile, props.onLeaderboard)}
-              {cities.length > 1 ? (
-                <>
-                  <p className="px-2.5 pt-1.5 text-[11px] text-faint">{NAV_COPY.cityMenuTitle}</p>
-                  {cities.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      role="账号菜单-城池"
-                      onClick={() => chooseCity(item.id)}
-                      className={`flex w-full cursor-pointer items-baseline justify-between gap-2 rounded px-2.5 py-1 text-left text-[12.5px] hover:bg-accent-soft ${
-                        item.id === activeCityId ? 'text-accent' : ''
-                      }`}
-                    >
-                      <span className="truncate">{tName(item.name)}</span>
-                      <span className="shrink-0 font-mono text-[11px] text-faint">{CITY_COPY.switcher.levelTag(item.level)}</span>
-                    </button>
-                  ))}
-                </>
-              ) : null}
             </div>
             <div className="border-t border-line-soft">
               <LanguageSwitcher />
@@ -335,48 +341,5 @@ export function Sidebar(props: SidebarProps) {
         ) : null}
       </div>
     </aside>
-  );
-}
-
-/** 城池下拉：全部城池（名字 / 等级 / 主城·分城 / 坐标），当前城打勾，底部给分城名额 */
-function CityMenu({ cityList, onChoose, className }: { cityList: CityList; onChoose: (cityId: string) => void; className: string }) {
-  const copy = useCopy();
-  const { CITY_COPY, NAV_COPY } = copy;
-  const { cities, activeCityId, branch } = cityList;
-  return (
-    <div
-      role="导航-城池下拉"
-      className={`absolute z-30 flex min-w-[200px] max-w-[320px] flex-col rounded-md border border-line bg-panel-2 p-1 shadow-2xl ${className}`}
-    >
-      {cities.map((item) => {
-        const active = item.id === activeCityId;
-        return (
-          <button
-            key={item.id}
-            type="button"
-            role="城池下拉-城池"
-            title={CITY_COPY.switcher.tabTitle(tName(item.name), item.level, item.x, item.y)}
-            onClick={() => onChoose(item.id)}
-            className={`flex cursor-pointer items-baseline justify-between gap-3 rounded px-2.5 py-1.5 text-left text-[12.5px] hover:bg-accent-soft ${
-              active ? 'text-accent' : ''
-            }`}
-          >
-            <span className="min-w-0 truncate">
-              {active ? '✓ ' : ''}
-              {tName(item.name)}{' '}
-              <small className="text-faint">
-                {CITY_COPY.switcher.levelTag(item.level)} · {item.isMain ? NAV_COPY.cityMain : NAV_COPY.cityBranch}
-              </small>
-            </span>
-            <span className="shrink-0 font-mono text-[11px] text-faint">{item.x !== null && item.y !== null ? `${item.x},${item.y}` : ''}</span>
-          </button>
-        );
-      })}
-      {branch ? (
-        <p role="城池下拉-分城名额" title={CITY_COPY.switcher.branchLocked(branch.minGovernment)} className="border-t border-line-soft px-2.5 pt-1 text-[11px] text-faint">
-          {CITY_COPY.switcher.branchQuota(branch.count, branch.limit)}
-        </p>
-      ) : null}
-    </div>
   );
 }

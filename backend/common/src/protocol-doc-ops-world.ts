@@ -93,7 +93,7 @@ export const REQUEST_GET_WORLD_MAP: RequestOpDoc = {
   name: 'GET_WORLD_MAP',
   title: '查询世界地图窗口（v12）',
   preAuth: false,
-  summary: `以窗口方式查询世界地图（世界为 ${WORLD_SIZE}×${WORLD_SIZE} 的方格，服务端启动时一次性生成）。请求给窗口左上角 (x, y) 与宽高 (w, h)；缺省以账号主城为中心取 ${DEFAULT_MAP_WINDOW}×${DEFAULT_MAP_WINDOW}。窗口起点 (x, y) 按世界边界钳制；w/h 须为 1..${MAX_MAP_WINDOW} 的整数，非法或越界（0、负数、超过上限、非整数）视为未提供、取缺省 ${DEFAULT_MAP_WINDOW}，不做钳制放大（v17 明确）。每个地块返回地形（plain 平原 / grass 草原 / forest 森林 / hill 丘陵 / desert 荒漠 / marsh 沼泽 / lake 湖泊 / gold_mine 金矿——v19 新增，占领产金、不可掠夺）、类别（wilderness 野地 / npc_city NPC 城池 / city 玩家城池）、野地或 NPC 城池等级、占领者（玩家名与城池）与驻军总数。大地图用多次窗口拼接；服务端不推送整图变化，地块级变化走 PUSH_TILE_STATE（漏推由按需重查覆盖）。`,
+  summary: `以窗口方式查询世界地图（世界为 ${WORLD_SIZE}×${WORLD_SIZE} 的方格，服务端启动时一次性生成）。请求给窗口左上角 (x, y) 与宽高 (w, h)；缺省以账号主城为中心取 ${DEFAULT_MAP_WINDOW}×${DEFAULT_MAP_WINDOW}。窗口起点 (x, y) 按世界边界钳制；w/h 须为 1..${MAX_MAP_WINDOW} 的整数，非法或越界（0、负数、超过上限、非整数）视为未提供、取缺省 ${DEFAULT_MAP_WINDOW}，不做钳制放大（v17 明确）。每个地块返回地形（plain 平原 / grass 草原 / forest 森林 / hill 丘陵 / desert 荒漠 / marsh 沼泽 / lake 湖泊 / gold_mine 金矿——v19 新增，占领产金、不可掠夺）、类别（wilderness 野地 / npc_city NPC 城池 / city 玩家城池）、野地或 NPC 城池等级、占领者（玩家名与城池）与驻军总数。大地图用多次窗口拼接；服务端不推送整图变化，地块级变化走 PUSH_TILE_STATE（漏推由按需重查覆盖）。 迷雾（v92，AISLG-224）：开关 fog_enabled 开启时，本协议只返回实时视野与已探索区块内的地块；未探索的格不出现在 tiles[] 里（前端按缺失格画黑雾），唯一例外是黄巾营地所在的格：未探索也返回最小视图（坐标、地形、camp，fog = explored，seenAt = null，其余字段为空）。已探索的格 fog = explored，只给地形、等级与上次看到的占领者（seenAt 为看到的时间），驻军、库存 / 储量档位、保护、城防、协防、掠夺冷却等动态字段为 null 或 0；实时视野格 fog = visible，与开启前完全一致。关闭时所有格 fog = visible。`,
   requestFields: [
     { name: 'x', type: 'number', desc: `可选。窗口左上角 x，0..${WORLD_SIZE - 1}；缺省按主城居中折算，超出部分按边界钳制。` },
     { name: 'y', type: 'number', desc: `可选。窗口左上角 y，0..${WORLD_SIZE - 1}；缺省按主城居中折算，超出部分按边界钳制。` },
@@ -103,12 +103,20 @@ export const REQUEST_GET_WORLD_MAP: RequestOpDoc = {
   dataFields: [
     { name: 'size', type: 'number', desc: '世界边长（世界为 size×size 方格）。' },
     { name: 'x / y / w / h', type: 'number', desc: '本次窗口的左上角与宽高（已按世界边界钳制后的实际值）。' },
+    { name: 'fogEnabled', type: 'boolean', desc: '战争迷雾开关 fog_enabled 的当前值（v97，AISLG-232）。关闭时望楼照建但不产生视野效果，客户端据此注明「迷雾未开启」。' },
     { name: 'tiles', type: 'array', desc: '窗口内地块，按 y 行 x 列排序。' },
     { name: 'tiles[].x / tiles[].y', type: 'number', desc: '地块坐标。' },
     { name: 'tiles[].terrain', type: "'plain' | 'grass' | 'forest' | 'hill' | 'desert' | 'marsh' | 'lake' | 'gold_mine'", desc: '地形（v19 新增 gold_mine 金矿：占领产金、掠夺为空池；加成映射见 GET_TILE 的字段说明）。' },
     { name: 'tiles[].kind', type: "'wilderness' | 'npc_city' | 'city'", desc: '地块类别：野地 / NPC 城池 / 玩家城池（主城与分城）。' },
+    { name: 'tiles[].faction', type: '{ key, name, nameEn, isLair } | null', desc: '势力归属（v99，AISLG-239）：被某方势力吞并的 NPC 城给 { key, name, nameEn, isLair: false }（守军与可掠夺库存是同等级普通 NPC 城的 1.5 倍，见 GET_FACTIONS；玩家占下后地块转城池、归属消失）；老巢地块给 isLair: true（老巢坐标对全服公开、不受迷雾影响；v101 起本季未灭亡的老巢可以出征 / 侦察，见 FACTION_LAIR_TARGET），这家本季已被攻破时另带 destroyed: true（老巢废墟，本季不能再出征 / 侦察 / 占领）。其余地块、开关 faction_enabled 关闭、以及已探索但不在实时视野内的格（动态信息）为 null。' },
+    { name: 'tiles[].fog', type: "'explored' | 'visible'", desc: '战争迷雾（v92，AISLG-224）：visible = 实时视野（与未开迷雾一致）；explored = 已探索但不在视野内（动态字段清空，见 summary）。未探索的格不返回。' },
+    { name: 'tiles[].seenAt', type: 'string | null', desc: '已探索的格为上次看到的时间（ISO）；实时视野为 null。' },
+    { name: 'tiles[].relic', type: '{ tier, kind } | null', desc: '遗迹（v93，AISLG-227）：实时视野或已探索且未领取的遗迹格才有；tier = common / rare / legendary，kind = granary / lumberyard / quarry / ironworks / caravan / battlefield / treasury / mausoleum。领取后所有人的地图上立刻消失。迷雾关闭时恒为 null。' },
+    { name: 'tiles[].facility', type: '{ kind, level } | null', desc: '野地上的设施（v97，AISLG-232）：目前只有望楼 kind = watchtower，level 为已建成等级（1..3）。只要能看到这块地（实时视野或已探索）就能看到有望楼与它的等级——别人想「断你的眼」得先知道眼在哪；**不含建造进度**（进度只有主人能看到，见 GET_STATE 的 city.territory[].facility）。没盖望楼、或还在建第一级时为 null。' },
+    { name: 'tiles[].heroSite', type: '{ name, hero, claimed } | null', desc: '名将处所（v93，AISLG-227）：8 位一线在野名将的隐居地，实时视野或已探索才有；name 为处所名（如「茅庐」），hero 为名将名，claimed = true 表示名将已被招揽（已出山，图标变灰）。迷雾关闭时恒为 null。' },
+    { name: 'tiles[].famous.firstExplorer', type: 'string | null', desc: '名城首探者用户名（v93，AISLG-227）：尚无人首探为 null；迷雾关闭时该字段缺省。' },
     { name: 'tiles[].level', type: 'number', desc: `野地等级（1..${WILDERNESS_LEVEL_MAX}）或 NPC 城池等级（1..3）；玩家城池为 0。` },
-    { name: 'tiles[].owner', type: 'object | null', desc: '占领者（占领野地或城池地块归属的城池）：{ accountId, username, cityId, cityName, ally }；无主为 null。ally（v67，AISLG-182）= 占领者与你同属一个联盟（盟友，自己的地块为 false）：盟友的城池 / 野地不能掠夺、抢占、占领，也不能侦察（返回 ALLY_NOT_ATTACKABLE）。' },
+    { name: 'tiles[].owner', type: 'object | null', desc: '占领者（占领野地或城池地块归属的城池）：{ accountId, username, cityId, cityName, ally, relation, canAssist }；relation（v77）= self / ally / friendly / hostile / neutral；无主为 null。canAssist（v95，AISLG-226）= 你现在能否向该占领者协防：同联盟或友盟为 true；自己、解除友好后 24 小时冷却期（relation 仍为 friendly，只为不能互打）、中立、敌对均为 false，与 MARCH task=assist 的校验一致。ally（v67，AISLG-182）= 占领者与你同属一个联盟（盟友，自己的地块为 false）：盟友的城池 / 野地不能掠夺、抢占、占领，也不能侦察（返回 ALLY_NOT_ATTACKABLE）。' },
     { name: 'tiles[].garrison', type: 'number', desc: '地块驻军总数；未占领野地为 0（原住守军不计入驻军总数；其编成见 GET_TILE 的 nativePower 与侦察）；NPC 城池需侦察（v17）：未侦察为 0，已侦察为最近一次侦察快照的总数。' },
     { name: 'tiles[].npcStockTier', type: "'rich' | 'normal' | 'low' | 'empty' | null", desc: "NPC 城池库存档位（v23 新增，AISLG-55）：相对该城初始库存——rich 丰厚（>60%）/ normal 一般（20%–60%）/ low 见底（<20%）/ empty 已空；只给档位不给精确数值（精确库存仍要走 SCOUT 侦察）；非 NPC 城为 null。掠夺后档位随库存变化，全服看到的档位一致。" },
     { name: 'tiles[].camp', type: 'object | null', desc: '黄巾营地 / 张角老巢（v29，AISLG-76）：地块上有进行中的营地时给出 { tier: small|medium|large|boss, label, level 守军强度对应的野地等级口径, garrisonTotal { min, max } 守军总兵力大概范围（当前存量 ±20%）, nextGrowAt 下次升档时刻（大营 / 老巢为 null）, boss? { stage: outer|keeper, recoversAt } }；其余为 null。营地格不显示野地原住守军，出征用 MARCH 掠夺任务（占领被拒）。详见 GET_YELLOW_TURBAN。' },
@@ -165,12 +173,14 @@ export const REQUEST_GET_MAP_OVERVIEW: RequestOpDoc = {
   name: 'GET_MAP_OVERVIEW',
   title: '查询世界小地图总览（v58）',
   preAuth: false,
-  summary: `返回全图的城池点位，供小地图一次看全局（AISLG-160）。无请求参数。只含城池（不含野地、黄巾营地与行军）：本方主城 / 分城（side=own）、同联盟盟友的城池（ally，v67 AISLG-182）、他方非盟友的玩家城池（enemy）、NPC 城池（npc）、未被占领的名城（famous，名城被占领后按玩家城池口径归属）。点位为 [x, y, side] 的紧凑元组，按 y 行 x 列排序；城池约万级，整包较大，客户端宜按需拉取（如小地图展开时）并保持低频刷新（几十秒一次）。归属按请求账号区分本方 / 他方，地图数据全服公开，不做侦察门控。`,
+  summary: `返回全图的城池点位，供小地图一次看全局（AISLG-160）。无请求参数。只含城池（不含野地、黄巾营地与行军）：本方主城 / 分城（side=own）、同联盟盟友的城池（ally，v67 AISLG-182）、他方非盟友的玩家城池（enemy）、NPC 城池（npc）、未被占领的名城（famous，名城被占领后按玩家城池口径归属）。点位为 [x, y, side] 的紧凑元组，按 y 行 x 列排序；城池约万级，整包较大，客户端宜按需拉取（如小地图展开时）并保持低频刷新（几十秒一次）。归属按请求账号区分本方 / 他方，地图数据全服公开，不做侦察门控。 迷雾开启时（v92）：实时视野内的城与战力榜前 20 名的主城始终显示；已探索的城按上次看到的归属显示；未探索的城不显示，8 座名城未探索时在锚点显示 side = famous_rumor（大致方位，不是真实坐标）。响应多出 exploredChunks（10,000 位 base64，1250 字节，区块下标 floor(y/10)*100+floor(x/10)，第 i 位在字节 i>>3、掩码 1<<(i&7)）与 exploredPercent（探索进度 %）。关闭时响应与之前完全一致（无这两个字段，全图城池）。`,
   requestFields: [],
   dataFields: [
     { name: 'size', type: 'number', desc: `世界边长（世界为 size×size 方格，当前 ${WORLD_SIZE}）。` },
     { name: 'at', type: 'string', desc: '统计时刻（ISO 8601）。' },
-    { name: 'cities', type: 'array', desc: "城池点位 [x, y, side] 数组；side 取 'own' | 'ally' | 'enemy' | 'npc' | 'famous'（ally 为 v67 新增：同联盟盟友的城池）。" },
+    { name: 'exploredChunks', type: 'string', desc: '迷雾开启时才有（v92）：已探索区块位图，base64（1250 字节）。' },
+    { name: 'exploredPercent', type: 'number', desc: '迷雾开启时才有（v92）：已探索区块占全图的百分比，保留 1 位小数。' },
+    { name: 'cities', type: 'array', desc: "城池点位 [x, y, side] 数组；side 取 'own' | 'ally' | 'friendly' | 'hostile' | 'enemy' | 'npc' | 'famous'（ally 为 v67 同联盟盟友；friendly / hostile 为 v77 友盟 / 敌对联盟成员）。" },
   ],
   errors: [],
   examples: [
@@ -215,14 +225,16 @@ export const REQUEST_GET_TILE: RequestOpDoc = {
     { name: 'tile.nativePower', type: 'number', desc: '未占领野地的原住守军规模参考（v24：含该地块固定浮动与战后恢复进度的当前存量；v18 起定位为粗估，不构成胜负预测——它抹平了射程与速度克制；已占领野地、NPC 城池与玩家城池为 0）。' },
     { name: 'tile.wilderness', type: 'object | null', desc: '野地收益预览：{ resource 加成资源, bonusRate 占领加成/小时（= 基线 + 等级 × 每级增量，v21 加成保底：森林/草原/金矿 30+70×等级、平原/丘陵/荒漠 25+55×等级、沼泽 20+40×等级、湖泊 40+80×等级）, gatherRate 当前驻军采集/小时（v61 起受储量约束：储量空时只按恢复速度采集）, reserve 野地储量（v61，同 tiles[].reserve）}；非野地为 null。' },
     { name: 'tile.npc', type: 'object | null', desc: 'NPC 城池情报（v13 需侦察）：{ garrison 驻防按兵种（快照）, stock 可掠夺库存（快照）, scoutDetail / garrisonTotal（v27）}；未侦察或非 NPC 城为 null。**v27 起驻防精度随侦察科技**：scoutDetail=rough（侦察科技 Lv0–2）时 garrison 全 0，只有 garrisonTotal { min, max } 给总兵力约数（真实 ±20%）；kinds（Lv3–5）给兵种明细、各兵种数量为近似值（真实 ±20%，同一地块固定不变）；exact（Lv6+）精确。历史情报无 scoutDetail 字段，视为 exact。' },
+    { name: 'tile.facilityBuilding', type: '{ toLevel, finishAt } | null', desc: '望楼的建造 / 升级进度（v97，AISLG-232）：**只有占着这块地的城的主人能看到**（toLevel 为目标等级、finishAt 为完成时刻 ISO 8601），其余账号为 null；没有进行中的工程也为 null。' },
     { name: 'tile.scoutedAt', type: 'string | null', desc: '最近一次侦察该地块的时间（ISO 8601，任意地块类型；v23 起非 NPC 城也返回）；从未侦察为 null。' },
+    { name: 'tile.assists', type: 'array | null', desc: '（v74，AISLG-194）城池的协防部队：{ id, accountId, username, fromCityId, fromCityName, troops（全兵种计数）, arrivedAt, initiator }。自己的城与盟友的城可见；其他人的城为 null（外人侦察只能看到计入守军总数的兵力）。' },
     { name: 'tile.durability', type: 'number | null', desc: '他人分城的当前城防值（v40，AISLG-124）：0..100，按「免战截止前不回涨、之后每小时 +10」惰性结算展示；非 null 即可被 task=occupy 攻打的分城，归零一击换主。主城 / 野地 / NPC 城 / 自己的城为 null。' },
     { name: 'tile.protection', type: 'object | null', desc: '玩家城与他人占领野地的保护状态（v38 / v39）：{ newbieUntil 新手保护截止（含其野地）, truceUntil 被动免战截止（仅城池；野地恒 null——城级免战不保护野地）, shieldUntil 主动免战截止（含其野地）, ownerChangedUntil 换主保护截止（仅野地：刚被抢占后 1 小时基准随缩放，期间玩家与 NPC 都不能再抢） }，任一截止时刻未到即受保护（MARCH 被拒，错误码与时限见 MARCH）；非玩家目标、自己的地为 null。到期自动失效，无事件。' },
     { name: 'tile.reserve', type: 'object | null', desc: '野地储量（v61，AISLG-165）：{ tier 档位 ample 充足 >60% / normal 一般 20%–60% / depleted 枯竭 <20%（所有人可见）, current 当前储量, cap 上限, eta { kind empty 预计采空 / full 预计回满, at } }；current / cap / eta 仅归属方与侦察过该地块的账号可见，其余为 null。储量与上限为基准单位（bonusRate、gatherRate 同口径）；采集与恢复速率随 time_scale 放大，eta 为真实时刻（采空 / 回满随之缩短）。非野地为 null。' },
     { name: 'tile.wildFamousIntel', type: 'object | null', desc: '在野名将情报（v54，AISLG-144）：未被获得的在野名将所在野地才有 { scouted, name, attrs { lead, force, wit } }；未侦察过时 scouted=false、name / attrs 为 null，侦察后（SCOUT 完成）给出名字与三项属性。其余为 null。' },
     { name: 'tile.plunderedAt', type: 'string | null', desc: `最近一次成功掠夺（攻方胜利）的时间（v16，ISO 8601）：距其 ${PLUNDER_COOLDOWN_HOURS} 小时内该地块处于掠夺冷却（基准值，实际受全局时间缩放等比缩短；MARCH task='plunder' 被拒，PLUNDER_COOLDOWN）；从未被掠为 null。` },
   ],
-  errors: ['INVALID_PARAMS'],
+  errors: ['INVALID_PARAMS', 'TILE_UNEXPLORED'],
   examples: [
     {
       caption: '查看一块 3 级森林野地（未占领）',
@@ -272,12 +284,12 @@ export const REQUEST_MARCH: RequestOpDoc = {
   name: 'MARCH',
   title: '出征 / 调兵 / 运输（从主城派兵，v12 起；v16 新增掠夺 / 占领任务；v26 新增运输任务）',
   preAuth: false,
-  summary: `从账号主城派出部队前往目标地块，到达后由服务端自动结算。编队 troops 按兵种给出数量（至少一种 > 0），发起时立即从城内驻军扣减；行军时长 = Chebyshev 距离 × 每格秒数（基准 ${DEFAULT_MARCH_SECONDS_PER_TILE} 秒/格，占位）÷ **编队最慢兵种的行军速度系数**（斥候 ×2、轻骑兵 ×1.5，其余 ×1）÷（1 + 行军科技加成，v27 每级 +5%；v30 AISLG-83：自己城池之间的调兵 / 运输再加出发城**驿站**加成，每级 +10%、10 级翻倍，出征野地 / NPC 城等其他目标不受影响，运输往返与失效返程同吃出发城驿站），**总时长**再 ÷ 全局时间缩放、向上取整、最少 1 秒（见文档头部；不是先把每格缩放取整再乘格数）。以响应里的 arriveAt 为准。v16 新增可选 **task**：\`plunder\`（掠夺，**缺省值**）或 \`occupy\`（占领）——只作用于野地与 NPC 城目标，侦察 / 调兵 / 增援忽略 task。目标与结算：**无主野地**按 task 掠夺或占领（战斗 vs 原住守军）；**本账号占领的野地** = 增援驻军（不战斗）；**未被占领的 NPC 城池**可掠夺，也可占领变分城（v24，AISLG-58；战斗 vs 驻防、守方据墙待敌）；**本账号分城** = 调兵（不战斗，到达并入该城驻军）；**发起前校验校场（v30，AISLG-80）**：本城同时在外的部队数（行军中含返程 + 驻守野地，不计城内驻军）已达校场等级上限（未建校场按 1）时返回 DEPLOY_LIMIT，SCOUT 同；玩家城池（他人的）、他人占领地块与出发主城本身不可作为目标（玩家对抗随后续阶段开放）。**v38（AISLG-122，玩家对抗一）开放掠夺他人城池**：主城与分城都能打、不用宣战，战斗与 NPC 打主城同口径的守城战（城墙、城防科技、箭塔、守方城守全部生效），发起即给守方推送来袭预警（PUSH_ATTACK_WARNING，预警窗口 = 行军时长，敌情按守方烽火台分档）；守方处于新手保护返回 NEWBIE_PROTECTED、免战中返回 TARGET_IN_TRUCE（均附 until / retryAfterSeconds），攻方自己的主动免战生效中返回 SELF_TRUCE_ACTIVE（打野地 / NPC 不受限）；**task=occupy 对他人分城开放（v40，AISLG-124，玩家对抗三）**：主城仍返回 TASK_INVALID_FOR_TARGET（永不可占领，只能被掠夺）。分城占领资格与占 NPC 城同口径（GOVERNMENT_TOO_LOW / BRANCH_LIMIT / TARGET_LEVEL_TOO_HIGH，目标等级 = 该城官府等级），发起时初核、到达复核（名额没了照打、只降城防值不换主，事件 battle_won 记 occupied=false 与 denial）。守城战打赢一次（守军全灭）城防值 −35，攻方幸存冲车占比每 1% 再 +1.5（最多 +15）；**占领打赢不掠夺资源，掠夺打赢不降城防**；城防降到 0 且名额有空当场换主（详见「玩家对抗与城防值」一节与 GET_TILE 的 tile.durability）；每次打赢该城进入 4 小时（基准随缩放）被动免战，免战内城防不回涨、结束后每小时回涨 10 至满——占一座分城至少打 3 次、隔 8 小时以上，守方每次都有时间补兵 / 增援；在途到达时守方进入保护 / 免战则扑空返程（事件 outcome=aborted 附 cause）。**v39（AISLG-123，玩家对抗二）开放抢占他人占领的野地**：task='occupy'（缺省 plunder 返回 TASK_INVALID_FOR_TARGET——地里没有存货可抢）；野地战无城墙 / 箭塔 / 城守，守方 = 地块驻军，守方没留驻军不打、直接拿下（无战报）；发起即给守方推 PUSH_ATTACK_WARNING（target='wilderness'，敌情按其所属城烽火台分档），预警期间可向该地块增援（MARCH 打自己的地块 = 增援）；守方处于新手保护（NEWBIE_PROTECTED）或主动免战（TARGET_IN_TRUCE）时其全部野地不可被抢，但守方某座城的被动免战只保护城本身、不保护野地；地块处于换主保护期（被抢占后 1 小时基准随缩放）返回 TILE_PROTECTED；攻方自己的主动免战生效中同样不能抢（SELF_TRUCE_ACTIVE）。**抢占结算**：打赢且出发城占领名额（官府等级）有空 → 地块易主、幸存部队驻守并获得加成、地块进入换主保护（1 小时基准随缩放，玩家与 NPC 都不能再抢）；名额已满 → 守方照样失地（wilderness_lost cause=conquest）、地块变无主（不设保护）、攻方幸存返程（事件 battle_won 记 occupied=false / denial=TERRITORY_LIMIT）；打输 → 守方继续占领，攻方残部返程；战报 kind='pvp_wilderness' 攻守双方各一份。**到达复核口径（v39）**：到达时地块已无主（对方召回等）→ 扑空返程（aborted，cause=target_gone）；已易主第三人 → 扑空返程（aborted，cause=owner_changed）；已归本账号 → 转增援并入驻军。战斗为多回合推进结构（速度与射程影响接敌、城墙为守方提供受击减免；具体算法不对外公开，机制概览见术语表「战斗」、兵种数值见「兵种与战斗属性」）；攻方歼灭守方获胜、胜方幸存 ≥ 1，攻方战败（全灭或回合耗尽）时幸存部队撤回出发城。**掠夺结算（task=plunder）**：野地奖励池 = 地形对应资源 × ${PLUNDER_POOL_RESOURCE_PER_LEVEL} × 等级 + 金币 × ${PLUNDER_POOL_GOLD_PER_LEVEL} × 等级（v21 掠夺含金，AISLG-31；金矿 gold_mine 保持空池——金矿定位占领生息）；NPC 城 = 持久化库存（v21 起含金币；库存不再生、掠空后无收益）。实际带走量按**幸存部队负重**装填（Σ 数量 × 单兵 carry，v27 起再 × 负重科技加成（每级 +5%，向下取整）；运输任务的负重上限同口径：民夫 ${TROOP_CARRY.porter}、斥候/刀盾兵 ${TROOP_CARRY.scout}、轻骑兵 ${TROOP_CARRY.cavalry}，其余 ${TROOP_CARRY.militia}，占位），按**金→粮→木→石→铁**顺序装满即止，立即入账出发城（不钳储量上限）；不改归属、幸存部队返程；成功掠夺的地块进入 ${PLUNDER_COOLDOWN_HOURS} 小时冷却（基准，受全局时间缩放；发起时校验 PLUNDER_COOLDOWN——v22 起该失败附 retryAfterSeconds（冷却截止 − 当前时刻，等满后重发必然受理；在途到达仍战斗但资源为零）。**掠夺玩家城（v38，AISLG-122）**：可抢池 = 城内资源先扣仓库保护（粮/木/石/铁 各保护 1000×仓库等级，金币不受保护），再乘单次比例上限（四资源 45%、金币 15%，v42 AISLG-126 校准拍板）与等级差衰减（出发城官府比目标城官府高 5 级起每多 1 级收益 −15%、最低 25%——大号打小号不禁止但收益递减），最后仍按幸存部队负重装填；攻破（守军全灭）后该城进入 4 小时（基准，随缩放）被动免战，玩家与 NPC 都不能再打它（GET_TILE 的 tile.protection 可查）；战报 kind='pvp_raid'，攻守双方各得一份；玩家城不受地块掠夺冷却限制（免战即冷却）。**名城（v24，AISLG-56，GET_TILE / 地图的 famous 字段标识，全图 8 座）分两阶段**：外围阶段对其出征（掠夺 / 占领都一样）打的是外围驻军（野战无城墙），打赢 = 外围清空、名城进入城守阶段（事件 battle_won 含 stage='outer'、outerCleared=true、recoversAt），无战利品；城守阶段（限时，超时外围恢复满编）再出征攻城守——task=plunder 掠夺其库存，task=occupy 占领并变分城（以名城命名、产量 +20%，名城计入分城上限）；外围未清时对其 task=occupy 返回 OUTER_NOT_CLEARED。名城守军 = 同等级普通 NPC 城 × 3（外围与城守各一半）。**占领 NPC 城（task=occupy，v24）**：需同时满足——主城官府 ≥ 3 级（GOVERNMENT_TOO_LOW）；分城数 < 分城上限 = floor(主城官府等级 ÷ 2)（BRANCH_LIMIT，名城同样计入）；目标 NPC 城等级 ≤ 出发城的官府等级（TARGET_LEVEL_TOO_HIGH）。发起时初核，Worker 到达时复核（不满足则胜利后不建分城、幸存部队返程，事件 battle_won 记录 occupied=false 与 denial）。打赢后该城成为分城：接收 NPC 城的建筑与**剩余库存**，幸存部队进城驻守，分城可独立建造 / 征兵 / 出征（城池类协议带 cityId）；占领不受掠夺冷却限制，不另行掠夺（库存随城移交）。**占领野地结算（task=occupy 目标为野地）**：无一次性战利品；该城占领野地数低于官府等级（上限 = 官府等级，随官府升级提高）时改归属、幸存部队驻守并获得持续加成；发起时初核 TERRITORY_LIMIT，到达复核（超限则胜利后不改归属、幸存部队返程，事件记录 occupied=false / denial=TERRITORY_LIMIT）。**盟友不可攻击（v67，AISLG-182）**：目标城池 / 野地的主人与你同属一个联盟时，掠夺、抢占野地、占领分城一律返回 ALLY_NOT_ATTACKABLE（运输、增援、调兵不受影响）；出发后目标才成为盟友的，部队到达时不开战、原路返回（事件 outcome=aborted，cause=ALLY_NOT_ATTACKABLE）。每场战斗生成一份战报（GET_BATTLE_REPORTS 可查、PUSH_BATTLE_REPORT 推送）。`,
+  summary: `从账号主城派出部队前往目标地块，到达后由服务端自动结算。编队 troops 按兵种给出数量（至少一种 > 0），发起时立即从城内驻军扣减；行军时长 = Chebyshev 距离 × 每格秒数（基准 ${DEFAULT_MARCH_SECONDS_PER_TILE} 秒/格，占位）÷ **编队最慢兵种的行军速度系数**（斥候 ×2、轻骑兵 ×1.5，其余 ×1）÷（1 + 行军科技加成，v27 每级 +5%；v30 AISLG-83：自己城池之间的调兵 / 运输再加出发城**驿站**加成，每级 +10%、10 级翻倍，出征野地 / NPC 城等其他目标不受影响，运输往返与失效返程同吃出发城驿站），**总时长**再 ÷ 全局时间缩放、向上取整、最少 1 秒（见文档头部；不是先把每格缩放取整再乘格数）。以响应里的 arriveAt 为准。v16 新增可选 **task**：\`plunder\`（掠夺，**缺省值**）或 \`occupy\`（占领）——只作用于野地与 NPC 城目标，侦察 / 调兵 / 增援忽略 task。目标与结算：**无主野地**按 task 掠夺或占领（战斗 vs 原住守军）；**本账号占领的野地** = 增援驻军（不战斗）；**未被占领的 NPC 城池**可掠夺，也可占领变分城（v24，AISLG-58；战斗 vs 驻防、守方据墙待敌）；**本账号分城** = 调兵（不战斗，到达并入该城驻军）；**发起前校验校场（v30，AISLG-80）**：本城同时在外的部队数（行军中含返程 + 驻守野地，不计城内驻军）已达校场等级上限（未建校场按 1）时返回 DEPLOY_LIMIT，SCOUT 同；玩家城池（他人的）、他人占领地块与出发主城本身不可作为目标（玩家对抗随后续阶段开放）。**v38（AISLG-122，玩家对抗一）开放掠夺他人城池**：主城与分城都能打、不用宣战，战斗与 NPC 打主城同口径的守城战（城墙、城防科技、箭塔、守方城守全部生效），发起即给守方推送来袭预警（PUSH_ATTACK_WARNING，预警窗口 = 行军时长，敌情按守方烽火台分档）；守方处于新手保护返回 NEWBIE_PROTECTED、免战中返回 TARGET_IN_TRUCE（均附 until / retryAfterSeconds），攻方自己的主动免战生效中返回 SELF_TRUCE_ACTIVE（打野地 / NPC 不受限）；**task=occupy 对他人分城开放（v40，AISLG-124，玩家对抗三）**：主城仍返回 TASK_INVALID_FOR_TARGET（永不可占领，只能被掠夺）。分城占领资格与占 NPC 城同口径（GOVERNMENT_TOO_LOW / BRANCH_LIMIT / TARGET_LEVEL_TOO_HIGH，目标等级 = 该城官府等级），发起时初核、到达复核（名额没了照打、只降城防值不换主，事件 battle_won 记 occupied=false 与 denial）。守城战打赢一次（守军全灭）城防值 −35，攻方幸存冲车占比每 1% 再 +1.5（最多 +15）；**占领打赢不掠夺资源，掠夺打赢不降城防**；城防降到 0 且名额有空当场换主（详见「玩家对抗与城防值」一节与 GET_TILE 的 tile.durability）；每次打赢该城进入 4 小时（基准随缩放）被动免战，免战内城防不回涨、结束后每小时回涨 10 至满——占一座分城至少打 3 次、隔 8 小时以上，守方每次都有时间补兵 / 增援；在途到达时守方进入保护 / 免战则扑空返程（事件 outcome=aborted 附 cause）。**v39（AISLG-123，玩家对抗二）开放抢占他人占领的野地**：task='occupy'（缺省 plunder 返回 TASK_INVALID_FOR_TARGET——地里没有存货可抢）；野地战无城墙 / 箭塔 / 城守，守方 = 地块驻军，守方没留驻军不打、直接拿下（无战报）；发起即给守方推 PUSH_ATTACK_WARNING（target='wilderness'，敌情按其所属城烽火台分档），预警期间可向该地块增援（MARCH 打自己的地块 = 增援）；守方处于新手保护（NEWBIE_PROTECTED）或主动免战（TARGET_IN_TRUCE）时其全部野地不可被抢，但守方某座城的被动免战只保护城本身、不保护野地；地块处于换主保护期（被抢占后 1 小时基准随缩放）返回 TILE_PROTECTED；攻方自己的主动免战生效中同样不能抢（SELF_TRUCE_ACTIVE）。**抢占结算**：打赢且出发城占领名额（官府等级）有空 → 地块易主、幸存部队驻守并获得加成、地块进入换主保护（1 小时基准随缩放，玩家与 NPC 都不能再抢）；名额已满 → 守方照样失地（wilderness_lost cause=conquest）、地块变无主（不设保护）、攻方幸存返程（事件 battle_won 记 occupied=false / denial=TERRITORY_LIMIT）；打输 → 守方继续占领，攻方残部返程；战报 kind='pvp_wilderness' 攻守双方各一份。**到达复核口径（v39）**：到达时地块已无主（对方召回等）→ 扑空返程（aborted，cause=target_gone）；已易主第三人 → 扑空返程（aborted，cause=owner_changed）；已归本账号 → 转增援并入驻军。战斗为多回合推进结构（速度与射程影响接敌、城墙为守方提供受击减免；具体算法不对外公开，机制概览见术语表「战斗」、兵种数值见「兵种与战斗属性」）；攻方歼灭守方获胜、胜方幸存 ≥ 1，攻方战败（全灭或回合耗尽）时幸存部队撤回出发城。**掠夺结算（task=plunder）**：野地奖励池 = 地形对应资源 × ${PLUNDER_POOL_RESOURCE_PER_LEVEL} × 等级 + 金币 × ${PLUNDER_POOL_GOLD_PER_LEVEL} × 等级（v21 掠夺含金，AISLG-31；金矿 gold_mine 保持空池——金矿定位占领生息）；NPC 城 = 持久化库存（v21 起含金币；库存不再生、掠空后无收益）。实际带走量按**幸存部队负重**装填（Σ 数量 × 单兵 carry，v27 起再 × 负重科技加成（每级 +5%，向下取整）；运输任务的负重上限同口径：民夫 ${TROOP_CARRY.porter}、斥候/刀盾兵 ${TROOP_CARRY.scout}、轻骑兵 ${TROOP_CARRY.cavalry}，其余 ${TROOP_CARRY.militia}，占位），按**金→粮→木→石→铁**顺序装满即止，立即入账出发城（不钳储量上限）；不改归属、幸存部队返程；成功掠夺的地块进入 ${PLUNDER_COOLDOWN_HOURS} 小时冷却（基准，受全局时间缩放；发起时校验 PLUNDER_COOLDOWN——v22 起该失败附 retryAfterSeconds（冷却截止 − 当前时刻，等满后重发必然受理；在途到达仍战斗但资源为零）。**掠夺玩家城（v38，AISLG-122）**：可抢池 = 城内资源先扣仓库保护（粮/木/石/铁 各保护 1000×仓库等级，金币不受保护），再乘单次比例上限（四资源 45%、金币 15%，v42 AISLG-126 校准拍板）与等级差衰减（出发城官府比目标城官府高 5 级起每多 1 级收益 −15%、最低 25%——大号打小号不禁止但收益递减），最后仍按幸存部队负重装填；攻破（守军全灭）后该城进入 4 小时（基准，随缩放）被动免战，玩家与 NPC 都不能再打它（GET_TILE 的 tile.protection 可查）；战报 kind='pvp_raid'，攻守双方各得一份；玩家城不受地块掠夺冷却限制（免战即冷却）。**名城（v24，AISLG-56，GET_TILE / 地图的 famous 字段标识，全图 8 座）分两阶段**：外围阶段对其出征（掠夺 / 占领都一样）打的是外围驻军（野战无城墙），打赢 = 外围清空、名城进入城守阶段（事件 battle_won 含 stage='outer'、outerCleared=true、recoversAt），无战利品；城守阶段（限时，超时外围恢复满编）再出征攻城守——task=plunder 掠夺其库存，task=occupy 占领并变分城（以名城命名、产量 +20%，名城计入分城上限）；外围未清时对其 task=occupy 返回 OUTER_NOT_CLEARED。名城守军 = 同等级普通 NPC 城 × 3（外围与城守各一半）。**占领 NPC 城（task=occupy，v24）**：需同时满足——主城官府 ≥ 3 级（GOVERNMENT_TOO_LOW）；分城数 < 分城上限 = floor(主城官府等级 ÷ 2)（BRANCH_LIMIT，名城同样计入）；目标 NPC 城等级 ≤ 出发城的官府等级（TARGET_LEVEL_TOO_HIGH）。发起时初核，Worker 到达时复核（不满足则胜利后不建分城、幸存部队返程，事件 battle_won 记录 occupied=false 与 denial）。打赢后该城成为分城：接收 NPC 城的建筑与**剩余库存**，幸存部队进城驻守，分城可独立建造 / 征兵 / 出征（城池类协议带 cityId）；占领不受掠夺冷却限制，不另行掠夺（库存随城移交）。**占领野地结算（task=occupy 目标为野地）**：无一次性战利品；该城占领野地数低于官府等级（上限 = 官府等级，随官府升级提高）时改归属、幸存部队驻守并获得持续加成；发起时初核 TERRITORY_LIMIT，到达复核（超限则胜利后不改归属、幸存部队返程，事件记录 occupied=false / denial=TERRITORY_LIMIT）。**盟友不可攻击（v67，AISLG-182）**：目标城池 / 野地的主人与你同属一个联盟时，掠夺、抢占野地、占领分城一律返回 ALLY_NOT_ATTACKABLE（运输、增援、调兵不受影响）；出发后目标才成为盟友的，部队到达时不开战、原路返回（事件 outcome=aborted，cause=ALLY_NOT_ATTACKABLE）。**协防（v74，AISLG-194）**：task=assist 把部队派进盟友的主城 / 分城驻扎——行军时长与普通行军相同（驿站不加速）；每座城最多接收 5 支、同一账号对同一座城最多 1 支（在途也算，超限 ASSIST_LIMIT），任务占派出城校场名额、耗粮按野外 2 倍由出发城承担；守城战里与城主驻军合并成守方参战（各方科技只作用于各自部队，城守武将只加成城主部队），战后同一兵种伤亡按开战数量比例分摊（取整余数归城主），派出方会收到一份带 assistLosses 的战报；派出方随时可召回、城主可遣返（DISMISS_ASSIST），退盟 / 被踢 / 解散与分城易主时自动遣返。出发后才退盟的，到达按 ASSIST_NOT_ALLY 原路返回。每场战斗生成一份战报（GET_BATTLE_REPORTS 可查、PUSH_BATTLE_REPORT 推送）。 迷雾（v92，AISLG-224）：目标未探索且不在视野内时（只限 task = plunder / occupy），目标相关的校验（保护、免战、占领资格等）被拒绝也不报错：照常建立行军，响应结构与校验通过时完全一致，且不会向守方发来袭预警、不破除新手保护；到达后由服务端复核——守方仍受保护或目标已不是可打的对象时原路返回（aborted），否则按现有规则结算。兵力不足、出征上限、迁城后的攻击限制（MOVE_CITY_ATTACK_LOCK）等与目标无关的校验照旧报错。`,
   requestFields: [
     { name: 'x', type: 'number', desc: `必填。目标地块 x，0..${WORLD_SIZE - 1}。` },
     { name: 'y', type: 'number', desc: `必填。目标地块 y，0..${WORLD_SIZE - 1}。` },
     { name: 'troops', type: 'object', desc: '必填。按兵种的派出数量（未知兵种、负数、非整数或全 0 返回 INVALID_PARAMS）；超过城内驻军返回 INSUFFICIENT_TROOPS。' },
-    { name: 'task', type: "'plunder' | 'occupy' | 'transport'", desc: '可选（v16）。出征任务：plunder=掠夺（缺省）、occupy=占领（野地占领驻守；NPC 城占领变分城，v24）、transport=运输（v26，AISLG-79，目标只能是本账号的另一座城，须同时带 cargo）；plunder / occupy 仅野地与 NPC 城目标接受，非法值返回 INVALID_PARAMS。缺省 plunder 对 v15 及以前不带 task 的客户端是破坏性语义变更（旧式请求从「战斗并占领」变为「掠夺」）。' },
+    { name: 'task', type: "'plunder' | 'occupy' | 'transport' | 'assist'", desc: '可选（v16）。出征任务：plunder=掠夺（缺省）、occupy=占领（野地占领驻守；NPC 城占领变分城，v24）、transport=运输（v26，AISLG-79，目标只能是本账号的另一座城，须同时带 cargo）、assist=协防（v74，AISLG-194，目标只能是盟友的主城 / 分城；到达后驻扎在对方城里，守城时与城主驻军合并参战，随时可召回）。plunder / occupy 仅野地与 NPC 城目标接受，assist 仅盟友城接受（非盟友返回 ASSIST_NOT_ALLY，名额满 / 同账号重复返回 ASSIST_LIMIT），非法值返回 INVALID_PARAMS。缺省 plunder 对 v15 及以前不带 task 的客户端是破坏性语义变更（旧式请求从「战斗并占领」变为「掠夺」）。' },
     { name: 'targetId', type: 'string', desc: '可选（v28，AISLG-78）。截击移动目标：目标 id（GET_MOVING_TARGETS）；此时 (x, y) 须是该目标路线上正在或将要经过的格（已过去的格 / 不在路线上返回 INVALID_PARAMS；目标不存在 / 已消失返回 MOVING_TARGET_GONE），task 被忽略、带 cargo 返回 INVALID_PARAMS。v35（AISLG-112）「到了先埋伏」：目标路线与时刻表固定，发起时即把 arriveAt 定为预计接战时刻 = max(部队到达时刻, 目标进入该格相邻范围（Chebyshev ≤ 1）的时刻)——提前到达的部队原地埋伏等目标经过，无需掐点；到达时目标已走出范围（太晚）仍按到达时刻结算、扑空返程。格式非 UUID 返回 INVALID_PARAMS。' },
     { name: 'heroId', type: 'string', desc: MARCH_HERO_FIELD_DESC },
     { name: 'cargo', type: 'object', desc: `task=transport 时必填（v26）：运送的资源 { gold, wood, food, stone, iron }，各项缺省 0、须为非负整数，总量 ≥ 1（缺失 / 全 0 / 未知键 / 非法值返回 INVALID_PARAMS）；其余任务带 cargo 同样返回 INVALID_PARAMS。总量不得超过所派编队的负重（Σ 数量 × 单兵 carry，民夫 ${TROOP_CARRY.porter}、斥候/刀盾兵 ${TROOP_CARRY.scout}、轻骑兵 ${TROOP_CARRY.cavalry}，其余 ${TROOP_CARRY.militia}，与掠夺共用同一张表），超出返回 CARGO_OVER_CAPACITY；出发城现有资源不够返回 INSUFFICIENT_RESOURCES。` },
@@ -351,20 +363,21 @@ export const REQUEST_MARCH: RequestOpDoc = {
 export const REQUEST_RECALL_GARRISON: RequestOpDoc = {
   kind: 'request',
   name: 'RECALL_GARRISON',
-  title: '召回野地驻军（放弃占领，v12）',
+  title: '召回野地驻军（全部撤回放弃占领 v12；按兵种部分撤回 v83）',
   preAuth: false,
-  summary: `撤回本账号占领野地上的**全部**驻军：召回发起即放弃占领（地块回到无主野地、原住守军重新满编），部队作为返程行军（purpose=return）回到占领它的城池，到达后才并入城内驻军。行军时长与出征同公式。野地占领以驻军存在为前提：驻军被 NPC 袭击全灭时占领同样失效（见 NPC 袭击说明）。`,
+  summary: `撤回本账号占领野地上的驻军，有两种用法：①**不带 troops = 全部撤回（v12 行为不变）**：撤回全部驻军，召回发起即放弃占领（地块回到无主野地、原住守军重新满编），部队作为返程行军（purpose=return）回到占领它的城池，到达后才并入城内驻军；②**带 troops = 部分撤回（v83，AISLG-207）**：只撤指定兵种与数量，**保留占领**（地块仍归本账号，占领加成与连片加成不变），被撤的兵作为返程行军回到占领城，剩余驻军继续守地。返程时长按撤回编队的最慢兵种折算，与出征同公式。野地占领以驻军存在为前提：驻军被 NPC 袭击全灭时占领同样失效（见 NPC 袭击说明）。`,
   requestFields: [
     { name: 'x', type: 'number', desc: '必填。地块 x（须为本账号占领的野地，见 GET_STATE 的 city.territory）。' },
     { name: 'y', type: 'number', desc: '必填。地块 y。' },
+    { name: 'troops', type: 'object', desc: '可选（v83，AISLG-207）。缺省（不带或 null）= 全部撤回并放弃占领。带上 = 部分撤回：键为兵种 id（如 porter、cavalry、iron_cavalry，与 GET_TILE 的 tile.garrisonDetail 键名一致），值为正整数撤回数量，只撤指定数量、保留占领。空对象、未知兵种、非正整数返回 INVALID_PARAMS；某兵种撤回数量超过该地块驻军返回 INSUFFICIENT_GARRISON；撤回总数等于或超过地块驻军总数（会撤空）返回 GARRISON_WOULD_EMPTY——部分撤回至少留 1 兵，想撤空请不带 troops。出错时不改任何数据。' },
   ],
   dataFields: [
-    { name: 'march', type: 'object | null', desc: '返程行军视图（结构与 MARCH 响应相同，purpose=return）；地块无驻军时为 null（占领同时清除）。' },
+    { name: 'march', type: 'object | null', desc: '返程行军视图（结构与 MARCH 响应相同，purpose=return）。全部撤回时地块无驻军则为 null（占领同时清除）；部分撤回恒非 null，其 troops 即本次撤回的兵力。' },
   ],
-  errors: ['INVALID_PARAMS', 'TILE_NOT_OCCUPIED'],
+  errors: ['INVALID_PARAMS', 'TILE_NOT_OCCUPIED', 'INSUFFICIENT_GARRISON', 'GARRISON_WOULD_EMPTY'],
   examples: [
     {
-      caption: '召回 (12,17) 的驻军',
+      caption: '全部撤回 (12,17) 的驻军（放弃占领）',
       request: { op: Op.RECALL_GARRISON, seq: 9, data: { x: 12, y: 17 } },
       responses: [
         {
@@ -382,6 +395,36 @@ export const REQUEST_RECALL_GARRISON: RequestOpDoc = {
       ],
     },
     {
+      caption: '部分撤回 (12,17) 的 4 名义兵（保留占领，返程只带撤回的兵）',
+      request: { op: Op.RECALL_GARRISON, seq: 11, data: { x: 12, y: 17, troops: { militia: 4 } } },
+      responses: [
+        {
+          op: Op.RECALL_GARRISON,
+          seq: 11,
+          ok: true,
+          data: {
+            march: {
+              ...MARCH_VIEW,
+              purpose: 'return',
+              troops: { ...EMPTY_ARMY, militia: 4 },
+            },
+          },
+        },
+      ],
+    },
+    {
+      caption: '部分撤回会撤空地块（失败响应无 data，不改任何数据）',
+      request: { op: Op.RECALL_GARRISON, seq: 12, data: { x: 12, y: 17, troops: { militia: 9 } } },
+      responses: [
+        {
+          op: Op.RECALL_GARRISON,
+          seq: 12,
+          ok: false,
+          error: { code: 'GARRISON_WOULD_EMPTY', message: '部分撤回不能撤空地块驻军，地块至少要留 1 个兵（想全部撤回请不带 troops，会放弃占领）' },
+        },
+      ],
+    },
+    {
       caption: '目标不是本账号占领的野地（失败响应无 data）',
       request: { op: Op.RECALL_GARRISON, seq: 18, data: { x: 60, y: 581 } },
       responses: [
@@ -394,7 +437,7 @@ export const REQUEST_RECALL_GARRISON: RequestOpDoc = {
       ],
     },
   ],
-  agentNote: '召回即弃地：占领加成与采集立即停止（产量在归属翻转前先结算到当前时刻），地块可被他人或 NPC 夺取。返程部队到达前不在城内驻军里，无法再次派出。',
+  agentNote: '两种用法按意图选：只想抽走一部分兵（守城吃紧、去打仗）就带 troops，地块与占领加成保留，但地块至少留 1 兵；想彻底放弃这块地就不带 troops。全部撤回时占领加成与采集立即停止（产量在归属翻转前先结算到当前时刻），地块可被他人或 NPC 夺取。部分撤回后驻军变少，采集与守备随之减弱。返程部队到达前不在城内驻军里，无法再次派出。',
 };
 
 export const PUSH_MARCH_STATE: PushOpDoc = {
@@ -433,6 +476,8 @@ export const PUSH_NPC_ATTACK_WARNING: PushOpDoc = {
     { name: 'armyKinds', type: 'object', desc: '仅 intel=kinds：各兵种大致数量范围 { 兵种: { min, max } }（±20% 取整）。' },
     { name: 'army', type: 'object', desc: '仅 intel=exact：精确编成 { 兵种: 数量 }。' },
     { name: 'arriveAt', type: 'string', desc: '预计到达时刻（ISO 8601；已按 timeScale 缩放，与实际结算时刻一致）。烽火台每级让预警提前量 +10%（10 级翻倍）：袭击从发起到到达的时长 = 基础提前量 ×（1 + 0.1 × 烽火台等级），预警在发起时即发出。' },
+    { name: 'faction', type: 'object', desc: 'v100（AISLG-240）：这次袭击属于哪家势力 { key, name, nameEn }（如南蛮）。只在该格落在某家势力范围内时有值——范围外的袭击与上线前完全一样，没有这个字段。发起频率（全服仍每 120 分钟一次）与目标选择都不变，只是打上了旗号，玩家能知道「是谁在打自己」。' },
+    { name: 'lair', type: 'object', desc: 'v100：出发老巢坐标 { x, y }（与 faction 同时出现）。' },
   ],
   examples: [
     { op: Op.PUSH_NPC_ATTACK_WARNING, push: true, data: { attackId: '3f1c2a4e-0000-4000-8000-000000000001', x: 128, y: 90, target: 'wilderness', terrain: 'forest', level: 2, armyMin: 17, armyMax: 27, arriveAt: '2026-10-01T08:15:00.000Z' } },
@@ -444,7 +489,7 @@ export const PUSH_TILE_STATE: PushOpDoc = {
   kind: 'push',
   name: 'PUSH_TILE_STATE',
   title: '推送：地块归属 / 驻军变化（v12）',
-  summary: `地块状态变化时推送给相关账号的在线连接：wilderness_occupied=野地被占领（含己方出征获胜）、wilderness_lost=占领失效（召回或 NPC 袭击失守）、reserve_depleted=名下野地储量采空（v61，AISLG-165；推送该地块最新视图，驻军仍在时改为按恢复速度采集）、npc_city_occupied=NPC 城池被占领为分城、npc_attack_repelled=NPC 袭击被击退（驻军折损）、garrison_reinforced=增援并入驻军。`,
+  summary: `地块状态变化时推送给相关账号的在线连接：wilderness_occupied=野地被占领（含己方出征获胜）、wilderness_lost=占领失效（召回 / NPC 袭击失守 / 账号长期未上线被收回，v98 AISLG-238，cause=inactive；此时驻军已回到归属城、望楼已毁、地块变为无主）、reserve_depleted=名下野地储量采空（v61，AISLG-165；推送该地块最新视图，驻军仍在时改为按恢复速度采集）、npc_city_occupied=NPC 城池被占领为分城、npc_attack_repelled=NPC 袭击被击退（驻军折损）、garrison_reinforced=增援并入驻军、facility_completed=望楼建成 / 升级完成（v97，AISLG-232，tile.facility 为新等级）。望楼随野地一起毁掉时不单独推：那一格另有一条 wilderness_lost，tile.facility 随之变 null。`,
   dataFields: [
     { name: 'reason', type: 'string', desc: '触发本次推送的变化类别（见 summary）。' },
     { name: 'tile', type: 'object', desc: '变化后的地块视图，字段与 GET_WORLD_MAP 的 tiles[] 相同。' },
@@ -452,5 +497,5 @@ export const PUSH_TILE_STATE: PushOpDoc = {
   examples: [
     { op: Op.PUSH_TILE_STATE, push: true, data: { reason: 'wilderness_occupied', tile: TILE_OWNED } },
   ],
-  agentNote: `NPC 会周期性袭击玩家占领的野地（袭击部队编成按野地等级推导，参考战力 = 等级 × ${armyPower(npcRaidArmy(1))}，定稿编成；基准每 30 分钟随机袭击一块已占领野地，v19 校准；实际 ÷ 全局时间缩放）：收到 wilderness_lost（cause=npc_attack）说明驻军全灭，用 GET_STATE 对齐领土与驻军；袭击结算同样生成守方视角战报。`,
+  agentNote: `NPC 会周期性袭击玩家占领的野地（袭击部队编成按野地等级推导，参考战力 = 等级 × ${armyPower(npcRaidArmy(1))}，定稿编成；基准每 30 分钟随机袭击一块已占领野地，v19 校准；实际 ÷ 全局时间缩放）：收到 wilderness_lost（cause=npc_attack）说明驻军全灭，用 GET_STATE 对齐领土与驻军；袭击结算同样生成守方视角战报。本人和 Agent 都 7 天没上线（现实时间）的账号，系统每小时扫一轮把名下野地一次全部收回——收到 wilderness_lost（cause=inactive）说明地块已变无主，驻军已不损失地回到归属城、望楼已毁（不退款）、当前储量不重置，其他玩家可立即占领；城与城内资源兵力不受影响。`,
 };

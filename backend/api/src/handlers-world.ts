@@ -1,9 +1,7 @@
-// 世界地图协议的处理逻辑：GET_WORLD_MAP / GET_TILE / MARCH / RECALL_GARRISON（v12 起）。
+// 世界地图协议的处理逻辑：GET_WORLD_MAP / GET_TILE / MARCH（v12 起）。RECALL_GARRISON 见 handlers-recall.ts。
 // 协议分发见 handlers.ts。共同约定：
 // - 出征与召回在事务内先锁城池行（cities → world_tiles 的全局锁序，与 Worker 一致）、
 //   懒结算生产（产量含野地加成）后按最新状态校验；
-// - 召回 = 撤回全部驻军并**立即放弃占领**（占位规则）：野地回到无主状态，部队作为
-//   返程行军回城，到达后才并入城内驻军；
 // - 出征目标本期限野地（无主或本账号占领）与 NPC 城池；玩家城池与他人占领地块随
 //   「玩家对抗」阶段开放，当前返回 TARGET_NOT_ATTACKABLE；
 // - v16 出征任务（MARCH.task，缺省 plunder）：野地掠夺 / 占领（占领上限 = 官府等级，
@@ -24,7 +22,6 @@ import {
   type TroopKind,
 } from '../../common/src/protocol';
 import { insertEvent } from '../../common/src/events';
-import { isEmptyArmy } from '../../common/src/battle';
 import {
   WORLD_SIZE,
   DEFAULT_MAP_WINDOW,
@@ -34,28 +31,61 @@ import {
   marchTravelSeconds,
 } from '../../common/src/world';
 import { PLUNDER_COOLDOWN_MS } from '../../common/src/plunder';
-import {
-  clearTileOccupation,
-  loadTerritory,
-  loadTile,
-  loadTileArmy,
-  type TileRow,
-} from '../../common/src/world-db';
-import { loadArmyFoodUsePerHour, loadBuildingLevels, settleCityProduction, type CityProductionRow } from '../../common/src/production';
+import type { TileRow } from '../../common/src/world-db';
 import { readIntInRange, respondError, respondOk } from './frames';
 import type { HandlerContext } from './handlers';
 import type { ConnInfo } from './connections';
-import { loadTileDetail, loadWorldWindow } from './views-world';
+import { loadFogTileDetail, loadFogWindow, withFogRequest } from './fog-view';
+import { loadVisibleMarches } from './fog-enemy-marches';
 import { deployCountOf, loadCityState, lockCitySnapshot, marchView, type MarchRow } from './views';
 import { canDeployMore, stationPercent } from '../../common/src/building-effects';
 import { famousMarchPercent } from '../../common/src/famous-effects';
 import { checkHeroMarchable } from './handlers-hero';
 import type { AccountHeroRow } from '../../common/src/hero-db';
 import { cargoOverCapacity } from '../../common/src/transport';
+import { loadActiveDecree } from '../../common/src/luoyang-db';
+import { decreeMarchSpeedPercent } from '../../common/src/luoyang';
 import { carryingPercent, marchingPercent } from '../../common/src/tech';
-import { loadTechLevels } from '../../common/src/tech-db';
 import { resolveIntercept, resolveMarchTarget } from './march-target';
 import { breakNewbieProtection, insertAttackWarning, pushAttackWarning } from './pvp';
+import { blindEligibleTask, isUnknownTarget } from './fog-march';
+import { ensureFogState } from '../../common/src/fog-db';
+import { getFogEnabled } from '../../common/src/fog-config';
+import { cityDispatchBlockedSeconds } from './stratagem-target';
+import { moveAttackLockRetry } from '../../common/src/move-city-db';
+
+/** 事务内取数据库 now（十面埋伏等判定的统一时钟） */
+async function dbNowOf(client: pg.PoolClient): Promise<Date> {
+  const res = await client.query(`SELECT now() AS now`);
+  return res.rows[0].now as Date;
+}
+
+/**
+ * 窗口式地图查询的窗口解析（GET_WORLD_MAP / GET_VISIBLE_MARCHES 共用）：
+ * w/h 越界视为未提供（取缺省），不钳制放大（v17）；x/y 缺省按主城居中折算，再按世界边界钳制。
+ */
+export async function resolveMapWindow(
+  pool: pg.Pool,
+  accountId: string,
+  data: Record<string, unknown> | undefined,
+): Promise<{ x: number; y: number; w: number; h: number }> {
+  const width = readIntInRange(data, 'w', 1, MAX_MAP_WINDOW, DEFAULT_MAP_WINDOW);
+  const height = readIntInRange(data, 'h', 1, MAX_MAP_WINDOW, DEFAULT_MAP_WINDOW);
+  const originX = Number.isInteger(data?.x) ? (data?.x as number) : undefined;
+  const originY = Number.isInteger(data?.y) ? (data?.y as number) : undefined;
+  if (originX !== undefined && originY !== undefined) {
+    return clampMapWindow(originX, originY, width, height);
+  }
+  const city = await pool.query(
+    `SELECT x, y FROM cities WHERE account_id = $1 ORDER BY created_at LIMIT 1`,
+    [accountId],
+  );
+  const row = city.rows[0] as { x: number | null; y: number | null } | undefined;
+  const center = Math.floor(WORLD_SIZE / 2);
+  const cx = row?.x ?? center;
+  const cy = row?.y ?? center;
+  return clampMapWindow(cx - Math.floor(width / 2), cy - Math.floor(height / 2), width, height);
+}
 
 /** GET_WORLD_MAP：窗口式地图查询；缺省以主城为中心 DEFAULT_MAP_WINDOW×DEFAULT_MAP_WINDOW */
 export async function handleGetWorldMap(
@@ -65,33 +95,49 @@ export async function handleGetWorldMap(
   seq: number | undefined,
   data: Record<string, unknown> | undefined,
 ): Promise<void> {
-  // w/h 越界视为未提供（取缺省），不钳制放大——与文档「1..MAX_MAP_WINDOW，缺省 DEFAULT_MAP_WINDOW」一致（v17）
-  const width = readIntInRange(data, 'w', 1, MAX_MAP_WINDOW, DEFAULT_MAP_WINDOW);
-  const height = readIntInRange(data, 'h', 1, MAX_MAP_WINDOW, DEFAULT_MAP_WINDOW);
-  let originX = Number.isInteger(data?.x) ? (data?.x as number) : undefined;
-  let originY = Number.isInteger(data?.y) ? (data?.y as number) : undefined;
-  if (originX === undefined || originY === undefined) {
-    const city = await ctx.pool.query(
-      `SELECT x, y FROM cities WHERE account_id = $1 ORDER BY created_at LIMIT 1`,
-      [conn.accountId as string],
-    );
-    const row = city.rows[0] as { x: number | null; y: number | null } | undefined;
-    const center = Math.floor(WORLD_SIZE / 2);
-    const cx = row?.x ?? center;
-    const cy = row?.y ?? center;
-    originX = cx - Math.floor(width / 2);
-    originY = cy - Math.floor(height / 2);
-  }
-  const window = clampMapWindow(originX, originY, width, height);
-  const tiles = await loadWorldWindow(ctx.pool, window.x, window.y, window.w, window.h, conn.accountId as string);
+  const window = await resolveMapWindow(ctx.pool, conn.accountId as string, data);
+  // v92（AISLG-224）：战争迷雾裁剪（开关关闭时原样返回，fog = visible）
+  const tiles = await loadFogWindow(ctx.pool, conn.accountId as string, window.x, window.y, window.w, window.h);
   respondOk(ctx.registry, conn, op, seq, {
     size: WORLD_SIZE,
     x: window.x,
     y: window.y,
     w: window.w,
     h: window.h,
+    // v97（AISLG-232）：界面上要说明「望楼在迷雾关闭时不产生视野效果」，这里给出开关的当前值
+    fogEnabled: getFogEnabled(),
     tiles,
   });
+}
+
+/**
+ * GET_VISIBLE_MARCHES（op 152，v96，AISLG-230）：窗口内、查看者实时视野里的他人部队。
+ * 玩家与 Agent 同一接口、同一套裁剪（只认登录账号，不看 role）；fog_enabled 关闭时返回空数组，
+ * 不报错、不碰任何迷雾表（与 GET_WORLD_MAP 同口径）。
+ */
+export async function handleGetVisibleMarches(
+  ctx: HandlerContext,
+  conn: ConnInfo,
+  op: number,
+  seq: number | undefined,
+  data: Record<string, unknown> | undefined,
+): Promise<void> {
+  const accountId = conn.accountId as string;
+  if (!getFogEnabled()) {
+    respondOk(ctx.registry, conn, op, seq, { serverTime: new Date().toISOString(), marches: [] });
+    return;
+  }
+  const window = await resolveMapWindow(ctx.pool, accountId, data);
+  const payload = await withFogRequest(ctx.pool, accountId, async (req) => {
+    const marches = await loadVisibleMarches(req.client, {
+      accountId,
+      sources: req.sources,
+      window,
+      now: req.now,
+    });
+    return { serverTime: req.now.toISOString(), marches };
+  });
+  respondOk(ctx.registry, conn, op, seq, payload);
 }
 
 /** GET_TILE：单格详情（野地收益预览 / NPC 城池驻军与库存） */
@@ -108,12 +154,17 @@ export async function handleGetTile(
     respondError(ctx.registry, conn, op, seq, 'INVALID_PARAMS');
     return;
   }
-  const tile = await loadTileDetail(ctx.pool, x as number, y as number, conn.accountId as string);
-  if (!tile) {
+  // v92（AISLG-224）：未探索的格返回 TILE_UNEXPLORED（不泄露任何地块信息）
+  const result = await loadFogTileDetail(ctx.pool, conn.accountId as string, x as number, y as number);
+  if (result.kind === 'missing') {
     respondError(ctx.registry, conn, op, seq, 'INVALID_PARAMS');
     return;
   }
-  respondOk(ctx.registry, conn, op, seq, { tile });
+  if (result.kind === 'unexplored') {
+    respondError(ctx.registry, conn, op, seq, 'TILE_UNEXPLORED');
+    return;
+  }
+  respondOk(ctx.registry, conn, op, seq, { tile: result.detail });
 }
 
 /** MARCH：从主城派出部队（扣减城内驻军），到达后由 Worker 结算（v16：task 缺省 plunder） */
@@ -148,6 +199,13 @@ export async function handleMarch(
       respondError(ctx.registry, conn, op, seq, 'INTERNAL');
       return;
     }
+    // v86（AISLG-211）：中了十面埋伏的城不能派出任何部队（出征 / 调兵 / 运输 / 侦察 / 协防；召回不受影响）
+    const ambushLeft = await cityDispatchBlockedSeconds(client, snap.cityId, await dbNowOf(client));
+    if (ambushLeft !== null) {
+      await client.query('ROLLBACK');
+      respondError(ctx.registry, conn, op, seq, 'CITY_AMBUSHED', { retryAfterSeconds: ambushLeft });
+      return;
+    }
     // v30（AISLG-80）：本城在外部队数已达校场等级 → 拒绝新的出征（已在外的不受影响）
     if (!canDeployMore(deployCountOf(snap), snap.levels.parade_ground)) {
       await client.query('ROLLBACK');
@@ -159,10 +217,29 @@ export async function handleMarch(
     const tile = (tileRes.rowCount ? tileRes.rows[0] : null) as TileRow | null;
     const nowRes = await client.query(`SELECT now() AS now`);
     const dbNow = nowRes.rows[0].now as Date;
+    // v91（AISLG-220）：指定坐标迁城后 12 小时内，这座城不能发起攻击类出征（运输 / 调兵 / 增援自己野地不受限）
+    const moveLockLeft = await moveAttackLockRetry(client, accountId, snap.cityId, tile, task, targetId, dbNow);
+    if (moveLockLeft !== null) {
+      await client.query('ROLLBACK');
+      respondError(ctx.registry, conn, op, seq, 'MOVE_CITY_ATTACK_LOCK', { retryAfterSeconds: moveLockLeft });
+      return;
+    }
     // v28（AISLG-78）：带 targetId = 截击移动目标（目标格内容无关，只核对目标与路线）
-    const target = targetId
+    // v92（AISLG-224）：探索状态并入（每次用到迷雾都先维护）；盲打时校验被拒绝不报错，改为正常建行军
+    // 关闭迷雾时不碰探索状态（零影响）
+    if (getFogEnabled()) {
+      await ensureFogState(client, accountId, dbNow);
+    }
+    let fogDenied = false;
+    let target = targetId
       ? await resolveIntercept(client, targetId, x, y, dbNow)
       : await resolveMarchTarget(client, accountId, snap.cityId, tile, task, snap.levels.government, dbNow);
+    if (!target.purpose && !targetId && blindEligibleTask(task) && (await isUnknownTarget(client, accountId, x, y, dbNow))) {
+      // 盲打（迷雾中）：校验被拒绝不报错，照常建行军；不带 pvp（不发预警、不破保护），
+      // 并写 fog_denied：到达一律原路返回（Worker resolveArrival），不因目标此后变得可打而开战
+      target = { purpose: task };
+      fogDenied = true;
+    }
     if (!target.purpose) {
       await client.query('ROLLBACK');
       const cityState = await loadCityState(ctx.pool, accountId);
@@ -186,7 +263,7 @@ export async function handleMarch(
               retryAfterSeconds: Math.max(1, Math.ceil((target.protectedUntil.getTime() - dbNow.getTime()) / 1000)),
             }
           : undefined;
-      const data = { ...(cityState ? { city: cityState } : {}), ...cooldownLeft, ...protectionLeft };
+      const data = { ...(cityState ? { city: cityState } : {}), ...cooldownLeft, ...protectionLeft, ...(target.nobility ? { nobility: target.nobility } : {}), ...(target.luoyangNextOpenAt ? { nextOpenAt: target.luoyangNextOpenAt.toISOString(), retryAfterSeconds: Math.max(1, Math.ceil((target.luoyangNextOpenAt.getTime() - dbNow.getTime()) / 1000)) } : {}) };
       respondError(ctx.registry, conn, op, seq, target.reason ?? 'TARGET_NOT_ATTACKABLE', Object.keys(data).length ? data : undefined);
       return;
     }
@@ -246,7 +323,9 @@ export async function handleMarch(
     // v62（AISLG-166）：出发城为许昌时，自己城池之间的调兵 / 运输行军速度另 +20%（与驿站加算）
     const selfCityMarch = target.purpose === 'transfer' || target.purpose === 'transport';
     const selfCityBonus = selfCityMarch ? stationPercent(snap.levels.post_station) + famousMarchPercent(snap.famousName) : 0;
-    const travel = marchTravelSeconds(snap.x, snap.y, x, y, troops, marchingPercent(snap.techs) + selfCityBonus);
+    const decree = await loadActiveDecree(client, accountId);
+    const decreeSpeed = decreeMarchSpeedPercent(decree?.kind ?? null, decree?.until ?? null, new Date());
+    const travel = marchTravelSeconds(snap.x, snap.y, x, y, troops, marchingPercent(snap.techs) + selfCityBonus + decreeSpeed);
     const arriveMs = dbNow.getTime() + travel * 1000;
     // v35（AISLG-112）：截击「到了先埋伏」——目标路线与时刻表固定，出发即可算出接战时刻 =
     // max(到达时刻, 目标进入选定格相邻范围的时刻)，Worker 按该时刻结算；提前到达的部队
@@ -258,13 +337,13 @@ export async function handleMarch(
       ambushMs = arriveMs < target.interceptWindow.from ? arriveMs : null;
     }
     const ins = await client.query(
-      `INSERT INTO marches (account_id, from_city_id, x, y, troops, purpose, status, initiator, arrive_at, cargo, target_id, ambush_at, hero_id)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6, 'marching', $7, $8, $9::jsonb, $10, $11, $12)
+      `INSERT INTO marches (account_id, from_city_id, x, y, troops, purpose, status, initiator, arrive_at, cargo, target_id, ambush_at, hero_id, fog_denied)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6, 'marching', $7, $8, $9::jsonb, $10, $11, $12, $13)
        RETURNING *`,
       [
         accountId, snap.cityId, x, y, JSON.stringify(troops), target.purpose, role,
         new Date(engageMs).toISOString(), cargo ? JSON.stringify(cargo) : null, targetId,
-        ambushMs !== null ? new Date(ambushMs).toISOString() : null, marchHero ? marchHero.id : null,
+        ambushMs !== null ? new Date(ambushMs).toISOString() : null, marchHero ? marchHero.id : null, fogDenied,
       ],
     );
     const march = ins.rows[0] as MarchRow;
@@ -287,7 +366,7 @@ export async function handleMarch(
     });
     // v38（AISLG-122）/ v39（AISLG-123）：打玩家的出征（掠夺城池 / 抢占野地）——给守方写
     // 来袭预警事件（提交后推送在线连接）；攻方处于新手保护期则因主动进攻立即失效
-    let warning: { accountId: string; detail: Record<string, unknown> } | null = null;
+    const warnings: Array<{ accountId: string; detail: Record<string, unknown> }> = [];
     if (target.pvp) {
       const targetCity = await client.query(
         `SELECT a.username FROM cities c JOIN accounts a ON a.id = c.account_id WHERE c.id = $1`,
@@ -300,23 +379,39 @@ export async function handleMarch(
       );
       const naming = namingRes.rows[0] as { username: string; city_name: string } | undefined;
       if (row && naming) {
-        warning = {
-          accountId: target.pvp.targetAccountId,
-          detail: await insertAttackWarning(
-            client, march, troops,
-            {
-              accountId: target.pvp.targetAccountId,
+        const detail = await insertAttackWarning(
+          client, march, troops,
+          {
+            accountId: target.pvp.targetAccountId,
+            cityId: target.pvp.targetCityId,
+            // 城池目标：x/y = 城池坐标；野地目标：x/y = 地块坐标 + 地形与等级
+            x: march.x,
+            y: march.y,
+            kind: target.pvp.kind,
+            terrain: target.pvp.terrain ?? null,
+            level: target.pvp.level ?? 0,
+          },
+          { username: naming.username, cityId: snap.cityId, cityName: naming.city_name },
+        );
+        warnings.push({ accountId: target.pvp.targetAccountId, detail });
+        // v74（AISLG-194）：城池被来袭时，驻扎在该城的协防方也收到同一份预警
+        if (target.pvp.kind === 'city') {
+          const assistRes = await client.query(
+            `SELECT account_id FROM city_assist WHERE city_id = $1 AND account_id <> $2`,
+            [target.pvp.targetCityId, target.pvp.targetAccountId],
+          );
+          for (const assist of assistRes.rows as Array<{ account_id: string }>) {
+            await insertEvent(client, {
+              accountId: assist.account_id,
               cityId: target.pvp.targetCityId,
-              // 城池目标：x/y = 城池坐标；野地目标：x/y = 地块坐标 + 地形与等级
-              x: march.x,
-              y: march.y,
-              kind: target.pvp.kind,
-              terrain: target.pvp.terrain ?? null,
-              level: target.pvp.level ?? 0,
-            },
-            { username: naming.username, cityId: snap.cityId, cityName: naming.city_name },
-          ),
-        };
+              buildId: march.id,
+              type: EventType.PLAYER_ATTACK_WARNING,
+              initiator: null,
+              detail,
+            });
+            warnings.push({ accountId: assist.account_id, detail });
+          }
+        }
       }
       await breakNewbieProtection(
         client,
@@ -335,125 +430,8 @@ export async function handleMarch(
       { op: Op.PUSH_MARCH_STATE, push: true, data: { reason: 'march_started', march: view } },
       conn,
     );
-    if (warning) {
+    for (const warning of warnings) {
       pushAttackWarning(ctx, warning.accountId, warning.detail);
-    }
-  } catch (err) {
-    await client.query('ROLLBACK').catch(() => undefined);
-    throw err;
-  } finally {
-    client.release();
-  }
-}
-
-/** RECALL_GARRISON：撤回本账号占领野地的全部驻军；撤回即放弃占领，部队返程回城 */
-export async function handleRecallGarrison(
-  ctx: HandlerContext,
-  conn: ConnInfo,
-  op: number,
-  seq: number | undefined,
-  x: number,
-  y: number,
-): Promise<void> {
-  const accountId = conn.accountId as string;
-  const role = conn.role as InitiatorRole;
-  // 先无锁读地块找到占领城，确认归属本账号后再进事务（锁序与出征一致）
-  const probe = await loadTile(ctx.pool, x, y);
-  if (!probe || probe.kind !== 'wilderness' || !probe.owner_city_id) {
-    respondError(ctx.registry, conn, op, seq, 'TILE_NOT_OCCUPIED');
-    return;
-  }
-  const ownerRes = await ctx.pool.query(
-    `SELECT id FROM cities WHERE id = $1 AND account_id = $2`,
-    [probe.owner_city_id, accountId],
-  );
-  if (!ownerRes.rowCount) {
-    respondError(ctx.registry, conn, op, seq, 'TILE_NOT_OCCUPIED');
-    return;
-  }
-  const ownerCityId = probe.owner_city_id;
-
-  const client = await ctx.pool.connect();
-  try {
-    await client.query('BEGIN');
-    // 锁占领城并结算生产：野地加成在归属清除前按旧速率结到当前时刻（产量切分）
-    const cityRes = await client.query(
-      `SELECT id, name, level, x, y, gold, wood, food, stone, iron,
-              settled_at, gold_rem, food_rem, wood_rem, stone_rem, iron_rem,
-              population, population_rem, now() AS db_now
-       FROM cities WHERE id = $1 FOR UPDATE`,
-      [ownerCityId],
-    );
-    const cityRow = cityRes.rows[0] as CityProductionRow & { x: number | null; y: number | null; db_now: Date };
-    if (!cityRow || cityRow.x === null || cityRow.y === null) {
-      await client.query('ROLLBACK');
-      respondError(ctx.registry, conn, op, seq, 'INTERNAL');
-      return;
-    }
-    const levels = await loadBuildingLevels(client, ownerCityId);
-    const territory = await loadTerritory(client, ownerCityId);
-    await settleCityProduction(
-      client,
-      cityRow,
-      levels,
-      cityRow.db_now,
-      territory,
-      await loadArmyFoodUsePerHour(client, ownerCityId),
-    );
-
-    // 复核地块归属未变（并发召回 / NPC 袭击由行锁串开）
-    const tileRes = await client.query(`SELECT * FROM world_tiles WHERE x = $1 AND y = $2 FOR UPDATE`, [x, y]);
-    const tile = tileRes.rows[0] as TileRow | undefined;
-    if (!tile || tile.kind !== 'wilderness' || tile.owner_city_id !== ownerCityId) {
-      await client.query('ROLLBACK');
-      respondError(ctx.registry, conn, op, seq, 'TILE_NOT_OCCUPIED');
-      return;
-    }
-    const troops = await loadTileArmy(client, x, y);
-    await clearTileOccupation(client, x, y);
-    let march: MarchRow | null = null;
-    if (!isEmptyArmy(troops)) {
-      // 返程按撤回编队的最慢兵种折算速度
-      const travel = marchTravelSeconds(cityRow.x, cityRow.y, x, y, troops, marchingPercent(await loadTechLevels(client, accountId)));
-      const ins = await client.query(
-        `INSERT INTO marches (account_id, from_city_id, x, y, troops, purpose, status, initiator, arrive_at)
-         VALUES ($1, $2, $3, $4, $5::jsonb, 'return', 'marching', $6, now() + make_interval(secs => $7))
-         RETURNING *`,
-        [accountId, ownerCityId, x, y, JSON.stringify(troops), role, travel],
-      );
-      march = ins.rows[0] as MarchRow;
-      await insertEvent(client, {
-        accountId,
-        cityId: ownerCityId,
-        buildId: march.id,
-        type: EventType.MARCH_STARTED,
-        initiator: role,
-        detail: { x, y, troops, purpose: 'return', arriveAt: march.arrive_at.toISOString() },
-      });
-    }
-    await insertEvent(client, {
-      accountId,
-      cityId: ownerCityId,
-      type: EventType.WILDERNESS_LOST,
-      initiator: role,
-      detail: { x, y, cause: 'recall', terrain: tile.terrain, level: tile.level },
-    });
-    await client.query('COMMIT');
-
-    const view = march ? marchView(march) : null;
-    respondOk(ctx.registry, conn, op, seq, view ? { march: view } : { march: null });
-    const tileViewRow = await loadWorldWindow(ctx.pool, x, y, 1, 1, accountId);
-    ctx.registry.broadcast(
-      accountId,
-      { op: Op.PUSH_TILE_STATE, push: true, data: { reason: 'wilderness_lost', tile: tileViewRow[0] } },
-      conn,
-    );
-    if (view) {
-      ctx.registry.broadcast(
-        accountId,
-        { op: Op.PUSH_MARCH_STATE, push: true, data: { reason: 'march_started', march: view } },
-        conn,
-      );
     }
   } catch (err) {
     await client.query('ROLLBACK').catch(() => undefined);

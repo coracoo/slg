@@ -20,9 +20,12 @@ export const HERO_COPY_EN = {
     meta: (normal: number, normalCap: number, famous: number, famousCap: number) =>
       `Regular ${normal}/${normalCap} · Famous ${famous}/${famousCap}`,
     hint: 'Heroes are shared across the account: bring 1 along on march / scout / intercept / transport tasks, or assign one as City Guard. Attributes only decide combat bonuses, and each bonus is capped at 20%.',
+    alert: (captives: number, low: number) => `${captives} captive hero(es) to ransom · ${low} with low loyalty`,
     loading: 'Loading heroes…',
-    noTavern: 'This city has no Tavern yet: build one and it refreshes 3 hero candidates every 4 hours — recruit them with gold.',
+    noTavern: 'Your main city has no Tavern yet: build one (the Tavern can only be built in the main city) and it refreshes 3 hero candidates every 4 hours — recruit them with gold.',
     noHeroes: 'No heroes yet. Go recruit one from the Tavern candidates.',
+    tavernMainOnly: 'The Tavern can only be built in your main city: candidates and recruitment always use the main city Tavern. Switch back to the main city to view candidates and recruit.',
+    goMainCity: 'Back to main city',
   },
   candidates: {
     title: 'Tavern candidates',
@@ -52,6 +55,15 @@ export const HERO_COPY_EN = {
     assignGuard: 'Assign as City Guard',
     removeGuard: 'Remove as City Guard',
     guardOther: "Reassign as this city's City Guard",
+    loyalty: (value: number) => `Loyalty ${value}`,
+    loyaltyLow: 'Loyalty 30 or below — reward the hero soon or it will leave',
+    captiveTag: 'Captive',
+    statusCaptive: (clock: string) => `Captured — ransom before ${clock}`,
+    ransom: (gold: number) => `Ransom ${gold}g`,
+    ransomConfirm: (gold: number) => `Pay ${gold}g to ransom`,
+    ransomCancel: 'Cancel',
+    ransomHint: 'The owner can ransom before the captivity ends: the full ransom is paid from the main city, the captor gets 50%, and the hero returns at once with loyalty −20 (minimum 1)',
+    captiveDenied: 'This hero is held captive and cannot be operated on',
     dismiss: 'Dismiss',
     dismissConfirm: 'Confirm dismissal?',
     dismissFamousHint: 'Once dismissed, this Famous Hero returns to the server-wide obtainable pool and may be obtained by another player',
@@ -84,6 +96,7 @@ export const HERO_COPY_EN = {
       busy: 'Away',
       guard: 'City Guard',
       training: 'Training',
+      captive: 'Captive',
     },
     preview: (atk: number, def: number, scale: number) =>
       `Bonus: Attack +${atk}% · damage taken reduced by ${def}%${scale < 1 ? ` (formation exceeds the leadership cap, scaled down to ${Math.round(scale * 100)}%)` : ''}`,
@@ -101,6 +114,14 @@ export const HERO_COPY_EN = {
     expSuffix: (name: string, gained: number, leveledTo: number | null) =>
       `; hero ${name} gained +${gained} exp${leveledTo ? `, reached Lv${leveledTo}` : ''}`,
     woundedSuffix: (name: string) => `; hero ${name} was wounded`,
+    heroLeftLoyalty: (name: string) => `Hero ${name} lost all loyalty and left you`,
+    heroLeftCaptive: (name: string) => `Hero ${name} was not ransomed in time and left you`,
+    heroLeftQualified: (name: string, owner: string) => `${owner}'s famous hero ${name} left after captivity timed out — you can now befriend them`,
+    captured: (name: string, captor: string, ransom: number) => `Hero ${name} was captured by ${captor} — ransom ${ransom} gold within 24 hours`,
+    capturedBy: (name: string, owner: string) => `Captured hero ${name} of ${owner} — they can ransom within 24 hours`,
+    ransomed: (name: string, cost: number) => `Hero ${name} was ransomed (cost ${cost} gold), loyalty −20`,
+    ransomedBy: (name: string, owner: string, share: number) => `${owner} ransomed hero ${name} — your main city got ${share} gold`,
+    loyaltyLow: (name: string, loyalty: number) => `Hero ${name} loyalty dropped to ${loyalty} — reward them soon or they will leave`,
   },
   report: {
     attackerHero: (name: string, lead: number, force: number, wit: number, atk: number, def: number) =>
@@ -110,6 +131,8 @@ export const HERO_COPY_EN = {
   },
   broadcast: {
     granted: (username: string, name: string, source: string) => `${username} obtained Famous Hero ${name} (${source})`,
+    left: (name: string, username: string) => `Famous hero ${name} left ${username}`,
+    captured: (captor: string, owner: string, name: string) => `${captor} captured ${owner}'s ${name}`,
   },
   growth: {
     points: (n: number) => `${n} points to assign`,
@@ -121,9 +144,11 @@ export const HERO_COPY_EN = {
     reset: 'Reset',
     pointsHint: 'Free points come from leveling up — assign them to Lead / Force / Wit',
     trainHint: 'Send the hero to train; the exp lands when it finishes (even offline). No marching, guard duty or point changes meanwhile',
-    giftHint: (left: number) => `1000 gold for 100 exp — ${left} gifts left today`,
+    giftHint: (left: number) => `1000 gold for 100 exp, loyalty +10 — ${left} gifts left today`,
     resetHint: (left: number) => `All assigned points return to the pool for level × 1000 gold — ${left} resets left today`,
     busyHint: 'Marching, on guard or training — points and training are unavailable',
+    cancelTraining: 'Cancel training (no exp refund)',
+    cancelTrainingHint: 'The hero returns home at once; no exp is granted (time already trained is forfeited)',
   },
   wild: {
     mapMark: 'A wild famous hero hides here — beat the garrison to befriend them',
@@ -149,6 +174,7 @@ export const HERO_COPY_EN = {
       HERO_CANDIDATE_GONE: 'This candidate is no longer in the Tavern (already recruited or the list refreshed) — check the latest candidates',
       HERO_CAP_REACHED: 'Regular hero cap reached — dismiss one or upgrade the Tavern, then recruit again',
       HERO_NOT_FOUND: 'This hero was not found',
+      TRAINING_NOT_CANCELLABLE: 'Nothing to cancel (the hero is not training, or training already finished)',
       HERO_BUSY: 'This hero is marching with another army',
       HERO_WOUNDED: 'This hero is wounded and cannot march out until recovered',
       HERO_ARREARS: 'This hero is in salary arrears — pay the owed gold before marching out',
@@ -162,6 +188,8 @@ export const HERO_COPY_EN = {
       HERO_FAVOR_INSUFFICIENT: 'Favor is below 100 — cannot recruit yet',
       HERO_FAVOR_FULL: 'Favor is full — recruit directly',
       FAMOUS_CLAIMED: 'This famous hero has already been claimed by someone else',
+      HERO_CAPTURED: 'This hero is held captive — the owner must ransom it before captivity ends',
+      HERO_NOT_CAPTURED: 'This hero is not held captive (or captivity has ended) — nothing to ransom',
     } as Partial<Record<ErrorCode, string>>,
   },
 } satisfies typeof HERO_COPY;

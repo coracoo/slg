@@ -4,7 +4,7 @@
 // - 建造 / 升级 / 改名在事务内加城池行锁、懒结算生产后按最新状态重新校验
 //   （玩家 / Agent 同时提交按先后生效）；
 // - 取消排队先用条件翻转守卫 builds 行（锁序与 Worker 相同：builds → cities，避免死锁），
-//   再在城池行锁内按成本快照全额返还（2026-09-27 确认规则；在建条目能否取消待定）。
+//   再在城池行锁内按成本快照全额返还（2026-09-27 确认规则；v71 起在建条目也可取消，连升只退未完成级）。
 //   一期不提供建筑拆除（范围文档「明确不上线」）。
 
 import pg from 'pg';
@@ -26,9 +26,9 @@ import {
   buildSeconds,
   buildingLevelMax,
   exchangeGoldFor,
+  judgeMainCityOnly,
   startBuild,
   startUpgrade,
-  upgradeChainCost,
   upgradeCost,
   upgradeSeconds,
   type BuildDeniedCode,
@@ -40,17 +40,22 @@ import { readString, respondError, respondOk } from './frames';
 import type { HandlerContext } from './handlers';
 import type { ConnInfo } from './connections';
 import { buildView, loadCityState, lockCitySnapshot, type BuildRow, type CitySnapshot } from './views';
+import { activateQueuedBuilds } from '../../common/src/queue-activate';
+import { cancelRefundOf } from '../../common/src/build-cancel';
+import { constructionReductionPercent } from '../../common/src/tech';
 
 /**
  * 建造 / 升级的共用事务路径：同一事务内行锁、生产结算、校验决策、入队/开工、
  * 扣资源、写事件，提交后响应并推送。玩家与 Agent 并发提交时，后提交方基于
  * 已扣减状态重新校验（decide 在行锁内取最新快照判定）。
+ * v87（AISLG-217）：酒馆 / 书院的「仅主城」校验也在这里（BUILD 与 UPGRADE 共用的唯一入口）。
  */
 async function runBuildAction(
   ctx: HandlerContext,
   conn: ConnInfo,
   op: number,
   seq: number | undefined,
+  kind: BuildingKind,
   decide: (
     snap: CitySnapshot,
     counts: { active: number; queued: number },
@@ -70,7 +75,9 @@ async function runBuildAction(
       return;
     }
     const counts = await queueCounts(client, snap.cityId);
-    const verdict = decide(snap, counts);
+    // v87（AISLG-217）：酒馆 / 书院只能在主城建造与升级（分城返回 BUILDING_MAIN_ONLY，不扣资源、不入队）
+    const mainOnly = judgeMainCityOnly(kind, snap.cityId === snap.mainCityId);
+    const verdict = mainOnly ?? decide(snap, counts);
     if (!verdict.ok) {
       await client.query('ROLLBACK');
       // 失败时附当前状态（含本次读取触发的生产结算），客户端据此自行刷新；
@@ -116,7 +123,7 @@ async function runBuildAction(
     // v22（AISLG-43）：连续升级返回整链计划（每级成本与时长，客户端可展示 / 预估）
     const chain =
       verdict.toLevel !== null
-        ? upgradeChainPlan(verdict.kind, verdict.fromLevel, verdict.toLevel)
+        ? upgradeChainPlan(verdict.kind, verdict.fromLevel, verdict.toLevel, constructionReductionPercent(snap.techs))
         : undefined;
     respondOk(ctx.registry, conn, op, seq, chain ? { build: view, chain } : { build: view });
     ctx.registry.broadcast(
@@ -146,13 +153,13 @@ export async function handleBuild(
   seq: number | undefined,
   kind: BuildingKind,
 ): Promise<void> {
-  await runBuildAction(ctx, conn, op, seq, (snap, counts) => {
+  await runBuildAction(ctx, conn, op, seq, kind, (snap, counts) => {
     const kindBusy = snap.levels[kind] > 0 || snap.queue.some((item) => item.kind === kind);
     const verdict = startBuild(kind, snap.resources, kindBusy, counts.active, counts.queued);
     if (!verdict.ok) {
       return verdict;
     }
-    return { ...verdict, kind, level: 1 as const, toLevel: null, fromLevel: 0, dueSeconds: buildSeconds() };
+    return { ...verdict, kind, level: 1 as const, toLevel: null, fromLevel: 0, dueSeconds: buildSeconds(constructionReductionPercent(snap.techs)) };
   });
 }
 
@@ -165,7 +172,7 @@ export async function handleUpgrade(
   kind: BuildingKind,
   toLevel: number | null,
 ): Promise<void> {
-  await runBuildAction(ctx, conn, op, seq, (snap, counts) => {
+  await runBuildAction(ctx, conn, op, seq, kind, (snap, counts) => {
     const currentLevel = snap.levels[kind];
     const kindInQueue = snap.queue.some((item) => item.kind === kind);
     const maxLevel = buildingLevelMax(kind, snap.famousName);
@@ -173,15 +180,20 @@ export async function handleUpgrade(
     if (!verdict.ok) {
       return verdict;
     }
-    return { ...verdict, kind, fromLevel: currentLevel, dueSeconds: upgradeSeconds(currentLevel) };
+    return { ...verdict, kind, fromLevel: currentLevel, dueSeconds: upgradeSeconds(currentLevel, constructionReductionPercent(snap.techs)) };
   });
 }
 
 /** 连续升级的整链计划（响应体 chain）：每级 { level, cost, seconds }，秒为该级单级时长（未加速基准由服务端缩放后给出） */
-function upgradeChainPlan(kind: BuildingKind, fromLevel: number, toLevel: number): Array<{ level: number; cost: Resources; seconds: number }> {
+function upgradeChainPlan(
+  kind: BuildingKind,
+  fromLevel: number,
+  toLevel: number,
+  reducePercent: number,
+): Array<{ level: number; cost: Resources; seconds: number }> {
   const plan: Array<{ level: number; cost: Resources; seconds: number }> = [];
   for (let level = fromLevel + 1; level <= toLevel; level += 1) {
-    plan.push({ level, cost: upgradeCost(kind, level - 1), seconds: upgradeSeconds(level - 1) });
+    plan.push({ level, cost: upgradeCost(kind, level - 1), seconds: upgradeSeconds(level - 1, reducePercent) });
   }
   return plan;
 }
@@ -308,20 +320,11 @@ export async function handleExchange(
   });
 }
 
-/** builds.cost 成本快照 → Resources（旧数据无快照时按零返还） */
-function refundOf(row: { cost?: Record<string, unknown> | null }): Resources {
-  const refund: Resources = { gold: 0, wood: 0, food: 0, stone: 0, iron: 0 };
-  const cost = row.cost ?? {};
-  for (const key of RESOURCE_KEYS) {
-    const value = cost[key];
-    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
-      refund[key] = Math.floor(value);
-    }
-  }
-  return refund;
-}
-
-/** 取消排队条目（v7：仅 status=queued 可取消；成本按快照全额返还，占位规则） */
+/** 取消建造条目（v7 仅排队可取消；v71 AISLG-190 起在建条目也可取消）：条件翻转守卫 builds 行
+ * （status 为 queued / building 才生效，Worker 到点完成按 status='building' 守卫，先翻转者生效），
+ * 再在城池行锁内返还（规则见 common/src/build-cancel.ts 的 cancelRefundOf，v87 起与上线迁移、
+ * 换主城共用）；建筑等级不变，同事务激活该城排队的下一条并推送 build_started。
+ */
 export async function handleCancelBuild(
   ctx: HandlerContext,
   conn: ConnInfo,
@@ -338,7 +341,7 @@ export async function handleCancelBuild(
     // 先锁 builds 再锁 cities（下方快照），与 Worker 的锁序一致，不构成死锁环
     const upd = await client.query(
       `UPDATE builds SET status = 'cancelled', due_at = NULL, completed_at = NULL
-       WHERE id = $1 AND account_id = $2 AND status = 'queued'
+       WHERE id = $1 AND account_id = $2 AND status IN ('queued', 'building')
        RETURNING *`,
       [buildId, accountId],
     );
@@ -357,7 +360,7 @@ export async function handleCancelBuild(
       return;
     }
     // 返还不受仓储上限钳制（上限只作用于产出增量；占位规则）
-    const refund = refundOf(build);
+    const refund = cancelRefundOf(build);
     const refunded: Resources = { ...snap.resources };
     for (const key of RESOURCE_KEYS) {
       refunded[key] += refund[key];
@@ -374,6 +377,18 @@ export async function handleCancelBuild(
       initiator: role,
       detail: { kind: build.kind, level: build.level, refund },
     });
+    // 让出的在建位立即由该城排队的下一条接上（与 Worker 同一激活写法；无排队时无操作）
+    const activated = await activateQueuedBuilds<BuildRow & { cost: Record<string, unknown> | null }>(client, snap.cityId);
+    for (const row of activated) {
+      await insertEvent(client, {
+        accountId,
+        cityId: snap.cityId,
+        buildId: row.id,
+        type: EventType.BUILD_STARTED,
+        initiator: row.initiator as InitiatorRole,
+        detail: { kind: row.kind, cost: row.cost ?? {}, level: row.level, ...(row.to_level ? { toLevel: row.to_level } : {}), fromQueue: true },
+      });
+    }
     await client.query('COMMIT');
 
     const view = buildView(build);
@@ -383,6 +398,13 @@ export async function handleCancelBuild(
       { op: Op.PUSH_BUILD_STATE, push: true, data: { reason: 'build_cancelled', build: view } },
       conn,
     );
+    for (const row of activated) {
+      ctx.registry.broadcast(accountId, {
+        op: Op.PUSH_BUILD_STATE,
+        push: true,
+        data: { reason: 'build_started', build: buildView(row) },
+      });
+    }
   } catch (err) {
     await client.query('ROLLBACK').catch(() => undefined);
     throw err;

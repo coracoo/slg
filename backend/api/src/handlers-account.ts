@@ -12,6 +12,7 @@ import type { HandlerContext } from './handlers';
 import type { ConnInfo } from './connections';
 import { loadCityState, lockCitySnapshot } from './views';
 import { CITY_NAME_MAX } from './handlers-city';
+import { destroyFacilitiesOfCity } from '../../common/src/facility-db';
 
 /** 昵称长度上限（v52）：与 LOGIN 密码分支的用户名同限（1..32）——昵称就是账号 username */
 export const NICKNAME_MAX = 32;
@@ -191,6 +192,13 @@ export async function handleResetAccount(
       await client.query(`DELETE FROM builds WHERE account_id = $1`, [accountId]);
       // 征兵队列与历史一并清空（v11）
       await client.query(`DELETE FROM recruits WHERE account_id = $1`, [accountId]);
+      // 城防器械打造队列与历史一并清空（v73，AISLG-193）；库存随城池行处理
+      await client.query(`DELETE FROM defense_crafts WHERE account_id = $1`, [accountId]);
+      // 协防部队（v74，AISLG-194）：本账号派出 / 被协防的记录随重置清空（部队随之消失）
+      await client.query(
+        `DELETE FROM city_assist WHERE account_id = $1 OR city_id IN (SELECT id FROM cities WHERE account_id = $1)`,
+        [accountId],
+      );
       // v27（AISLG-77）：科技等级与研究记录一并清空（回到开号初始状态）
       await client.query(`DELETE FROM tech_research WHERE account_id = $1`, [accountId]);
       // v29（AISLG-76）：黄巾之乱的个人贡献一并清空
@@ -201,6 +209,8 @@ export async function handleResetAccount(
       // 战报与侦察情报属账号游戏数据（v13）：一并清空
       await client.query(`DELETE FROM battle_reports WHERE account_id = $1`, [accountId]);
       await client.query(`DELETE FROM scout_intel WHERE account_id = $1`, [accountId]);
+      // 设为主城的冷却（v82，AISLG-205）：重置后视同新号，第一次设为主城不受冷却
+      await client.query(`DELETE FROM capital_swaps WHERE account_id = $1`, [accountId]);
       // 竞技场席位（v53，AISLG-150）：删除本账号的榜上席位，其后名次整体前移，榜单保持连续（与 joinArena 的 max+1 口径一致）。
       // 先拿竞技场锁再碰城池行，与竞技场流程的锁序一致
       await lockArena(client);
@@ -229,6 +239,10 @@ export async function handleResetAccount(
          )`,
         [cityIds],
       );
+      // v97（AISLG-232）：野地上的望楼随占领一并清掉（不退款；主人收到 facility_lost）
+      for (const id of cityIds) {
+        await destroyFacilitiesOfCity(client, id, 'reset');
+      }
       await client.query(
         `UPDATE world_tiles SET owner_city_id = NULL, npc = NULL,
                 kind = CASE WHEN kind = 'city' THEN 'wilderness' ELSE kind END
@@ -241,6 +255,8 @@ export async function handleResetAccount(
         `DELETE FROM city_buildings WHERE city_id = ANY($1::uuid[])`,
         [cityIds],
       );
+      // 城防器械库存随重置清空（v73，AISLG-193）：城还在，但器械回到零库存
+      await client.query(`DELETE FROM city_defenses WHERE city_id = ANY($1::uuid[])`, [cityIds]);
     await client.query(`DELETE FROM city_army WHERE city_id = ANY($1::uuid[])`, [cityRes.rows.map((row: { id: string }) => row.id)]);
     // 复原开号之初（与注册同一套 INITIAL_* 常量）：资源、人口、自带建筑（1 级官府）
     await client.query(
@@ -261,13 +277,18 @@ export async function handleResetAccount(
     );
     // 自带建筑与开号之初一致（共用 main-city.ts）；重置后账号只剩主城一座
     await insertInitialBuildings(client, [firstCityId]);
+    // 剧本战场（v75，AISLG-198）：报名 / 队伍 / 军功余额随账号数据一起清空
+    await client.query(`DELETE FROM battlefield_squads WHERE account_id = $1`, [accountId]);
+    await client.query(`DELETE FROM battlefield_participants WHERE account_id = $1`, [accountId]);
+    await client.query(`DELETE FROM battlefield_merit WHERE account_id = $1`, [accountId]);
     await client.query(`DELETE FROM events WHERE account_id = $1`, [accountId]);
     // Agent 自报计划属账号数据的一部分，一并清空（v10）
     await client.query(`DELETE FROM agent_plans WHERE account_id = $1`, [accountId]);
     // Agent 离线日报同属账号数据，一并清空（v23 AISLG-54）
     await client.query(`DELETE FROM agent_daily_reports WHERE account_id = $1`, [accountId]);
     // 累计掠夺台账随重置清零（v23 AISLG-61）
-    await client.query(`UPDATE accounts SET plunder_total = 0 WHERE id = $1`, [accountId]);
+    await client.query(`UPDATE accounts SET plunder_total = 0, prestige = 0, nobility = 0 WHERE id = $1`, [accountId]);
+    await client.query(`DELETE FROM nobility_claims WHERE account_id = $1`, [accountId]);
     // v38（AISLG-122）：重置 = 回到开号初始状态——重新进入新手保护（3 天基准随缩放），
     // 清掉主动免战与本城被动免战（免战是「城被攻破」的产物，重置后不再是）
     await client.query(

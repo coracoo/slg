@@ -1,5 +1,6 @@
 // 断粮哗变（v34，AISLG-107）的共用规则：城池粮食为 0 且净产量为负时，每过 1 小时（随全局时间倍速缩放）
-// 该城**城内驻军**每个兵种减少 10%（向上取整、至少 1 个；没有逃兵系统，减少的直接损失）；在外部队
+// 该城**城内驻军**每个兵种减少 10%（向上取整、至少 1 个；v85 AISLG-212 起减少的进这座城的逃兵营，
+// 断粮结束后可花征兵资源 50% 劝回，24 小时不处理就没了）；在外部队
 // （行军中 / 驻守野地）不强制召回，但耗粮照常计入（所以出征多也会加速断粮）。粮食恢复为正或净产量转正即停。
 // 预计断粮时间 starveAt 随 CityView 下发，距断粮不足 1 小时（缩放后）推送一次预警。
 // 旧口径「断粮仅停止增长、部队不解散」（v14）由本规则取代；全部数值为占位，上线后按数据调整。
@@ -20,6 +21,39 @@ export function mutinyIntervalMs(): number {
 
 export function starveWarningLeadMs(): number {
   return scaledMs(STARVE_WARNING_LEAD_HOURS * 3_600_000);
+}
+
+/** 断粮扫描的复查间隔下限（毫秒，真实时间）；与 Worker 扫描节流同值 */
+export const STARVATION_RECHECK_MIN_MS = 10_000;
+/** 复查间隔上限（真实时间）；时间倍速很大时按预警提前量的 1/4 再收紧 */
+export const STARVATION_RECHECK_MAX_MS = 300_000;
+
+/**
+ * 断粮扫描的下次复查时刻（毫秒时间戳）。离断粮越远查得越稀，省掉对「粮食很充裕」的城每 10 秒一次的全量结算：
+ * - 不会断粮（净产量 ≥ 0）：按上限间隔复查，兜住期间补兵 / 派兵 / 卖粮把净产量拉负的情况；
+ * - 预警窗口之外：取到预警线剩余时间的一半（上限同上）；
+ * - 预警窗口之内：等到预计断粮时刻；已断粮：等到下次哗变时刻。
+ * 上限取 min(5 分钟, 预警提前量 / 4)，倍速下预警提前量按真实时间缩短，复查也随之变密。
+ */
+export function nextStarvationCheckMs(
+  nowMs: number,
+  starveAtMs: number | null,
+  starving: boolean,
+  mutinyNextMs: number | null,
+  leadMs: number,
+): number {
+  const cap = Math.max(STARVATION_RECHECK_MIN_MS, Math.min(STARVATION_RECHECK_MAX_MS, leadMs / 4));
+  let target: number;
+  if (starving) {
+    target = mutinyNextMs ?? nowMs + cap;
+  } else if (starveAtMs === null) {
+    target = nowMs + cap;
+  } else if (starveAtMs - leadMs > nowMs) {
+    target = nowMs + (starveAtMs - leadMs - nowMs) / 2;
+  } else {
+    target = starveAtMs;
+  }
+  return nowMs + Math.min(cap, Math.max(STARVATION_RECHECK_MIN_MS, target - nowMs));
 }
 
 export interface StarvationProjection {

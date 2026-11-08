@@ -15,6 +15,7 @@ export const CITY_COPY_EN = {
     branchLocked: (minGovernment: number) =>
       `From Main City Government Hall Lv ${minGovernment}, NPC cities can be occupied as Branch Cities`,
     switching: 'Switching…',
+    locate: 'Locate',
   },
   /** 出征任务：占领 NPC 城（变分城） */
   worldMap: {
@@ -82,6 +83,16 @@ export const CITY_COPY_EN = {
       'Outer ring cleared: march out within the time limit to attack the keeper — plunder the stockpile or occupy ' +
       'the city as a Branch City (occupying grants an exclusive output bonus); when time runs out, the outer-ring ' +
       'garrisons refill',
+  },
+  nobility: {
+    label: 'Title / Nobility',
+    meta: (title: string, name: string) => `${title} · ${name}`,
+    claim: 'Claim daily salary',
+    claimed: 'Salary claimed today',
+    noNobility: 'Commoners receive no salary',
+    claimFailed: 'Failed to claim salary, please retry',
+    salary: (gold: number) => `Today's salary: ${gold} gold`,
+    promoted: (actor: string, name: string) => `${actor} was promoted to ${name}`,
   },
   errors: {
     governmentTooLow:

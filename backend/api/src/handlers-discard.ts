@@ -9,21 +9,25 @@
 import pg from 'pg';
 import { EventType, Op, type ErrorCode, type InitiatorRole } from '../../common/src/protocol';
 import { insertEvent } from '../../common/src/events';
+import { refreshLuoyangHolder } from '../../common/src/luoyang-db';
 import { loadBuildingLevels } from '../../common/src/production';
-import { discardCooldownDays } from '../../common/src/branch-city';
+import { discardCooldownUntil } from '../../common/src/branch-city-db';
+import { moveNpcLevelOf } from '../../common/src/move-city';
 import { FAMOUS_CITY_LEVEL, famousGarrisons, newFamousState } from '../../common/src/famous-city';
 import { npcSnapshot, type NpcCitySnapshot } from '../../common/src/world';
+import { cityInBattle } from '../../common/src/city-battle';
 import { scaledMs } from '../../common/src/time-scale';
 import { currentCityId } from './city-scope';
 import { respondError, respondOk } from './frames';
 import type { HandlerContext } from './handlers';
 import type { ConnInfo } from './connections';
 import { lockCitySnapshot } from './views';
-
-const DAY_MS = 24 * 60 * 60 * 1000;
+import { returnAssistsForCity } from '../../common/src/city-assist-db';
+import { destroyFacilitiesOfCity } from '../../common/src/facility-db';
+import { cancelSiegesForCity } from '../../common/src/faction-siege-db';
 
 type DiscardOutcome =
-  | { ok: true; cityId: string; x: number; y: number; cooldownUntil: Date }
+  | { ok: true; cityId: string; x: number; y: number; cooldownUntil: Date; assistProviders: string[] }
   | { ok: false; code: ErrorCode };
 
 export async function handleDiscardCity(
@@ -50,7 +54,8 @@ export async function handleDiscardCity(
       respondError(ctx.registry, conn, op, seq, outcome.code);
       return;
     }
-    await insertEvent(client, {
+    await refreshLuoyangHolder(client);
+  await insertEvent(client, {
       accountId,
       cityId: null,
       type: EventType.CITY_DISCARDED,
@@ -70,6 +75,13 @@ export async function handleDiscardCity(
       { op: Op.PUSH_CITY_STATE, push: true, data: { reason: 'city_discarded', cityId } },
       conn,
     );
+    for (const provider of new Set(outcome.assistProviders)) {
+      ctx.registry.broadcast(provider, {
+        op: Op.PUSH_CITY_STATE,
+        push: true,
+        data: { reason: 'assist_changed', cityId },
+      });
+    }
   } catch (err) {
     await client.query('ROLLBACK').catch(() => undefined);
     throw err;
@@ -109,16 +121,8 @@ async function discardCityTx(client: pg.PoolClient, accountId: string, cityId: s
   if (outside.rowCount) {
     return { ok: false, code: 'ARMY_OUTSIDE' };
   }
-  // 战斗中：有行军正指向本城或其名下野地，或本城有未结的 NPC 来袭
-  const inBattle = await client.query(
-    `SELECT 1 FROM marches m JOIN world_tiles wt ON wt.x = m.x AND wt.y = m.y
-     WHERE wt.owner_city_id = $1 AND m.status = 'marching'
-     UNION ALL
-     SELECT 1 FROM npc_attacks WHERE target_city_id = $1 AND resolved_at IS NULL
-     LIMIT 1`,
-    [cityId],
-  );
-  if (inBattle.rowCount) {
+  // 战斗中：有行军正指向本城或其名下野地，或本城有未结的 NPC 来袭（v84 起与遣散士兵共用同一判定）
+  if (await cityInBattle(client, cityId)) {
     return { ok: false, code: 'CITY_IN_BATTLE' };
   }
   // 名下野地驻军须先召回
@@ -134,10 +138,10 @@ async function discardCityTx(client: pg.PoolClient, accountId: string, cityId: s
   const originRes = await client.query(`SELECT origin_level, famous_name FROM cities WHERE id = $1`, [cityId]);
   const origin = originRes.rows[0] as { origin_level: number | null; famous_name: string | null };
   const levels = await loadBuildingLevels(client, cityId);
-  const cooldownUntil = await cooldownFrom(client, discardCooldownDays(levels.government) * DAY_MS);
+  const cooldownUntil = await discardCooldownUntil(client, levels.government);
 
   // 地块回到 NPC 城池：名城按登记恢复为未攻破的名城（城守阶段守军、外围满编）；普通城按来源等级
-  const level = origin.famous_name ? FAMOUS_CITY_LEVEL : clampNpcLevel(origin.origin_level ?? 1);
+  const level = origin.famous_name ? FAMOUS_CITY_LEVEL : moveNpcLevelOf(origin.origin_level);
   const base = npcSnapshot(level);
   const npc: NpcCitySnapshot = origin.famous_name
     ? { ...base, garrison: famousGarrisons(level).keeper, famous: newFamousState(origin.famous_name, level) }
@@ -151,20 +155,16 @@ async function discardCityTx(client: pg.PoolClient, accountId: string, cityId: s
      ON CONFLICT (x, y) DO UPDATE SET account_id = EXCLUDED.account_id, until = EXCLUDED.until`,
     [tile.x, tile.y, accountId, cooldownUntil],
   );
+  // v74（AISLG-194）：放弃的城若有人协防，协防部队先自动遣返原派出方（否则随城级联消失）
+  const returned = await returnAssistsForCity(client, cityId, 'city_discarded');
+  // v97（AISLG-232）：该城名下野地上的望楼一并毁掉（名下野地转无主；设施行随城级联删除，事件在这里补写）
+  await destroyFacilitiesOfCity(client, cityId, 'city_lost');
+  // v100（AISLG-240）：城被放弃，正在围攻这座城的势力本次围攻作废（不战斗）
+  await cancelSiegesForCity(client, cityId);
   // 名下野地转为无主（owner_city_id 外键 ON DELETE SET NULL），随后删除城池行：
   // 建筑、城内驻军、建造 / 征兵 / 研究队列与城守任命随外键级联清理（资源随城作废）
   await client.query(`DELETE FROM cities WHERE id = $1`, [cityId]);
-  return { ok: true, cityId, x: tile.x, y: tile.y, cooldownUntil };
+  return { ok: true, cityId, x: tile.x, y: tile.y, cooldownUntil, assistProviders: returned.map((row) => row.providerAccountId) };
 }
 
-/** 冷却截止 = 数据库当前时刻 + 基准时长（按时间缩放） */
-async function cooldownFrom(client: pg.PoolClient, baseMs: number): Promise<Date> {
-  const res = await client.query(`SELECT now() AS db_now`);
-  const now = (res.rows[0] as { db_now: Date }).db_now;
-  return new Date(new Date(now).getTime() + scaledMs(baseMs));
-}
-
-function clampNpcLevel(level: number): number {
-  return Math.min(FAMOUS_CITY_LEVEL, Math.max(1, Math.floor(level)));
-}
 

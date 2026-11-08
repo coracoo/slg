@@ -25,18 +25,43 @@ type DrawnSide = Exclude<MapOverviewSide, 'npc'>;
 
 /** 各归属的绘制参数：颜色取主题变量（缺省用兜底色），边长（像素） */
 const DOT_STYLE: Record<DrawnSide, { cssVar: string; fallback: string; size: number }> = {
+  // famous_rumor（AISLG-224）：未探索名城的大致方位，半透明的金色点
+  famous_rumor: { cssVar: '--gold', fallback: '#d9a441', size: 4 },
   enemy: { cssVar: '--warn', fallback: '#e0653a', size: 2 },
+  // 遗迹 / 名将处所（v93，AISLG-227）：遗迹青色小点，处所金色（已出山则灰）
+  relic: { cssVar: '--accent', fallback: '#2dd4bf', size: 3 },
+  hero_site: { cssVar: '--gold', fallback: '#d9a441', size: 4 },
+  hero_site_claimed: { cssVar: '--muted', fallback: '#8a8f98', size: 3 },
   famous: { cssVar: '--gold', fallback: '#d9a441', size: 4 },
   own: { cssVar: '--accent', fallback: '#2dd4bf', size: 3 },
+  friendly: { cssVar: '--ok', fallback: '#4ade80', size: 3 },
+  hostile: { cssVar: '--st-error', fallback: '#ef4444', size: 3 },
   // 盟友（v67，AISLG-182）：绿色，比他方大一点便于一眼认出
   ally: { cssVar: '--st-online', fallback: '#34d399', size: 3 },
 };
 /** 绘制顺序：名城在他方之上，本方城池最后盖在最上面 */
-const DRAW_ORDER: DrawnSide[] = ['enemy', 'ally', 'famous', 'own'];
+const DRAW_ORDER: DrawnSide[] = ['enemy', 'ally', 'famous', 'famous_rumor', 'relic', 'hero_site', 'hero_site_claimed', 'own'];
 
 function themeColor(cssVar: string, fallback: string): string {
   const value = getComputedStyle(document.documentElement).getPropertyValue(cssVar).trim();
   return value || fallback;
+}
+
+/** 迷雾（AISLG-224）：未探索的区块压暗（探索位图按 10×10 区块；迷雾关闭时没有位图，不画） */
+function drawFog(ctx: CanvasRenderingContext2D, data: MapOverviewResponseData, dpr: number) {
+  if (!data.exploredChunks) {
+    return;
+  }
+  const bytes = Uint8Array.from(atob(data.exploredChunks), (ch) => ch.charCodeAt(0));
+  const cell = (MINIMAP_SIZE_PX * dpr) / (data.size / 10);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+  for (let index = 0; index < bytes.length * 8; index += 1) {
+    if ((bytes[index >> 3] & (1 << (index & 7))) === 0) {
+      const cx = index % 100;
+      const cy = Math.floor(index / 100);
+      ctx.fillRect(Math.round(cx * cell), Math.round(cy * cell), Math.ceil(cell), Math.ceil(cell));
+    }
+  }
 }
 
 function drawDots(canvas: HTMLCanvasElement, data: MapOverviewResponseData, dpr: number) {
@@ -46,9 +71,11 @@ function drawDots(canvas: HTMLCanvasElement, data: MapOverviewResponseData, dpr:
   }
   const scale = (MINIMAP_SIZE_PX * dpr) / data.size;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawFog(ctx, data, dpr);
   for (const side of DRAW_ORDER) {
     const style = DOT_STYLE[side];
     ctx.fillStyle = themeColor(style.cssVar, style.fallback);
+    ctx.globalAlpha = side === 'famous_rumor' ? 0.55 : 1;
     const edge = style.size * dpr;
     for (const [x, y, dotSide] of data.cities) {
       if (dotSide === side) {
@@ -123,6 +150,9 @@ export function WorldMinimap({ overview, win, onPanTo }: WorldMinimapProps) {
       </button>
       {open ? (
         <div role="世界地图视图-小地图" className="pointer-events-auto flex flex-col gap-1.5 rounded-md border border-line-soft bg-panel/90 p-1.5">
+          {data?.exploredPercent !== undefined ? (
+            <p role="小地图-探索进度" className="text-[11px] text-muted">{copy.EXTRA_MAP.fog.exploredPercent(data.exploredPercent)}</p>
+          ) : null}
           <div
             role="世界地图视图-小地图-画布"
             title={MAPUI_COPY.minimapHint}

@@ -11,6 +11,8 @@ export const CITY_COPY = {
     branchQuota: (count: number, limit: number) => `分城 ${count}/${limit}`,
     branchLocked: (minGovernment: number) => `主城官府 ${minGovernment} 级起可占领 NPC 城变分城`,
     switching: '切换中…',
+    /** 行内「定位」：地图居中到该城并选中，不切换当前城池（AISLG-203） */
+    locate: '定位',
   },
   /** 出征任务：占领 NPC 城（变分城） */
   worldMap: {
@@ -64,6 +66,16 @@ export const CITY_COPY = {
     cityBonusRow: (percent: number) => `名城加成：产量 +${percent}%`,
     hintOuter: '名城分两阶段：先出征清理外围（打赢无战利品），外围清空后限时内再出征攻城守；外围未清时不能直接占领',
     hintKeeper: '外围已清空：限时内出征攻城守——掠夺库存或占领变分城（占领独享产量加成）；超时外围恢复满编',
+  },
+  nobility: {
+    label: '称号 / 爵位',
+    meta: (title: string, name: string) => `${title} · ${name}`,
+    claim: '领取今日俸禄',
+    claimed: '今日俸禄已领',
+    noNobility: '平民暂无俸禄',
+    claimFailed: '领取俸禄失败，请稍后再试',
+    salary: (gold: number) => `今日俸禄 ${gold} 金`,
+    promoted: (actor: string, name: string) => `${actor} 晋爵为${name}`,
   },
   errors: {
     governmentTooLow: '占领 NPC 城需要主城官府达到指定等级（见分城名额提示）',

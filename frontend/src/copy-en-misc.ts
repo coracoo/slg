@@ -60,6 +60,11 @@ export const EVENTS_PANEL_EN = {
   viewReport: 'Report',
   // Scout events carry intel: the chip opens the scout report dialog.
   viewScoutReport: 'Scout',
+  // City name tag on each row when the account owns 2+ cities: placeholder + hint when the city is gone.
+  cityGone: 'Former city',
+  cityGoneHint: 'This city is no longer yours',
+  // Hover text of the city tag: full name + click to switch
+  cityTagHint: (name: string) => `${name} (click to switch to this city)`,
 } satisfies typeof COPY['eventsPanel'];
 
 export const LOGIN_EN = {
@@ -115,7 +120,8 @@ export const ERRORS_EN = {
     buildingExists: 'A building of this type already exists or is under construction/upgrade — you cannot start another one',
     buildingNotBuilt: 'This building type is not built yet — build it first, then upgrade',
     buildingLevelMax: 'The building has reached its level cap and cannot be upgraded further',
-    buildNotCancellable: 'Only queued build tasks can be cancelled',
+    buildingMainOnly: 'The Tavern and Academy can only be built in your main city — switch back to the main city to build or upgrade them',
+    buildNotCancellable: 'Build task not found, not yours, or already completed / cancelled',
     invalidParams: 'Invalid building type',
     fallback: 'Failed to start the build',
   },
@@ -132,9 +138,24 @@ export const ERRORS_EN = {
     insufficientResources: 'Not enough resources for this recruitment (current resources in the top bar)',
     insufficientPopulation: 'Not enough population to recruit that many (population grows over time; Houses raise the cap)',
     queueFull: 'Recruit queue is full — wait for the first task to finish before queueing another',
-    notCancellable: 'Only queued recruit tasks can be cancelled',
+    notCancellable: 'Recruit task not found, not yours, or already completed / cancelled',
     invalidParams: 'Invalid recruit parameters (unknown troop type or out-of-range count)',
     fallback: 'Failed to start recruitment',
+  },
+  // v84 (AISLG-209): disband troops
+  disband: {
+    insufficientTroops: 'The number to disband exceeds the troops of that type currently in the city (troops away or garrisoned in the field do not count)',
+    cityInBattle: 'A march is heading for this city (or its wilderness), or an NPC attack is still open, so disbanding is unavailable for now',
+    invalidParams: 'Invalid disband parameters (unknown troop type, or a count that is not a positive integer)',
+    fallback: 'Failed to disband troops, please retry',
+  },
+  // v85 (AISLG-212): heal / recruit / recall for the wounded, captives and deserters
+  pools: {
+    invalidParams: 'The count exceeds what the pool holds, or invalid parameters (unknown troop type, non-integer count)',
+    insufficientResources: 'Not enough resources to pay for this heal / recruit / recall (see the top bar for current resources)',
+    insufficientPopulation: 'Not enough population to recruit this many captives (population grows over time; Houses raise the cap)',
+    cityStarving: 'This city is starving; deserters can only be recalled after the famine ends',
+    fallback: 'Operation failed, please retry',
   },
   exchange: {
     insufficientResources: 'Not enough of that resource for this exchange',
@@ -145,6 +166,8 @@ export const ERRORS_EN = {
     targetNotAttackable: 'This target cannot be marched against yet (player cities and tiles occupied by others; PvP opens in a later phase)',
     insufficientTroops: 'Not enough troops in the city for this formation (troops on the march are not in the city)',
     tileNotOccupied: 'This tile is not occupied by your account, so its garrison cannot be recalled',
+    garrisonWouldEmpty: 'A partial recall cannot empty the tile: at least 1 troop must stay (to recall everything, use "Recall all", which abandons the occupation)',
+    insufficientGarrison: 'The number to recall exceeds the tile garrison for that troop type; check the counts per type',
     invalidParams: 'Invalid march parameters (coordinates out of bounds, empty formation, or invalid task value)',
     plunderCooldown: 'This tile was just plundered successfully and is in plunder cooldown (occupying is not limited by the cooldown)',
     taskInvalidForTarget: 'This task does not apply to that target (NPC cities support plunder only)',
@@ -183,7 +206,17 @@ export const SESSION_EN = {
   recruitFailedFallback: 'Failed to start recruitment',
   cancelRecruitRejected: (message: string) => `Recruit cancellation rejected (${message})`,
   cancelRecruitFailedFallback: 'Failed to cancel recruitment',
+  // v84 (AISLG-209): disband troops
+  troopsDisbanded: (troops: string, refund: string) => `Disbanded ${troops}; refunded ${refund}`,
+  troopsDisbandedRejected: (message: string) => `Disband rejected (${message})`,
+  // v85 (AISLG-212): heal / recruit / recall and abandon / release
+  troopsRestored: (label: string, troops: string, cost: string) => `${label} ${troops}, cost ${cost}`,
+  troopsRestoredRejected: (message: string) => `Restore rejected (${message})`,
+  troopsReleased: (label: string, troops: string) => `${label} ${troops}, nothing is refunded`,
+  troopsReleasedRejected: (message: string) => `Release rejected (${message})`,
   marchStarted: (x: number, y: number, dueClock: string) => `Troops marching out → (${x},${y}), due ${dueClock}`,
+  recallPartialStarted: (x: number, y: number, dueClock: string) =>
+    `Part of the garrison departing (${x},${y}) for home, due ${dueClock}; occupation kept`,
   recallStarted: (x: number, y: number, dueClock: string) =>
     `Garrison departing (${x},${y}) for home, due ${dueClock}; occupation abandoned`,
   scoutStarted: (x: number, y: number, count: number, dueClock: string) =>
@@ -235,4 +268,8 @@ export const TRUCE_COPY_EN = {
     return `This week's Truce Shield has been used (once per week) — you can enable it again in about ${hours} hours`;
   },
   errFallback: 'Failed to enable Truce Shield, please try again later',
+  cancelledText: 'Truce Shield ended early (this week’s use is not refunded)',
+  errNotActive: 'No active Truce Shield to end',
+  errPassive: 'Your city is under passive protection (after being conquered or raided) and the shield cannot be ended early',
+  cancelFallback: 'Failed to end the Truce Shield early, please try again later',
 } satisfies typeof COPY['truce'];

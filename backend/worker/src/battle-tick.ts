@@ -13,7 +13,8 @@
 // - 锁序与全栈统一：cities → world_tiles（本文件只做结算，锁由调用方持有）。
 
 import { degradeGarrison } from '../../common/src/scout-detail';
-import type { TechLevels } from '../../common/src/tech';
+import { combatTechBonus, type TechLevels } from '../../common/src/tech';
+import { loadTechLevels } from '../../common/src/tech-db';
 import pg from 'pg';
 import { EventType, RESOURCE_KEYS, type InitiatorRole, type Resources, type TroopKind } from '../../common/src/protocol';
 import { insertEvent } from '../../common/src/events';
@@ -26,7 +27,10 @@ import {
   wallDefensePercent,
   type BattleResult,
 } from '../../common/src/battle';
+import { splitBattleCasualties } from '../../common/src/battle-casualties';
+import { recordPoolTroops } from '../../common/src/troop-pools-db';
 import type { ScoutIntel } from '../../common/src/protocol-battle';
+import type { DefenseScoutView } from '../../common/src/protocol-defense';
 import { famousEncounter } from '../../common/src/famous-city';
 import { clearNativeGarrison, loadNativeGarrison, saveNativeGarrison } from '../../common/src/native-garrison';
 import { grantUnlock } from '../../common/src/hero-friendship-db';
@@ -78,8 +82,15 @@ export async function resolveBattleArrival(
     wallDefensePercent: wall,
     siege: tile.kind === 'npc_city',
     attackerHero: hero?.engine ?? null,
+    // v72（AISLG-192）：世界地图战斗吃攻方科技乘数；NPC 守方不吃
+    attackerTech: combatTechBonus(await loadTechLevels(client, march.account_id)),
   });
   const heroSettle = await settleMarchHero(client, march, result, notifies);
+  // v85（AISLG-212）：世界地图战斗统一拆分伤兵 / 俘虏——攻方是玩家、守方是 NPC；
+  // 攻方伤兵与俘虏都进出发城（战斗结算时立即入账，不用等返程）
+  const casualties = splitBattleCasualties(result, false, true);
+  await recordPoolTroops(client, march.from_city_id, 'wounded', casualties.attacker.wounded);
+  await recordPoolTroops(client, march.from_city_id, 'captive', casualties.captives);
   if (!npc) {
     await saveNativeGarrison(client, tile, result.defender.survivors);
   }
@@ -90,6 +101,7 @@ export async function resolveBattleArrival(
     client, march.account_id, 'attacker', result.attackerWon,
     tile.kind === 'npc_city' ? 'npc_city' : 'wilderness',
     tile.x, tile.y, result, attackerName, defenderName, wall, notifies, hero?.report ?? null,
+    null, null, null, casualties,
   );
 
   if (!result.attackerWon) {
@@ -241,6 +253,8 @@ export interface NpcWildernessRaidTarget {
   garrison: Partial<Record<TroopKind, number>>;
   /** 战报守方展示名 */
   defenderName: string;
+  /** v100（AISLG-240）：这次袭击的势力旗号（null / 缺省 = 不在任何势力范围内的普通 NPC 袭击） */
+  faction?: { key: string; name: string; nameEn: string } | null;
   notifies: TileNotify[];
 }
 
@@ -249,12 +263,20 @@ export async function resolveNpcWildernessRaid(
   target: NpcWildernessRaidTarget,
 ): Promise<void> {
   const { tile, level, garrison, accountId, cityId } = target;
-  const raid = resolveNpcRaid(garrison, level);
+  const raid = resolveNpcRaid(garrison, level, undefined, combatTechBonus(await loadTechLevels(client, accountId)));
+  // v85（AISLG-212）：守方是玩家（野地驻军）——伤兵进占领这块野地的城；守住（含全歼
+  // NPC 部队）时玩家从 NPC 损失里抓俘虏（败方是 NPC 也抓）；NPC 打赢时不抓
+  const raidCasualties = splitBattleCasualties(raid.result, true, false);
+  await recordPoolTroops(client, cityId, 'wounded', raidCasualties.defender.wounded);
+  await recordPoolTroops(client, cityId, 'captive', raidCasualties.captives);
   const npcPower = armyPower(npcRaidArmy(level));
   const garrisonPower = armyPower(garrison);
+  const attackerName = target.faction ? `${target.faction.name}袭击部队` : 'NPC 袭击部队';
+  const factionDetail = target.faction ? { faction: target.faction } : {};
   const reportId = await saveBattleReport(
     client, accountId, 'defender', raid.defended, 'npc_raid',
-    tile.x, tile.y, raid.result, 'NPC 袭击部队', target.defenderName, 0, target.notifies,
+    tile.x, tile.y, raid.result, attackerName, target.defenderName, 0, target.notifies,
+    null, null, null, null, raidCasualties,
   );
   // 连胜计数（v23 AISLG-60）：守方视角的胜负同样计入（击退 +1、失守清零；与主城守城同口径）
   const naming = await loadCityNaming(client, cityId);
@@ -287,6 +309,7 @@ export async function resolveNpcWildernessRaid(
       detail: {
         x: tile.x, y: tile.y, target: 'wilderness', level,
         outcome: 'repelled',
+        ...factionDetail,
         npcPower, garrisonPower, rounds: raid.result.rounds,
         losses: raid.result.defender.losses, reportId,
       },
@@ -294,7 +317,8 @@ export async function resolveNpcWildernessRaid(
     target.notifies.push({ reason: 'tile_changed', accountId, x: tile.x, y: tile.y, tileReason: 'npc_attack_repelled' });
     return;
   }
-  await clearTileOccupation(client, tile.x, tile.y);
+  // v97（AISLG-232）：驻军全灭即失地，望楼随之毁掉
+  await clearTileOccupation(client, tile.x, tile.y, 'npc_attack');
   await insertEvent(client, {
     accountId,
     cityId,
@@ -303,6 +327,7 @@ export async function resolveNpcWildernessRaid(
     detail: {
       x: tile.x, y: tile.y, target: 'wilderness', level,
       outcome: 'garrison_lost',
+      ...factionDetail,
       npcPower, garrisonPower, rounds: raid.result.rounds,
       losses: raid.result.defender.losses, reportId,
     },
@@ -326,6 +351,8 @@ export function buildScoutIntel(
   techs?: TechLevels,
   /** v38（AISLG-122）：玩家城目标的城墙减伤（城墙 + 守方城防科技，守城战同口径）；其余目标不传 */
   pvpWallPercent?: number,
+  /** v73（AISLG-193）：玩家城目标的城防器械（已按侦察科技降级）；野地 / NPC 城为 null */
+  defenses?: DefenseScoutView | null,
 ): ScoutIntel {
   const npc = tile.kind === 'npc_city' ? (tile.npc as NpcCitySnapshot | null) : null;
   // 名城：情报即当前阶段口径（外围 = 野战无城墙，城守 = 攻城战含城墙）
@@ -346,6 +373,7 @@ export function buildScoutIntel(
       ? pvpWallPercent
       : npc && (!encounter || encounter.siege) ? wallDefensePercent((npc.buildings?.wall as number | undefined) ?? 0) : 0,
     npcStock: npc ? npc.stock ?? null : null,
+    ...(tile.kind === 'city' ? { defenses: defenses ?? null } : {}),
     scoutedAt: at,
     ...(encounter && npc?.famous ? { famous: { name: npc.famous.name, stage: encounter.stage } } : {}),
   };

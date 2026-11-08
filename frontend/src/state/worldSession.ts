@@ -22,9 +22,11 @@ import {
   type TileStatePushData,
   type TileView,
   type TroopKind,
+  type VisibleMarchView,
   type WorldMapResponseData,
 } from '../api/protocol';
 import { cargoText, formatClock, marchErrorText } from '../api/mapping';
+import { facilityErrorText } from '../api/errorText';
 import { getCopy } from '../i18n/bundle';
 import type { Actor } from '../types';
 import { applyMarchResult } from './cityUpdates';
@@ -42,6 +44,13 @@ export interface ScoutRecord {
   id: number;
   intel: ScoutIntel;
   at: string;
+}
+
+/** 视野内他人部队的一次快照（AISLG-230）：marches 是该窗口的全部结果，receivedAt 为本地接收时刻（外推基准） */
+export interface EnemyMarchSnapshot {
+  serverTime: string;
+  receivedAt: number;
+  marches: VisibleMarchView[];
 }
 
 export interface WorldSessionDeps {
@@ -91,11 +100,18 @@ export interface WorldSession {
     /** v36（AISLG-114）：随队武将 id（null / 缺省 = 不带将） */
     heroId?: string | null,
   ) => Promise<boolean>;
-  recall: (x: number, y: number) => Promise<boolean>;
+  /** 召回驻军：不带 troops = 全部撤回并放弃占领；带 troops = 按兵种部分撤回，保留占领（v83） */
+  recall: (x: number, y: number, troops?: Partial<Record<TroopKind, number>>) => Promise<boolean>;
   /** 斥候侦察（SCOUT，v13）：城内扣减斥候、乐观插入侦察行军 */
   scout: (x: number, y: number, count: number, heroId?: string | null) => Promise<boolean>;
   /** 撤回行军途中的部队（RECALL_MARCH，v13）：行军翻转为返程 */
   recallMarch: (marchId: string) => Promise<boolean>;
+  /** 在自己占领的野地上建望楼 / 升级望楼（FACILITY_BUILD，v97 AISLG-232）：成功后对齐城池与地块详情 */
+  buildFacility: (x: number, y: number) => Promise<boolean>;
+  /** 视野内的他人部队（AISLG-230）：最近一次快照（null = 还没拉过 / 已清空） */
+  enemyMarches: EnemyMarchSnapshot | null;
+  /** 拉一次当前窗口的他人部队（地图打开时每 5 秒一次；迷雾关闭时服务端返回空数组） */
+  fetchEnemyMarches: () => Promise<void>;
   /** 战报列表（GET_BATTLE_REPORTS，v13；null = 尚未拉取） */
   battleReports: BattleReportView[] | null;
   reportsLoading: boolean;
@@ -138,6 +154,7 @@ export function useWorldSession(deps: WorldSessionDeps): WorldSession {
   const [detail, setDetail] = useState<TileDetailView | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [enemyMarches, setEnemyMarches] = useState<EnemyMarchSnapshot | null>(null);
   const [battleReports, setBattleReports] = useState<BattleReportView[] | null>(null);
   const [reportsLoading, setReportsLoading] = useState(false);
   const [reportsExhausted, setReportsExhausted] = useState(false);
@@ -223,6 +240,7 @@ export function useWorldSession(deps: WorldSessionDeps): WorldSession {
     },
     [clientRef],
   );
+
 
   const fetchDetail = useCallback(
     async (x: number, y: number) => {
@@ -400,9 +418,9 @@ export function useWorldSession(deps: WorldSessionDeps): WorldSession {
     [clientRef, setCity, appendLocalEvent, scheduleSync, refresh],
   );
 
-  /** 召回驻军（RECALL_GARRISON）：撤回即放弃占领；领地与产量随按需查询对齐 */
+  /** 召回驻军（RECALL_GARRISON）：不带 troops 撤回即放弃占领；带 troops 部分撤回，保留占领（v83）；领地与产量随按需查询对齐 */
   const recall = useCallback(
-    async (x: number, y: number): Promise<boolean> => {
+    async (x: number, y: number, troops?: Partial<Record<TroopKind, number>>): Promise<boolean> => {
       const client = clientRef.current;
       if (!client?.connected) {
         return false;
@@ -410,12 +428,17 @@ export function useWorldSession(deps: WorldSessionDeps): WorldSession {
       setError(null);
       const { COPY, EXTRA_STATE } = getCopy();
       try {
-        const res = await client.request(Op.RECALL_GARRISON, { x, y });
+        const res = await client.request(Op.RECALL_GARRISON, troops ? { x, y, troops } : { x, y });
         if (res.ok) {
           const marchView = field<MarchView>(res.data, 'march');
           if (marchView) {
             setCity((prev) => (prev ? applyMarchResult(prev, marchView) : prev));
-            appendLocalEvent('player', COPY.session.recallStarted(x, y, formatClock(marchView.arriveAt)));
+            appendLocalEvent(
+              'player',
+              troops
+                ? COPY.session.recallPartialStarted(x, y, formatClock(marchView.arriveAt))
+                : COPY.session.recallStarted(x, y, formatClock(marchView.arriveAt)),
+            );
           } else {
             appendLocalEvent('player', EXTRA_STATE.state.recallNoGarrison(x, y));
           }
@@ -502,6 +525,39 @@ export function useWorldSession(deps: WorldSessionDeps): WorldSession {
         return false;
       } catch (err) {
         setError(err instanceof Error ? err.message : EXTRA_STATE.state.recallMarchFailed);
+        return false;
+      }
+    },
+    [clientRef, setCity, appendLocalEvent, scheduleSync, refresh],
+  );
+
+  /** 建望楼 / 升级望楼（FACILITY_BUILD，v97 AISLG-232）：资源从占着这块地的城扣，扣费后的城池状态随响应回来 */
+  const buildFacility = useCallback(
+    async (x: number, y: number): Promise<boolean> => {
+      const client = clientRef.current;
+      if (!client?.connected) {
+        return false;
+      }
+      setError(null);
+      const { EXTRA_MAP, EXTRA_STATE } = getCopy();
+      try {
+        const res = await client.request(Op.FACILITY_BUILD, { x, y });
+        if (res.ok) {
+          const cityNow = field<CityView>(res.data, 'city');
+          if (cityNow) {
+            setCity(() => cityNow);
+          }
+          appendLocalEvent('player', EXTRA_MAP.watchtower.startedLog(x, y));
+          scheduleSync();
+          // 领地列表与地块详情都按权威状态对齐（建造进度只有主人拿得到）
+          void refresh();
+          return true;
+        }
+        setError(facilityErrorText(res.error?.code, res.error?.message, res.data));
+        appendLocalEvent('player', facilityErrorText(res.error?.code, res.error?.message, res.data));
+        return false;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : EXTRA_STATE.state.rejectedFallback);
         return false;
       }
     },
@@ -660,6 +716,32 @@ export function useWorldSession(deps: WorldSessionDeps): WorldSession {
     [fetchScoutRecords],
   );
 
+  /** 视野内他人部队（GET_VISIBLE_MARCHES，v96 AISLG-230）：只请求当前窗口；失败保留旧快照（前端最多外推 6 秒） */
+  const fetchEnemyMarches = useCallback(async () => {
+    const client = clientRef.current;
+    const current = windowRef.current;
+    if (!client?.connected || !current) {
+      return;
+    }
+    try {
+      const res = await client.request(Op.GET_VISIBLE_MARCHES, { x: current.x, y: current.y, w: current.w, h: current.h });
+      if (!res.ok) {
+        return;
+      }
+      const marches = field<VisibleMarchView[]>(res.data, 'marches');
+      if (!Array.isArray(marches)) {
+        return;
+      }
+      setEnemyMarches({
+        serverTime: field<string>(res.data, 'serverTime') ?? new Date().toISOString(),
+        receivedAt: Date.now(),
+        marches,
+      });
+    } catch {
+      // 网络异常：保留旧快照，图标停在 6 秒外推上限处，下一次拉取对齐
+    }
+  }, [clientRef]);
+
   const onTilePush = useCallback(
     (tile: TileView) => {
       setWindow((prev) => {
@@ -714,6 +796,7 @@ export function useWorldSession(deps: WorldSessionDeps): WorldSession {
     reportCacheRef.current.clear();
     scoutRecordsRef.current = null;
     setWindow(null);
+    setEnemyMarches(null);
     setSelected(null);
     setDetail(null);
     setError(null);
@@ -748,6 +831,9 @@ export function useWorldSession(deps: WorldSessionDeps): WorldSession {
       recall,
       scout,
       recallMarch,
+      buildFacility,
+      enemyMarches,
+      fetchEnemyMarches,
       battleReports,
       reportsLoading,
       reportsExhausted,
@@ -791,6 +877,9 @@ export function useWorldSession(deps: WorldSessionDeps): WorldSession {
       recall,
       scout,
       recallMarch,
+      buildFacility,
+      enemyMarches,
+      fetchEnemyMarches,
       fetchBattleReports,
       loadOlderBattleReports,
       fetchBattleReportById,

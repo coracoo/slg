@@ -8,6 +8,7 @@ import { passwordLoginData, passwordSignupErrorText } from '../api/passwordLogin
 import {
   Op,
   type AccountStatePushData,
+  type ItemsStatePushData,
   type AgentInfoView,
   type AgentPlanPushData,
   type BattleReportCommentPushData,
@@ -56,6 +57,9 @@ import {
 import type { Actor, SessionEvent } from '../types';
 import { applyBuildPush, applyBuildResult, applyCancelResult, applyMarchPush, applyRecruitPush } from './cityUpdates';
 import { createRecruitActions } from './recruitActions';
+import { createDisbandActions } from './disbandActions';
+import { createTroopPoolsActions } from './troopPoolsActions';
+import { createDefenseActions } from './defenseActions';
 import { createExchangeAction, type ExchangeResource } from './exchangeAction';
 import { createTruceAction } from './truceAction';
 import { useWorldSession, type WorldSession } from './worldSession';
@@ -66,7 +70,13 @@ import { useHeroSession, type HeroSession } from './heroSession';
 import { useQuestSession, type QuestSession } from './questSession';
 import { useMovingTargets, type MovingTargetsSession } from './movingTargets';
 import { useMapOverview, type MapOverviewSession } from './mapOverview';
+import { useTroopPoolsAllCities, type TroopPoolsAllCitiesSession } from './troopPoolsAllCities';
 import { useYellowTurban, type YellowTurbanSession } from './yellowTurban';
+import { useFactionSession, type FactionSession } from './factionSession';
+import { useBattlefieldSession, type BattlefieldSession } from './battlefield';
+import { useNobilitySession, type NobilitySession } from './nobilitySession';
+import { useMarketSession, type MarketSession } from './marketSession';
+import { useLuoyangSession, type LuoyangSession } from './luoyangSession';
 import { useSessionExtras } from './session-extras';
 import { useChat, type ChatState } from './useChat';
 import { useAnnouncements, type AnnouncementSlice } from './announcements';
@@ -76,6 +86,10 @@ import { useSeasonSession, type SeasonSession } from './seasonSession';
 import { useAllianceSession, type AllianceSession } from './allianceSession';
 import { useAllianceMarks, type AllianceMarksSession } from './allianceMarks';
 import { useHallOfFame, type HallOfFameSession } from './hallOfFame';
+import { useStratagemSession, type StratagemSession } from './stratagemSession';
+import { useItemsSession, type ItemsSession } from './itemsSession';
+import { useMoveCitySession, type MoveCitySession } from './moveCitySession';
+import { clearExplorationReports, pushExplorationReport, type ExplorationReport } from './explorationReport';
 
 /** 断线自动重连间隔（毫秒） */
 const RECONNECT_DELAY_MS = 3000;
@@ -105,6 +119,7 @@ export interface GameSession {
   buildError: string | null;
   /** 征兵 / 取消征兵失败的人读提示（v11，征兵面板内展示） */
   recruitError: string | null;
+  defenseError: string | null;
   city: CityView | null;
   agent: AgentInfoView | null;
   events: SessionEvent[];
@@ -119,20 +134,44 @@ export interface GameSession {
   startBuild: (kind: BuildingKind) => Promise<void>;
   /** 按建筑类型发起升级：缺省升到下一等级；toLevel（当前+2..10，v22）连续升到目标等级 */
   startUpgrade: (kind: BuildingKind, toLevel?: number) => Promise<void>;
-  /** 取消排队中的建造条目（全额返还成本；在建条目不可取消） */
+  /** 取消建造条目（排队中 / 建造中，全额返还成本） */
   cancelBuild: (buildId: string) => Promise<void>;
   /** 发起征兵（v11）：军营等级解锁兵种，发起时扣减资源与人口 */
   startRecruit: (troop: TroopKind, count: number) => Promise<void>;
-  /** 取消排队中的征兵条目（v11，全额返还资源与人口；征募中条目不可取消） */
+  /** 取消征兵条目（v11 排队可取消，v71 起征募中也可取消；全额返还资源与人口） */
   cancelRecruit: (recruitId: string) => Promise<void>;
+  /** 遣散城内驻军（v84，AISLG-209）：返还征兵成本的 50%、不退人口；成功返回 null，失败返回人读错误 */
+  disbandTroops: (troops: Partial<Record<TroopKind, number>>) => Promise<string | null>;
+  /** 治疗 / 招降 / 劝回（v85，AISLG-212）：成功返回 null，失败返回人读错误；cityId 缺省 = 当前城（v88 全城一键处理按城传） */
+  restoreTroops: (pool: import('../api/protocol').TroopPoolKind, troops: Partial<Record<TroopKind, number>>, cityId?: string) => Promise<string | null>;
+  /** 放弃治疗 / 释放俘虏（v85）：免费不返还；成功返回 null，失败返回人读错误；cityId 缺省 = 当前城 */
+  releaseTroops: (pool: import('../api/protocol').TroopPoolKind, troops: Partial<Record<TroopKind, number>>, cityId?: string) => Promise<string | null>;
+  /** 全账号伤兵营（v88，AISLG-218）：全城池子 / 伤兵营可见时 30 秒刷新 / 立即重拉 */
+  troopPoolsAll: TroopPoolsAllCitiesSession;
+  /** 计谋（v86，AISLG-211）：定义 / 令 / 武将预览 / 施计 / 被施计警报 */
+  stratagem: StratagemSession;
+  /** 背包与商店（v90，AISLG-222）：弹窗、目录、礼金购买 */
+  items: ItemsSession;
+  /** 城池迁移（v91，AISLG-220）：指定坐标迁的选点、预览与执行 */
+  moveCity: MoveCitySession;
+  /** 打造城防器械（v73）：count 件，成本 = 单件 × 件数；库存上限 = 城墙等级 × 60 */
+  craftDefense: (kind: import('../api/protocol').DefenseKind, count: number) => Promise<void>;
+  /** 取消打造（v73）：排队中 / 打造中都可取消，成本全额返还 */
+  cancelDefenseCraft: (craftId: string) => Promise<void>;
+  /** 召回 / 遣返协防部队（v74）：派出方召回、城主遣返；成功返回 null，失败返回人读错误 */
+  dismissAssist: (assistId: string) => Promise<string | null>;
   /** 集市兑换（v22，AISLG-67 前端入口）：基础资源按 4:1 换金币；成功返回 null，失败返回人读错误 */
   exchangeGold: (resource: ExchangeResource, amount: number) => Promise<string | null>;
   /** 开启主动免战（v38 AISLG-122）：每周一次免费、12 小时；成功返回 null，失败返回人读错误 */
   startTruce: () => Promise<string | null>;
+  /** 提前解除主动免战（v71，AISLG-190）：本周次数不返还；成功返回 null，失败返回人读错误 */
+  cancelTruce: () => Promise<string | null>;
   /** 城池改名；成功返回 null，失败返回人读错误（弹窗内展示） */
   renameCity: (name: string) => Promise<string | null>;
   /** 放弃分城（v57，AISLG-153）：成功后当前城回到主城 */
   discardCity: (cityId: string) => Promise<string | null>;
+  /** 设为主城（v82，AISLG-205）：选中的分城与主城对调身份，换完 24 小时内不能再换；成功返回 null，失败返回人读错误 */
+  setCapital: (cityId: string) => Promise<string | null>;
   /** 一键重置账号数据（v9，不可逆）；成功返回 null，失败返回人读错误（弹窗内展示） */
   resetAccount: () => Promise<string | null>;
   /** 离线日报（v23 AISLG-54）：非 null 时弹窗展示（上线自动弹出 / 手动打开） */
@@ -192,6 +231,16 @@ export interface GameSession {
   moving: MovingTargetsSession;
   /** 黄巾之乱会话（v29 AISLG-76）：事件进度 / 营地 / 我的贡献 / 贡献榜 */
   yellowTurban: YellowTurbanSession;
+  /** 五方势力会话（v99 AISLG-239）：五家的老巢 / 半径 / 持城数；开关关闭时 enabled=false、列表为空 */
+  factions: FactionSession;
+  /** 剧本战场会话（v75 AISLG-198）：官渡的报名 / 入场 / 队伍 / 军功 / 商店 */
+  battlefield: BattlefieldSession;
+  /** 声望与爵位（v76 AISLG-197）：爵位 / 今日俸禄状态与领取 */
+  nobility: NobilitySession;
+  /** 玩家交易所（v78 AISLG-196）：挂单 / 吃单 / 撤单 / 我的成交 */
+  market: MarketSession;
+  /** 洛阳争夺（v79 AISLG-200）：状态 / 窗口 / 政令 */
+  luoyang: LuoyangSession;
   /** 加载更早的一页事件（滚动到底部触发；游标 = 已加载的最小服务端事件 id） */
   loadOlderEvents: () => Promise<void>;
   /** 账号安全（v43）：Agent 令牌签发 / 吊销、微信绑定状态刷新 */
@@ -221,9 +270,12 @@ export function useGameSession(): GameSession {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [buildError, setBuildError] = useState<string | null>(null);
   const [recruitError, setRecruitError] = useState<string | null>(null);
+  const [defenseError, setDefenseError] = useState<string | null>(null);
   const [city, setCity] = useState<CityView | null>(null);
+  // 战报推送计数（v88，AISLG-218）：伤兵营可见时据此重拉全城池子（战报可能带来新的伤兵 / 俘虏）
+  const [battleReportTick, setBattleReportTick] = useState(0);
   const cityList = useCityList(setCity);
-  const { applyState: applyCityList, reset: resetCityList } = cityList;
+  const { applyState: applyCityList, applyItems: applyCityItems, reset: resetCityList } = cityList;
   const [agent, setAgent] = useState<AgentInfoView | null>(null);
   const [events, setEvents] = useState<SessionEvent[]>([]);
   const [eventsExhausted, setEventsExhausted] = useState(false);
@@ -347,6 +399,13 @@ export function useGameSession(): GameSession {
   const { clear: worldClear, onMarchPush, onTilePush, onBattleReportPush, onBattleReportCommentPush } = world;
   // 世界小地图（v58 AISLG-160）：全图城池点位，展开时才拉取
   const mapOverview = useMapOverview({ clientRef, connected: connection === 'online' });
+  // 全账号伤兵营（v88 AISLG-218）：全城池子，连接后拉一次 + 伤兵营可见时 30 秒刷新，
+  // 战报推送（PUSH_BATTLE_REPORT）到达时也刷新一次
+  const troopPoolsAll = useTroopPoolsAllCities({
+    clientRef,
+    connected: connection === 'online',
+    battleReportTick,
+  });
 
   // 科技研究会话切片（v27 AISLG-77）：科技表 / 研究 / 取消，推送到达时联动
   const techSession = useTechSession({
@@ -387,6 +446,15 @@ export function useGameSession(): GameSession {
   });
   const { clear: heroClear, onHeroPush } = heroSession;
 
+  // 计谋切片（v86 AISLG-211）：定义 / 计谋令 / 逐武将预览 / 施计动作 / 被施计警报
+  const stratagem = useStratagemSession(clientRef, { scheduleSync });
+  const { clear: stratagemClear, onPush: onStratagemPush } = stratagem;
+  const items = useItemsSession(clientRef, { applyItems: applyCityItems });
+  const { clear: itemsClear } = items;
+  // 城池迁移切片（v91）：迁城后重拉城池列表与状态
+  const moveCity = useMoveCitySession(clientRef, { onMoved: () => void syncAll('initial') });
+  const { cancelPick: moveCityCancelPick } = moveCity;
+
   // 移动目标会话切片（v28 AISLG-78）：流寇 / 运粮商队列表，推送增量合并
   const moving = useMovingTargets({ clientRef, connected: connection === 'online' });
   const { clear: movingClear, onPush: onMovingPush } = moving;
@@ -394,6 +462,27 @@ export function useGameSession(): GameSession {
   // 黄巾之乱会话切片（v29 AISLG-76）：事件进度 / 营地 / 贡献，推送到达重拉
   const yellowTurban = useYellowTurban({ clientRef, connected: connection === 'online' });
   const { clear: ytClear, onPush: onYtPush } = yellowTurban;
+
+  // 五方势力会话切片（v99 AISLG-239）：连接就绪时拉一次，之后每分钟重拉（半径按真实天数变化）；
+  // v101（AISLG-241）：老巢战况有 PUSH_FACTION_LAIR 推送，收到即重拉
+  const factions = useFactionSession({ clientRef, connected: connection === 'online' });
+  const { clear: factionClear, fetchState: fetchFactions } = factions;
+
+  // 剧本战场会话切片（v75，AISLG-198）：官渡的报名 / 入场 / 队伍 / 军功 / 商店，推送到达重拉
+  const battlefield = useBattlefieldSession({ clientRef, connected: connection === 'online' });
+  const { clear: battlefieldClear, onPush: onBattlefieldPush } = battlefield;
+
+  // 声望与爵位切片（v76，AISLG-197）：连接建立时拉取，领俸禄后重拉
+  const nobility = useNobilitySession({ clientRef, connected: connection === 'online' });
+  const { clear: nobilityClear } = nobility;
+
+  // 玩家交易所切片（v78，AISLG-196）：挂单列表 / 我的挂单与成交，写操作后刷新城池
+  const market = useMarketSession({ clientRef, connected: connection === 'online', scheduleSync });
+  const { clear: marketClear } = market;
+
+  // 洛阳争夺切片（v79，AISLG-200）
+  const luoyang = useLuoyangSession({ clientRef, connected: connection === 'online' });
+  const { clear: luoyangClear } = luoyang;
 
   // 任务与签到会话切片（v53 AISLG-200）：打开养成页拉取当日任务 / 签到状态，领奖与签到后回带城池资源
   const questSession = useQuestSession({ clientRef, connected: connection === 'online', setCity });
@@ -416,7 +505,7 @@ export function useGameSession(): GameSession {
   });
   const announcements = useAnnouncements(clientRef);
   const { refresh: refreshAnnouncements, onPush: onAnnouncementPush, reset: resetAnnouncements } = announcements;
-  const { checkOfflineReportRef, fetchServerBroadcasts, onBroadcastPush, onNpcWarningPush, resetNpcWarnings } = extras;
+  const { checkOfflineReportRef, fetchServerBroadcasts, onBroadcastPush, onNpcWarningPush, onFactionSiegePush, resetNpcWarnings } = extras;
   // 赛季切片（v65 AISLG-134）：换季预告 / 维护遮罩 / 新赛季重连收尾；名人堂切片：打开页签时按需拉取
   const season = useSeasonSession(clientRef, connection === 'online');
   const { applyLogin: applySeasonLogin, onPush: onSeasonPush, onMaintenance: onSeasonMaintenance, refresh: refreshSeason, clear: seasonClear } = season;
@@ -443,10 +532,15 @@ export function useGameSession(): GameSession {
         // v12：地块归属 / 驻军变化 → 更新地图窗口并刷新选中详情
         const data = frame.data as unknown as TileStatePushData;
         onTilePush(data.tile);
+      } else if (frame.op === Op.PUSH_EXPLORATION_REPORT) {
+        // v92（AISLG-224）：探索简报 → 地图页简报卡片
+        pushExplorationReport((frame.data as unknown as { report: ExplorationReport }).report);
       } else if (frame.op === Op.PUSH_BATTLE_REPORT) {
         // v13：战斗战报生成 → 置顶战报列表（列表未加载时不预取，按需拉取覆盖）
         const data = frame.data as unknown as { report: BattleReportView };
         onBattleReportPush(data.report);
+        // v88（AISLG-218）：战报可能带来新的伤兵 / 俘虏——伤兵营可见时重拉全城池子
+        setBattleReportTick((tick) => tick + 1);
       } else if (frame.op === Op.PUSH_BATTLE_REPORT_COMMENT) {
         // v23（AISLG-53）：Agent 点评写入 → 更新战报列表/缓存，弹窗开着则就地补显
         const data = frame.data as unknown as BattleReportCommentPushData;
@@ -472,6 +566,10 @@ export function useGameSession(): GameSession {
       } else if (frame.op === Op.PUSH_STARVATION_STATE) {
         // v34（AISLG-107）：断粮预警 / 哗变——不记本地事件（服务端事件 starvation_warning / mutiny 随下方增量查询补齐，
         // 避免重复）；增量查询同时对齐驻军减员与 starveAt / mutinyNextAt，顶栏红色提示随之出现
+      } else if (frame.op === Op.PUSH_BATTLEFIELD_STATE) {
+        // v75（AISLG-198）：剧本战场报名 / 开战 / 据点易手 / 收场（全服广播，与账号状态无关）
+        onBattlefieldPush(frame.data as unknown as import('../api/protocol').BattlefieldPushData);
+        return;
       } else if (frame.op === Op.PUSH_YELLOW_TURBAN_STATE) {
         // v29（AISLG-76）：黄巾之乱起事 / 进度 / 老巢出现 / 收场（全服广播，与账号状态无关）
         onYtPush();
@@ -522,6 +620,15 @@ export function useGameSession(): GameSession {
           ...(data.army ? { army: data.army } : {}),
           arriveAt: data.arriveAt,
         });
+      } else if (frame.op === Op.PUSH_FACTION_SIEGE) {
+        // v100（AISLG-240）：势力围攻——预警进来袭预警队列（同一弹窗，标题写势力名 + 当前城防值）；
+        // 守住的 / 扣城防的 / 城被吞的结果由事件流（faction_siege / faction_city_lost）随下方增量查询补齐
+        onFactionSiegePush(frame.data as unknown as import('../api/protocol').FactionSiegePushData);
+      } else if (frame.op === Op.PUSH_FACTION_LAIR) {
+        // v101（AISLG-241）：老巢战况变化（有人进攻 / 恢复 1 营 / 势力灭亡）——重拉势力面板与地图范围，
+        // 战报与事件由 PUSH_BATTLE_REPORT 与事件流补齐
+        void fetchFactions();
+        return;
       } else if (frame.op === Op.PUSH_AGENT_STATUS) {
         const data = frame.data as unknown as { online: boolean };
         setAgent((prev) => (prev ? { ...prev, agentOnline: data.online } : prev));
@@ -535,14 +642,23 @@ export function useGameSession(): GameSession {
         // account_renamed 事件由下方防抖增量查询补进事件流
         const data = frame.data as unknown as AccountStatePushData;
         if (data.reason === 'account_renamed' && typeof data.username === 'string') {
-          setAccount((prev) => (prev ? { ...prev, username: data.username } : prev));
+          const renamed = data.username;
+          setAccount((prev) => (prev ? { ...prev, username: renamed } : prev));
+        } else if (data.reason === 'items_changed') {
+          // v90（AISLG-222）：道具背包 / 礼金变化（其他连接买了道具、或消耗方扣了道具）：按推送直接更新，不重拉
+          const push = frame.data as unknown as ItemsStatePushData;
+          applyCityItems({ items: push.items, gift: push.gift });
         }
+      } else if (frame.op === Op.PUSH_STRATAGEM) {
+        // v86（AISLG-211）：被施计警报——目标方即时弹窗；等价文案由服务端 stratagem_received
+        // 事件随下方增量查询补进事件流，同时对齐城池的计谋效果（十面埋伏 / 趁火打劫）
+        onStratagemPush(frame.data as unknown as import('../api/protocol').StratagemPushData);
       } else if (frame.op === Op.PUSH_CITY_STATE) {
         const data = frame.data as unknown as CityStatePushData;
         if (data.reason === 'city_renamed') {
           setCity((prev) => (prev && data.name && data.cityId === prev.id ? { ...prev, name: data.name } : prev));
-        } else if (data.reason === 'city_discarded') {
-          // 分城被放弃（可能是本账号另一连接发起）：选中的城可能已不存在，复位为主城并全量刷新
+        } else if (data.reason === 'city_discarded' || data.reason === 'capital_changed') {
+          // 分城被放弃 / 主城对调（可能是本账号另一连接发起）：选中的城可能已不存在或身份已变，复位为主城并全量刷新
           resetCityList();
           void syncAll('initial');
           return;
@@ -558,7 +674,7 @@ export function useGameSession(): GameSession {
       }
       scheduleSync();
     },
-    [scheduleSync, syncAll, onMarchPush, onTilePush, onBattleReportPush, onBattleReportCommentPush, onBroadcastPush, onNpcWarningPush, onTechPush, onArenaPush, onHeroPush, onMovingPush, onYtPush, onAnnouncementPush, onSeasonPush, onAlliancePush, onAllianceMarkPush],
+    [scheduleSync, syncAll, applyCityItems, onMarchPush, onTilePush, onBattleReportPush, onBattleReportCommentPush, onBroadcastPush, onNpcWarningPush, onFactionSiegePush, fetchFactions, onTechPush, onArenaPush, onHeroPush, onMovingPush, onYtPush, onBattlefieldPush, onAnnouncementPush, onSeasonPush, onAlliancePush, onAllianceMarkPush, onStratagemPush],
   );
 
   const ensureClient = useCallback((): ApiClient => {
@@ -609,15 +725,23 @@ export function useGameSession(): GameSession {
       heroClear();
       movingClear();
       ytClear();
+      factionClear();
+      battlefieldClear();
+      nobilityClear();
+      marketClear();
+      luoyangClear();
       questClear();
       seasonClear();
       hallClear();
+      stratagemClear();
+      itemsClear();
+      moveCityCancelPick();
       allianceClear();
       allianceMarksClear();
       clientRef.current?.close();
       clientRef.current = null;
     },
-    [clearTimers, worldClear, techClear, arenaClear, starTowerClear, heroClear, movingClear, ytClear, questClear, resetCityList, seasonClear, hallClear],
+    [clearTimers, worldClear, techClear, arenaClear, starTowerClear, heroClear, movingClear, ytClear, factionClear, battlefieldClear, nobilityClear, marketClear, luoyangClear, questClear, resetCityList, seasonClear, hallClear, stratagemClear, itemsClear, moveCityCancelPick],
   );
 
   /** 清空游戏态缓存（登录 / 新赛季重连前调用）：世界、科技、竞技场等切片与事件流都回到初始状态 */
@@ -642,11 +766,15 @@ export function useGameSession(): GameSession {
     heroClear();
     movingClear();
     ytClear();
+      factionClear();
     questClear();
     hallClear();
+    stratagemClear();
+    itemsClear();
+    moveCityCancelPick();
     allianceClear();
     allianceMarksClear();
-  }, [resetCityList, resetNpcWarnings, resetAnnouncements, worldClear, techClear, arenaClear, starTowerClear, heroClear, movingClear, ytClear, questClear, hallClear, allianceClear, allianceMarksClear]);
+  }, [resetCityList, resetNpcWarnings, resetAnnouncements, worldClear, techClear, arenaClear, starTowerClear, heroClear, movingClear, ytClear, factionClear, battlefieldClear, nobilityClear, marketClear, luoyangClear, questClear, hallClear, allianceClear, allianceMarksClear, moveCityCancelPick]);
 
   const scheduleReconnect = useCallback(() => {
     if (reconnectTimerRef.current !== null || !aliveRef.current) {
@@ -952,6 +1080,8 @@ export function useGameSession(): GameSession {
 
   const logout = useCallback(async () => {
     logoutIntentRef.current = true;
+    // 退出登录：探索简报不串到下一个账号（AISLG-224 复核）
+    clearExplorationReports();
     const client = clientRef.current;
     try {
       if (client?.connected) {
@@ -1072,6 +1202,47 @@ export function useGameSession(): GameSession {
     [appendLocalEvent, scheduleSync],
   );
 
+  // 遣散动作（v84 AISLG-209）：成功直接用服务端返回的城池状态替换本地
+  const { disbandTroops } = useMemo(
+    () => createDisbandActions({ clientRef, setCity, appendLocalEvent, scheduleSync }),
+    [appendLocalEvent, scheduleSync],
+  );
+
+  // 伤兵 / 俘虏 / 逃兵动作（v85 AISLG-212）：治疗 / 招降 / 劝回与放弃 / 释放
+  const { restoreTroops, releaseTroops } = useMemo(
+    () => createTroopPoolsActions({ clientRef, setCity, appendLocalEvent, scheduleSync }),
+    [appendLocalEvent, scheduleSync],
+  );
+
+  // 城防器械（v73 AISLG-193）：打造 / 取消；库存与队列按需查询对齐
+  const { craftDefense, cancelDefenseCraft } = useMemo(
+    () => createDefenseActions({ clientRef, setDefenseError, appendLocalEvent, scheduleSync }),
+    [appendLocalEvent, scheduleSync],
+  );
+
+  // 协防召回 / 遣返（v74 AISLG-194）：成功后按需查询对齐（协防列表 / 返程行军）
+  const dismissAssist = useCallback(
+    async (assistId: string): Promise<string | null> => {
+      const { DEFENSE_COPY } = getCopy();
+      const client = clientRef.current;
+      if (!client?.connected) {
+        return DEFENSE_COPY.craft.offline;
+      }
+      try {
+        const res = await client.request(Op.DISMISS_ASSIST, { assistId });
+        if (res.ok) {
+          scheduleSync();
+          return null;
+        }
+        scheduleSync();
+        return res.error?.message ?? DEFENSE_COPY.craft.fallback;
+      } catch (err) {
+        return err instanceof Error ? err.message : DEFENSE_COPY.craft.fallback;
+      }
+    },
+    [scheduleSync],
+  );
+
   // 集市兑换（AISLG-67）同形态拆出；错误由弹窗侧接收展示，不走面板级 error 状态
   const { exchangeGold } = useMemo(
     () => createExchangeAction({ clientRef, setCity, appendLocalEvent, scheduleSync }),
@@ -1079,7 +1250,7 @@ export function useGameSession(): GameSession {
   );
 
   // 主动免战（v38 AISLG-122）：成功后 shield 随防抖按需查询对齐
-  const { startTruce } = useMemo(
+  const { startTruce, cancelTruce } = useMemo(
     () => createTruceAction({ clientRef, appendLocalEvent, scheduleSync }),
     [appendLocalEvent, scheduleSync],
   );
@@ -1111,6 +1282,29 @@ export function useGameSession(): GameSession {
 
   /** 放弃分城（v57，AISLG-153，仅玩家连接）：分城已从账号名下移除、地块转回 NPC 城池。发起连接收不到
    *  PUSH_CITY_STATE，成功后直接复位为主城并全量重拉城池列表与状态 */
+  /** 设为主城（v82，AISLG-205，仅玩家连接）：分城与当前主城对调身份。发起连接收不到自己的 PUSH_CITY_STATE，成功后复位为主城并全量重拉 */
+  const setCapital = useCallback(
+    async (cityId: string): Promise<string | null> => {
+      const { COPY } = getCopy();
+      const client = clientRef.current;
+      if (!client?.connected) {
+        return COPY.session.connectFailed;
+      }
+      try {
+        const res = await client.request(Op.SET_CAPITAL, { cityId, confirm: true });
+        if (res.ok) {
+          resetCityList();
+          await syncAll('initial');
+          return null;
+        }
+        return res.error?.message ?? COPY.topbar.capitalFallback;
+      } catch (err) {
+        return err instanceof Error ? err.message : COPY.topbar.capitalFallback;
+      }
+    },
+    [syncAll, resetCityList],
+  );
+
   const discardCity = useCallback(
     async (cityId: string): Promise<string | null> => {
       const { COPY } = getCopy();
@@ -1161,6 +1355,11 @@ export function useGameSession(): GameSession {
         heroClear();
         movingClear();
         ytClear();
+      factionClear();
+      battlefieldClear();
+      nobilityClear();
+      marketClear();
+      luoyangClear();
         questClear();
         await syncAll('initial');
         return null;
@@ -1169,7 +1368,7 @@ export function useGameSession(): GameSession {
     } catch (err) {
       return err instanceof Error ? err.message : COPY.errors.reset.fallback;
     }
-  }, [syncAll, worldClear, techClear, arenaClear, starTowerClear, heroClear, movingClear, ytClear, questClear, resetCityList]);
+  }, [syncAll, worldClear, techClear, arenaClear, starTowerClear, heroClear, movingClear, ytClear, factionClear, battlefieldClear, nobilityClear, marketClear, luoyangClear, questClear, resetCityList]);
 
   /** 加载更早的一页事件（beforeId 游标分页；本地临时事件 id 为负，不作为游标） */
   const loadOlderEvents = useCallback(async () => {
@@ -1260,16 +1459,29 @@ export function useGameSession(): GameSession {
     cancelBuild,
     startRecruit,
     cancelRecruit,
+    disbandTroops,
+    restoreTroops,
+    releaseTroops,
+    stratagem,
+    items,
+    moveCity,
+    craftDefense,
+    cancelDefenseCraft,
+    dismissAssist,
+    defenseError,
     exchangeGold,
     startTruce,
+    cancelTruce,
     renameCity,
     discardCity,
+    setCapital,
     resetAccount,
     ...extras,
     cityList,
     switchCity,
     world,
     mapOverview,
+    troopPoolsAll,
     techSession,
     arenaSession,
     starTowerSession,
@@ -1283,6 +1495,11 @@ export function useGameSession(): GameSession {
     hallOfFame,
     moving,
     yellowTurban,
+    factions,
+    battlefield,
+    nobility,
+    market,
+    luoyang,
     loadOlderEvents,
     security,
     connectForWechat,

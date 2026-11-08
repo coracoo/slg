@@ -16,12 +16,14 @@
 // - 攻方战败：幸存部队撤回出发城（v15 语义，与 battle-tick 一致）；
 // - 目标失效（易主 / 转城 / 任务不再适用）：不战斗，部队原路返回（aborted）。
 
-import { carryingPercent } from '../../common/src/tech';
+import { carryingPercent, combatTechBonus, lootingPercent } from '../../common/src/tech';
 import { loadTechLevels } from '../../common/src/tech-db';
 import pg from 'pg';
 import { EventType, type InitiatorRole, type Resources, type TroopKind } from '../../common/src/protocol';
 import { insertEvent } from '../../common/src/events';
 import { armyPower, resolveBattle, wallDefensePercent } from '../../common/src/battle';
+import { splitBattleCasualties } from '../../common/src/battle-casualties';
+import { recordPoolTroops } from '../../common/src/troop-pools-db';
 import { grantUnlock } from '../../common/src/hero-friendship-db';
 import { clearNativeGarrison, loadNativeGarrison, saveNativeGarrison } from '../../common/src/native-garrison';
 import { armyCarryCapacity } from '../../common/src/troops';
@@ -140,8 +142,16 @@ export async function resolvePlunderArrival(
     wallDefensePercent: wall,
     siege: npc !== null,
     attackerHero: hero?.engine ?? null,
+    attackerTech: combatTechBonus(await loadTechLevels(client, march.account_id)),
   });
   const heroSettle = await settleMarchHero(client, march, result, notifies);
+  // v85（AISLG-212）：掠夺野地 / NPC 城——攻方是玩家、守方是 NPC；伤兵与俘虏（胜时
+  // 从守军损失抓 10%）进出发城
+  const plunderCasualties = splitBattleCasualties(result, false, true);
+  await recordPoolTroops(client, march.from_city_id, 'wounded', plunderCasualties.attacker.wounded);
+  if (plunderCasualties.winner === 'attacker') {
+    await recordPoolTroops(client, march.from_city_id, 'captive', plunderCasualties.captives);
+  }
   if (!npc) {
     // 野地原住守军战后存量落库，之后按小时恢复（v24 AISLG-48）
     await saveNativeGarrison(client, target, result.defender.survivors);
@@ -153,6 +163,7 @@ export async function resolvePlunderArrival(
     client, march.account_id, 'attacker', result.attackerWon,
     npc ? 'npc_city' : 'wilderness',
     target.x, target.y, result, attackerName, defenderName, wall, notifies, hero?.report ?? null,
+    null, null, null, plunderCasualties,
   );
 
   if (!result.attackerWon) {
@@ -191,8 +202,9 @@ export async function resolvePlunderArrival(
 
   // 胜利：按幸存部队的负重从奖励池装填（冷却内到达 → 收益为零，战斗照常结算）
   const now = await dbNow(client);
-  const carry = armyCarryCapacity(result.attacker.survivors, carryingPercent(await loadTechLevels(client, march.account_id)));
-  const pool = npc ? npcStockPool(npc) : wildernessPlunderPool(target.terrain, target.level);
+  const plunderTechs = await loadTechLevels(client, march.account_id);
+  const carry = armyCarryCapacity(result.attacker.survivors, carryingPercent(plunderTechs));
+  const pool = npc ? npcStockPool(npc) : wildernessPlunderPool(target.terrain, target.level, lootingPercent(plunderTechs));
   // v61（AISLG-165）：野地的地形资源奖励以该地块当前储量为上限（掠空即止）；金币不受储量约束
   const reserve = npc ? 0 : ((await readTileReserve(client, target.x, target.y, now)) ?? 0);
   if (!npc) {
@@ -308,8 +320,19 @@ export async function resolveOccupyArrival(
   const defender = await loadNativeGarrison(client, target);
   // v36（AISLG-114）：随队武将加成（按部队规模折算）
   const hero = await loadMarchHeroBonus(client, march, armyTotal(troops));
-  const result = resolveBattle(troops, defender, { wallDefensePercent: 0, siege: false, attackerHero: hero?.engine ?? null });
+  const result = resolveBattle(troops, defender, {
+    wallDefensePercent: 0,
+    siege: false,
+    attackerHero: hero?.engine ?? null,
+    attackerTech: combatTechBonus(await loadTechLevels(client, march.account_id)),
+  });
   const heroSettle = await settleMarchHero(client, march, result, notifies);
+  // v85（AISLG-212）：占领野地——攻方是玩家、守方是 NPC；伤兵与俘虏（胜时）进出发城
+  const occupyCasualties = splitBattleCasualties(result, false, true);
+  await recordPoolTroops(client, march.from_city_id, 'wounded', occupyCasualties.attacker.wounded);
+  if (occupyCasualties.winner === 'attacker') {
+    await recordPoolTroops(client, march.from_city_id, 'captive', occupyCasualties.captives);
+  }
   await saveNativeGarrison(client, target, result.defender.survivors);
   const naming = await loadCityNaming(client, march.from_city_id);
   const attackerName = naming ? `${naming.username} · ${naming.cityName}` : '出征部队';
@@ -317,6 +340,7 @@ export async function resolveOccupyArrival(
   const reportId = await saveBattleReport(
     client, march.account_id, 'attacker', result.attackerWon,
     'wilderness', target.x, target.y, result, attackerName, defenderName, 0, notifies, hero?.report ?? null,
+    null, null, null, occupyCasualties,
   );
 
   if (!result.attackerWon) {

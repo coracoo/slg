@@ -6,7 +6,7 @@ import type { AllianceLeaderboardEntryView } from './protocol-alliance';
 import type { TroopKind } from './protocol';
 
 /** 排行榜类别（v23 AISLG-61；v50 AISLG-133 新增 model 模型榜；v70 AISLG-185 新增 alliance 联盟榜） */
-export const LEADERBOARD_KINDS = ['power', 'territory', 'plunder', 'model', 'alliance'] as const;
+export const LEADERBOARD_KINDS = ['power', 'territory', 'plunder', 'model', 'alliance', 'nobility', 'exploration'] as const;
 
 export type LeaderboardKind = (typeof LEADERBOARD_KINDS)[number];
 
@@ -20,6 +20,9 @@ export interface LeaderboardEntryView {
   agentOnline: boolean;
   /** Agent 自报的模型名原文（v50；null = 从未声明）。自报不验证，展示标注「自报」 */
   agentModel: string | null;
+  /** 爵位（v76，AISLG-197） */
+  nobility: number;
+  nobilityName: string;
 }
 
 /** 模型榜单行（v50，AISLG-133） */
@@ -68,12 +71,23 @@ export const SERVER_BROADCAST_TYPES = [
   'yt_finished',
   // v36 AISLG-115 名将获得：全服唯一的追求目标
   'hero_granted',
+  // v94 AISLG-228 名将下野 / 被俘
+  'hero_left',
+  'hero_captured',
   // v40 AISLG-124 玩家占领玩家分城
   'city_conquered',
   // v53 AISLG-145 竞技场：有人登上第 1 名
   'arena_champion',
   // v60 AISLG-162 公告：运维发布时同步播报标题（detail.announcementId / title）
   'announcement',
+  // v76 AISLG-197 爵位：升到大夫及以上
+  'nobility_promoted',
+  // v93（AISLG-227）战争迷雾：名城 / 名将处所首探、传说遗迹被领取（必达，不带坐标）
+  'famous_first_explored',
+  'hero_site_first_explored',
+  'legendary_relic_claimed',
+  // v99（AISLG-239）五方势力：势力范围半径扩大（每周最多一次）
+  'faction_expanded',
 ] as const;
 
 export type ServerBroadcastType = (typeof SERVER_BROADCAST_TYPES)[number];
@@ -121,6 +135,13 @@ export interface PlayerAttackWarningPushData {
   arriveAt: string;
 }
 
+/** 势力旗号（v100，AISLG-240）：袭击 / 围攻预警里说明是哪一家 */
+export interface FactionBannerView {
+  key: string;
+  name: string;
+  nameEn: string;
+}
+
 export interface NpcAttackWarningPushData {
   attackId: string;
   x: number;
@@ -130,6 +151,8 @@ export interface NpcAttackWarningPushData {
   level: number;
   /** 进攻方（v38 AISLG-122 玩家来袭预警，op 2017 归一化进本形态时携带；NPC 预警无） */
   attacker?: { username: string; cityId: string; cityName: string };
+  /** v77（AISLG-195）：进攻方联盟与你敌对时给出 */
+  hostileAlliance?: { id: string; name: string } | null;
   armyMin: number;
   armyMax: number;
   /** 敌情详细度（v31 AISLG-81，由被袭击城烽火台等级决定）：缺省视为 range */
@@ -138,4 +161,16 @@ export interface NpcAttackWarningPushData {
   armyKinds?: Partial<Record<TroopKind, { min: number; max: number }>>;
   army?: Partial<Record<TroopKind, number>>;
   arriveAt: string;
+  /** v100（AISLG-240）：势力范围内的袭击带上旗号（不在任何势力范围内时没有这个字段） */
+  faction?: FactionBannerView;
+  /** v100：出发老巢坐标 */
+  lair?: { x: number; y: number };
+  /** v100：势力围攻的预警（PUSH_FACTION_SIEGE reason=warning 归一化进同一预警队列时携带） */
+  siege?: {
+    siegeId: string;
+    faction: FactionBannerView;
+    cityName: string | null;
+    /** 被围城当前城防值 */
+    durability: number;
+  };
 }

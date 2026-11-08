@@ -34,6 +34,8 @@ import { FOOT_COPY, HALL_COPY, MODAL_COPY, NAV_COPY, PAGED_COPY, SEASON_COPY, TO
 import { FOOT_COPY_EN, HALL_COPY_EN, MODAL_COPY_EN, NAV_COPY_EN, PAGED_COPY_EN, SEASON_COPY_EN, TOP_COPY_EN } from '../copy-ui-en';
 import { GITHUB_COPY } from '../copy-github';
 import { GITHUB_COPY_EN } from '../copy-github-en';
+import { LANDING_COPY } from '../copy-landing';
+import { LANDING_COPY_EN } from '../copy-landing-en';
 import { GOOGLE_COPY } from '../copy-google';
 import { GOOGLE_COPY_EN } from '../copy-google-en';
 import { STARVE_COPY } from '../copy-starvation';
@@ -55,7 +57,23 @@ import { ANNOUNCEMENT_COPY_EN } from '../copy-announcement-en';
 import { PASSWORD_SIGNUP_COPY } from '../copy-password-signup';
 import { PASSWORD_SIGNUP_COPY_EN } from '../copy-password-signup-en';
 import { ALLIANCE_COPY } from '../copy-alliance';
+import { BATTLEFIELD_COPY } from '../copy-battlefield';
+import { MARKET_COPY } from '../copy-market';
+import { LUOYANG_COPY } from '../copy-luoyang';
 import { ALLIANCE_COPY_EN } from '../copy-alliance-en';
+import { BATTLEFIELD_COPY_EN } from '../copy-battlefield-en';
+import { MARKET_COPY_EN } from '../copy-market-en';
+import { LUOYANG_COPY_EN } from '../copy-luoyang-en';
+import { STRATAGEM_COPY } from '../copy-stratagem';
+import { STRATAGEM_COPY_EN } from '../copy-stratagem-en';
+import { SHORTFALL_COPY } from '../copy-shortfall';
+import { SHORTFALL_COPY_EN } from '../copy-shortfall-en';
+import { GIFT_COPY } from '../copy-gift';
+import { GIFT_COPY_EN } from '../copy-gift-en';
+import { ITEM_COPY } from '../copy-items';
+import { ITEM_COPY_EN } from '../copy-items-en';
+import { MOVE_CITY_COPY } from '../copy-move-city';
+import { MOVE_CITY_COPY_EN } from '../copy-move-city-en';
 
 /** 中文文案全集（结构基准）：英文 Bundle 必须与之同构 */
 const ZH = {
@@ -92,6 +110,7 @@ const ZH = {
   TOP_COPY,
   FOOT_COPY,
   GITHUB_COPY,
+  LANDING_COPY,
   GOOGLE_COPY,
   STARVE_COPY,
   EXTRA_STATE,
@@ -103,8 +122,16 @@ const ZH = {
   ANNOUNCEMENT_COPY,
   PASSWORD_SIGNUP_COPY,
   ALLIANCE_COPY,
+  BATTLEFIELD_COPY,
+  MARKET_COPY,
+  LUOYANG_COPY,
   SEASON_COPY,
   HALL_COPY,
+  SHORTFALL_COPY,
+  GIFT_COPY,
+  STRATAGEM_COPY,
+  ITEM_COPY,
+  MOVE_CITY_COPY,
 };
 
 export type Bundle = typeof ZH;
@@ -144,6 +171,7 @@ const EN: Bundle = {
   TOP_COPY: TOP_COPY_EN,
   FOOT_COPY: FOOT_COPY_EN,
   GITHUB_COPY: GITHUB_COPY_EN,
+  LANDING_COPY: LANDING_COPY_EN,
   GOOGLE_COPY: GOOGLE_COPY_EN,
   STARVE_COPY: STARVE_COPY_EN,
   EXTRA_STATE: EXTRA_STATE_EN,
@@ -155,8 +183,16 @@ const EN: Bundle = {
   ANNOUNCEMENT_COPY: ANNOUNCEMENT_COPY_EN,
   PASSWORD_SIGNUP_COPY: PASSWORD_SIGNUP_COPY_EN,
   ALLIANCE_COPY: ALLIANCE_COPY_EN,
+  BATTLEFIELD_COPY: BATTLEFIELD_COPY_EN,
+  MARKET_COPY: MARKET_COPY_EN,
+  LUOYANG_COPY: LUOYANG_COPY_EN,
   SEASON_COPY: SEASON_COPY_EN,
   HALL_COPY: HALL_COPY_EN,
+  SHORTFALL_COPY: SHORTFALL_COPY_EN,
+  GIFT_COPY: GIFT_COPY_EN,
+  STRATAGEM_COPY: STRATAGEM_COPY_EN,
+  ITEM_COPY: ITEM_COPY_EN,
+  MOVE_CITY_COPY: MOVE_CITY_COPY_EN,
 };
 
 const BUNDLES: Record<Lang, Bundle> = { zh: ZH, en: EN };

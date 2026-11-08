@@ -13,6 +13,12 @@ export interface HeroTrainingView {
   exp: number;
 }
 
+/** 被俘中的武将（v94，AISLG-228）：囚禁截止时刻与赎金（2000 × 等级，从主人主城扣）；未被俘为 null */
+export interface HeroCaptiveView {
+  capturedUntil: string;
+  ransomGold: number;
+}
+
 /** 一名武将的视图（GET_HEROES / 推送共用） */
 export interface HeroView {
   /** Random and immutable on ordinary recruitment; famous and legacy heroes have null. */
@@ -49,6 +55,10 @@ export interface HeroView {
   guardProductionPercent: number;
   /** 今日剩余次数（游戏日重置，v54）：赏赐 / 洗点 */
   dailyLeft: { gift: number; reset: number };
+  /** 忠诚度 0..100（v94，AISLG-228）：只有 29 位在野名将有，其余为 null；30 及以下界面标红 */
+  loyalty: number | null;
+  /** 被俘囚禁（v94，AISLG-228）：未被俘为 null；被俘时不能出征 / 任城守 / 历练 / 赏赐 / 解雇 / 加点 / 洗点 */
+  captive: HeroCaptiveView | null;
 }
 
 /** 一名在野名将的结交进度（v54，只列本账号结交过或拥有结交资格的名将） */
@@ -85,7 +95,7 @@ export interface FamousClaimView {
   /** 当前主人用户名；null = 尚未被获得（可争取） */
   ownerUsername: string | null;
   grantedAt: string | null;
-  /** 在野名将的落位野地（坐标与等级）；名城 / 黄巾为 null。被获得后仍保留落位信息 */
+  /** 在野名将的落位野地（坐标与等级）：未被获得（ownerUsername 为 null）时为 null，不泄露藏身位置；被获得后给出落位并保留。名城 / 黄巾恒为 null */
   wildAt: { x: number; y: number; level: number } | null;
 }
 
@@ -172,9 +182,14 @@ export interface HeroStatePushData {
     | 'granted'          // 获得名将（全服另有播报）
     | 'training_started' // 开始历练（v54）
     | 'training_done'    // 历练结束，经验已到账（v54）
+    | 'training_cancelled' // 历练被取消，武将回城、不给经验（v71，AISLG-190）
     | 'points_changed'   // 加点 / 洗点（v54）
     | 'gifted'           // 赏赐（v54）
-    | 'friendship_changed'; // 结交进度变化（v54）
+    | 'friendship_changed' // 结交进度变化（v54）
+    | 'loyalty_changed'    // 忠诚度变化（v94，AISLG-228：自然下降 / 欠饷；赏赐 +10 走 gifted）
+    | 'captured'           // 名将被俘（v94，AISLG-228；主人与胜方各一条）
+    | 'ransomed'           // 名将被赎回（v94，AISLG-228）
+    | 'left';              // 名将下野（v94，AISLG-228；忠诚度为 0 或被俘超时）
   heroId?: string;
   /** exp_gained 时的经验与升级信息 */
   exp?: { gained: number; level: number; leveledTo: number | null };

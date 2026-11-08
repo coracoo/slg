@@ -30,11 +30,12 @@ export { eventText, serverBroadcastText, cargoText } from './mapping-world';
 export function costParts(
   cost: Resources,
   resources: Resources | undefined,
-): Array<{ label: string; value: number; insufficient: boolean }> {
+): Array<{ key: keyof Resources; label: string; value: number; insufficient: boolean }> {
   const { RESOURCE_LABEL } = getCopy();
   return (Object.keys(RESOURCE_LABEL) as Array<keyof Resources>)
     .filter((key) => cost[key] > 0)
     .map((key) => ({
+      key,
       label: RESOURCE_LABEL[key],
       value: cost[key],
       insufficient: resources !== undefined && resources[key] < cost[key],
@@ -85,7 +86,7 @@ export function buildingEffectText(kind: BuildingKind, city: CityView | null): s
   }
   if (kind === 'barracks' && city) {
     const unlocked = TROOP_KINDS.filter(
-      (troop) => TROOP_INFO[troop].barracksLevel <= city.levels.barracks,
+      (troop) => TROOP_INFO[troop].barracksLevel <= (city.levels.barracks ?? 0),
     ).length;
     return COPY.buildingModal.barracksLine(unlocked, TROOP_KINDS.length);
   }
@@ -125,5 +126,7 @@ export function toSessionEvent(view: EventView): SessionEvent {
     view.type === 'march_completed' && view.detail.outcome === 'scouted'
       ? (view.detail.intel as SessionEvent['scoutIntel'] | undefined)
       : undefined;
-  return { id: view.id, at: formatClock(view.createdAt), actor, text: eventText(view), reportId, scoutIntel };
+  // 城池 id 直接透传（AISLG-213）：界面用它在已加载的城池列表里查名字；账号级事件为 null → undefined
+  const cityId = view.cityId ?? undefined;
+  return { id: view.id, at: formatClock(view.createdAt), actor, text: eventText(view), reportId, scoutIntel, cityId };
 }

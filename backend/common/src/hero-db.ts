@@ -28,6 +28,7 @@ import {
   type HeroBattleBonus,
 } from './hero';
 import { heroDayIndex, GIFT_DAILY_LIMIT, RESET_DAILY_LIMIT, type TrainingTier } from './hero-growth';
+import { initialLoyalty, ransomCost } from './hero-loyalty';
 import { rollHeroSpecialty, SPECIALTY_RULES, type HeroSpecialty } from './hero-specialty';
 import type {
   FamousClaimView,
@@ -65,6 +66,17 @@ export interface AccountHeroRow {
   gift_count: number;
   reset_day: string | null;
   reset_count: number;
+  /** v86（AISLG-211）：施计冷却截止（施计后 1 小时基准随缩放）；从未施计为 null */
+  stratagem_cooldown_until?: Date | null;
+  /** v94（AISLG-228）：忠诚度（只有在野名将非 null）；loyalty_at 为自然下降的结算锚点 */
+  loyalty: number | null;
+  loyalty_at: Date | null;
+  loyalty_warned: boolean;
+  /** 欠饷每小时 −1 的上次扣减锚点（欠饷开始时起算） */
+  loyalty_arrears_at: Date | null;
+  /** 被俘：胜方账号 id 与囚禁截止（均非 null 才是被俘中） */
+  captured_by: string | null;
+  captured_until: Date | null;
   created_at: Date;
 }
 
@@ -119,7 +131,16 @@ export function heroView(row: AccountHeroRow, guardCityId: string | null, marchi
       gift: Math.max(0, GIFT_DAILY_LIMIT - usedToday(row.gift_day, row.gift_count, today)),
       reset: Math.max(0, RESET_DAILY_LIMIT - usedToday(row.reset_day, row.reset_count, today)),
     },
+    loyalty: row.loyalty,
+    captive: row.captured_by && row.captured_until
+      ? { capturedUntil: row.captured_until.toISOString(), ransomGold: ransomCost(row.level) }
+      : null,
   };
+}
+
+/** 带忠诚度的武将（在野名将）是否处于被俘囚禁中（captured_by 与截止时刻都在） */
+export function isCaptive(row: Pick<AccountHeroRow, 'captured_by' | 'captured_until'>): boolean {
+  return row.captured_by !== null && row.captured_until !== null;
 }
 
 /** 账号全部武将（按获得先后） */
@@ -169,8 +190,9 @@ export function tavernRefreshMs(): number {
 }
 
 /**
- * 某座城的酒馆候选（惰性刷新）：候选不存在或已过期（refreshed_at + 4 小时基准 ≤ now）
- * 时重摇一批（3 名），同一事务内 DELETE + INSERT。未建酒馆的城返回空数组（不落库）。
+ * 酒馆候选（惰性刷新；v87 AISLG-217：账号只有一份，cityId 固定为主城 id）：候选不存在或已过期
+ * （refreshed_at + 4 小时基准 ≤ now）时重摇一批（3 名），同一事务内 DELETE + INSERT。
+ * 主城酒馆未建（tavernLevel ≤ 0）时返回空数组（不落库）。
  */
 export async function loadTavernCandidates(
   client: Writer,
@@ -227,13 +249,18 @@ function candidateView(row: TavernCandidateRow): HeroCandidateView {
 export async function insertHero(
   client: Writer,
   accountId: string,
-  hero: { name: string; famous: boolean; lead: number; force: number; wit: number },
+  hero: { name: string; famous: boolean; lead: number; force: number; wit: number; loyalty?: number | null },
   rng: () => number = Math.random,
 ): Promise<AccountHeroRow> {
+  // v94（AISLG-228）：忠诚度非 null 时锚点为入队时刻（招揽即起算）
   const ins = await client.query(
-    `INSERT INTO account_heroes (account_id, name, famous, lead, force, wit, base_lead, base_force, base_wit, specialty)
-     VALUES ($1, $2, $3, $4, $5, $6, $4, $5, $6, $7) RETURNING *`,
-    [accountId, hero.name, hero.famous, hero.lead, hero.force, hero.wit, hero.famous ? null : rollHeroSpecialty(rng)],
+    `INSERT INTO account_heroes (account_id, name, famous, lead, force, wit, base_lead, base_force, base_wit, specialty, loyalty, loyalty_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $4, $5, $6, $7, $8, CASE WHEN $8::int IS NULL THEN NULL ELSE now() END) RETURNING *`,
+    [
+      accountId, hero.name, hero.famous, hero.lead, hero.force, hero.wit,
+      hero.famous ? null : rollHeroSpecialty(rng),
+      hero.loyalty ?? null,
+    ],
   );
   return ins.rows[0] as AccountHeroRow;
 }
@@ -262,7 +289,8 @@ export async function grantFamousHero(
     return null;
   }
   const rolled = attrs ?? rollFamousAttrs(Math.random);
-  const hero = await insertHero(client, accountId, { name: def.name, famous: true, ...rolled });
+  // v94（AISLG-228）：在野名将带忠诚度 100，名城 / 黄巾名将为 null
+  const hero = await insertHero(client, accountId, { name: def.name, famous: true, ...rolled, loyalty: initialLoyalty(def.name) });
   const claim = await client.query(
     `INSERT INTO famous_heroes (name, source, hero_id, owner_account_id)
      VALUES ($1, $2, $3, $4) ON CONFLICT (name) DO NOTHING RETURNING name`,
@@ -275,25 +303,31 @@ export async function grantFamousHero(
   return hero;
 }
 
-/** 全部名将的归属视图（未被获得的也列出，ownerUsername 为 null；在野名将附落位坐标） */
-export async function loadFamousClaims(q: Queryable): Promise<FamousClaimView[]> {
-  const res = await q.query(
-    `SELECT f.name, f.source, f.granted_at, a.username
-     FROM famous_heroes f JOIN accounts a ON a.id = f.owner_account_id`,
-  );
-  const owned = new Map(
-    (res.rows as Array<{ name: string; source: string; granted_at: Date; username: string }>).map((row) => [
-      row.name,
-      row,
-    ]),
-  );
-  const wild = await q.query(`SELECT wild_hero, x, y, level FROM world_tiles WHERE wild_hero IS NOT NULL`);
-  const wildAt = new Map(
-    (wild.rows as Array<{ wild_hero: string; x: number; y: number; level: number }>).map((row) => [row.wild_hero, row]),
-  );
+/** famous_heroes JOIN accounts 的一行（已被获得的名将） */
+export interface FamousClaimRow {
+  name: string;
+  granted_at: Date;
+  username: string;
+}
+
+/** world_tiles 上带在野名将的一行（落位野地） */
+export interface WildTileRow {
+  wild_hero: string;
+  x: number;
+  y: number;
+  level: number;
+}
+
+/**
+ * 名将归属视图的纯组装（loadFamousClaims 与单测共用）。在野名将只有被获得之后才给落位坐标：
+ * 未被获得时 wildAt 为 null，避免一次接口调用就拿到全部藏身位置；名城 / 黄巾名将没有落位，恒为 null。
+ */
+export function buildFamousClaims(claims: FamousClaimRow[], wildTiles: WildTileRow[]): FamousClaimView[] {
+  const owned = new Map(claims.map((row) => [row.name, row]));
+  const wildAt = new Map(wildTiles.map((row) => [row.wild_hero, row]));
   return ALL_FAMOUS_HEROES.map((def) => {
     const claim = owned.get(def.name);
-    const tile = wildAt.get(def.name);
+    const tile = claim && def.source.kind === 'wild' ? wildAt.get(def.name) : undefined;
     return {
       name: def.name,
       sourceLabel: famousSourceLabel(def.source),
@@ -302,6 +336,16 @@ export async function loadFamousClaims(q: Queryable): Promise<FamousClaimView[]>
       wildAt: tile ? { x: tile.x, y: tile.y, level: tile.level } : null,
     };
   });
+}
+
+/** 全部名将的归属视图（未被获得的也列出，ownerUsername 为 null；在野名将仅被获得后附落位坐标） */
+export async function loadFamousClaims(q: Queryable): Promise<FamousClaimView[]> {
+  const res = await q.query(
+    `SELECT f.name, f.granted_at, a.username
+     FROM famous_heroes f JOIN accounts a ON a.id = f.owner_account_id`,
+  );
+  const wild = await q.query(`SELECT wild_hero, x, y, level FROM world_tiles WHERE wild_hero IS NOT NULL`);
+  return buildFamousClaims(res.rows as FamousClaimRow[], wild.rows as WildTileRow[]);
 }
 
 /** 某座城的城守（未任命返回 null） */
@@ -363,14 +407,18 @@ export async function woundHero(client: Writer, heroId: string, until: Date): Pr
   await client.query(`UPDATE account_heroes SET wounded_until = $2 WHERE id = $1`, [heroId, until]);
 }
 
-/** 普通将上限相关：账号所有城中酒馆的最高等级 */
+/** 普通将上限相关：主城酒馆等级（v87，AISLG-217：只读主城——酒馆只在主城建造，不再取所有城的最高值） */
 export async function maxTavernLevel(q: Queryable, accountId: string): Promise<number> {
   const res = await q.query(
-    `SELECT coalesce(max(b.level), 0)::int AS lv FROM city_buildings b
-     JOIN cities c ON c.id = b.city_id WHERE c.account_id = $1 AND b.kind = 'tavern'`,
+    `SELECT coalesce(b.level, 0)::int AS lv
+     FROM cities c
+     LEFT JOIN city_buildings b ON b.city_id = c.id AND b.kind = 'tavern'
+     WHERE c.account_id = $1
+     ORDER BY c.created_at, c.id
+     LIMIT 1`,
     [accountId],
   );
-  return (res.rows[0] as { lv: number }).lv;
+  return (res.rows[0] as { lv: number } | undefined)?.lv ?? 0;
 }
 
 /** 普通将 / 名将数量、上限与酒馆最高等级（招募校验与视图共用） */
@@ -392,10 +440,12 @@ export async function heroCounts(
   );
   const row = res.rows[0] as { normal_count: number; famous_count: number };
   const maxTavern = await maxTavernLevel(q, accountId);
+  const nobilityRes = await q.query(`SELECT nobility FROM accounts WHERE id = $1`, [accountId]);
+  const nobility = Math.max(0, Number((nobilityRes.rows[0] as { nobility: number } | undefined)?.nobility ?? 0));
   return {
     normalCount: row.normal_count,
     famousCount: row.famous_count,
-    normalCap: normalHeroCap(maxTavern),
+    normalCap: normalHeroCap(maxTavern, nobility),
     famousCap: FAMOUS_HERO_CAP,
     maxTavernLevel: maxTavern,
   };

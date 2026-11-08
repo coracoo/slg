@@ -7,6 +7,10 @@ interface ImportMetaEnv {
   readonly PUBLIC_SAME_ORIGIN?: string;
   /** 额外的站点 → WebSocket 网关映射（JSON），见 api/client.ts */
   readonly PUBLIC_WS_BY_HOST?: string;
+  /** umami 统计脚本地址，见 analytics.ts */
+  readonly PUBLIC_UMAMI_SCRIPT?: string;
+  /** 页面域名 → umami website-id 映射（JSON），见 analytics.ts */
+  readonly PUBLIC_UMAMI_BY_HOST?: string;
 }
 
 interface ImportMeta {

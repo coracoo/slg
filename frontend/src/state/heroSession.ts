@@ -45,8 +45,12 @@ export interface HeroSession {
   reset: (heroId: string) => Promise<boolean>;
   /** 历练（v54）：派出去 1 / 4 / 12 小时基准 */
   train: (heroId: string, tier: TrainingTier) => Promise<boolean>;
+  /** 取消历练（v71，AISLG-190）：武将立刻回家，不返还经验 */
+  cancelTraining: (heroId: string) => Promise<boolean>;
   /** 赏赐（v54）：花金币加经验 */
   gift: (heroId: string) => Promise<boolean>;
+  /** 赎回被俘名将（v94，AISLG-228）：赎金从主城扣 */
+  ransom: (heroId: string) => Promise<boolean>;
   /** 结交在野名将（v54） */
   befriend: (heroName: string) => Promise<boolean>;
   /** 招揽在野名将（v54，好感满 100） */
@@ -59,7 +63,10 @@ export interface HeroSession {
 export function heroUnavailableReason(
   hero: HeroView,
   now: number,
-): 'wounded' | 'arrears' | 'busy' | 'guard' | 'training' | null {
+): 'wounded' | 'arrears' | 'busy' | 'guard' | 'training' | 'captive' | null {
+  if (hero.captive) {
+    return 'captive';
+  }
   if (hero.woundedUntil && Date.parse(hero.woundedUntil) > now) {
     return 'wounded';
   }
@@ -80,7 +87,7 @@ export function heroUnavailableReason(
 
 /** 在家可培养（加点 / 洗点 / 历练）：不在外出、不城守、不历练（与服务端 heroBusyCode 同口径，仅作预判） */
 export function heroAtHome(hero: HeroView): boolean {
-  return !hero.training && !hero.marchingMarchId && !hero.guardCityId;
+  return !hero.training && !hero.marchingMarchId && !hero.guardCityId && !hero.captive;
 }
 
 export function useHeroSession(deps: HeroSessionDeps): HeroSession {
@@ -161,7 +168,9 @@ export function useHeroSession(deps: HeroSessionDeps): HeroSession {
   );
   const reset = useCallback((heroId: string) => run(Op.RESET_HERO_POINTS, { heroId }), [run]);
   const train = useCallback((heroId: string, tier: TrainingTier) => run(Op.TRAIN_HERO, { heroId, tier }), [run]);
+  const cancelTraining = useCallback((heroId: string) => run(Op.CANCEL_TRAINING, { heroId }), [run]);
   const gift = useCallback((heroId: string) => run(Op.GIFT_HERO, { heroId }), [run]);
+  const ransom = useCallback((heroId: string) => run(Op.RANSOM_HERO, { heroId }), [run]);
   const befriend = useCallback((heroName: string) => run(Op.BEFRIEND_HERO, { heroName }), [run]);
   const recruitFamous = useCallback((heroName: string) => run(Op.RECRUIT_FAMOUS_HERO, { heroName }), [run]);
   const dismiss = useCallback(
@@ -203,7 +212,9 @@ export function useHeroSession(deps: HeroSessionDeps): HeroSession {
       allocate,
       reset,
       train,
+      cancelTraining,
       gift,
+      ransom,
       befriend,
       recruitFamous,
       onHeroPush,
@@ -221,7 +232,9 @@ export function useHeroSession(deps: HeroSessionDeps): HeroSession {
       allocate,
       reset,
       train,
+      cancelTraining,
       gift,
+      ransom,
       befriend,
       recruitFamous,
       onHeroPush,

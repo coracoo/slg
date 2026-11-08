@@ -480,7 +480,7 @@
  * 等级上限 20 → 40。名将扩到 40 名，其中 29 名在野（Lv3+ 野地，开服分配，地图标记 wildFamous，
  * 侦察后 wildFamousIntel 给出名字与属性），打赢该野地守军即获结交资格（GET_HEROES.unlocks），
  * 好感满 100 招揽（全服唯一）。HeroView 新增 freePoints / training / dailyLeft，GET_HEROES 新增
- * friendships / unlocks / friendshipCap，famousClaims 新增 wildAt。推送 PUSH_HERO_STATE 新增
+ * friendships / unlocks / friendshipCap，famousClaims 新增 wildAt（口径：在野名将未被获得时为 null，被获得后才给出落位；AISLG-223 收紧，字段与类型不变，未升版本号）。推送 PUSH_HERO_STATE 新增
  * reason。新表 hero_unlocks / hero_friendship；account_heroes 新增 base_* / free_points / train_* /
  * gift_* / reset_*；world_tiles 新增 wild_*。
  * v55（将星塔，AISLG-146，只加不改）：新增 GET_STAR_TOWER（op 83）、STAR_TOWER_CHALLENGE（op 84，无参数，挑战
@@ -539,5 +539,296 @@
  *   榜单走 Worker 定期快照（alliance_leaderboard_snapshots，换季清空）。GET_ALLIANCE 的 alliance 详情新增 power（势力，现算）与 rank（榜单名次，取最近快照，未上榜为 null）。
  *   GET_HALL_OF_FAME 的 kind 新增 alliance：换季时联盟榜前三进名人堂，条目 accountId / username 为当时的盟主，value 为势力，并带 allianceId / allianceName / memberCount（个人榜这三项为 null）。
  *   无新增协议号与错误码。
+ * v71（进行中的取消，AISLG-190，只加不改）：CANCEL_BUILD（op 24）与 CANCEL_RECRUIT（op 29）放宽为进行中条目也可取消——建造 building / 征募 recruiting 条目取消后
+ *   成本 / 资源与人口按快照全额返还（建造连升进行中：已完成的级保留、只返还未完成级的成本），建筑等级不变，排队的下一条立即开工（同事务激活，推送 build_started / recruit_started）；
+ *   与 Worker 到点完成按条件守卫并发，先翻转状态者生效。RECRUIT_NOT_CANCELLABLE / BUILD_NOT_CANCELLABLE 保留，用于已完成 / 已取消 / 不属于本账号。
+ *   新增 CANCEL_TRAINING（op 115）取消历练：武将立刻回家、不给经验，推送 PUSH_HERO_STATE reason=training_cancelled；无历练中的武将返回新错误码 TRAINING_NOT_CANCELLABLE。
+ *   新增 CANCEL_TRUCE（op 116）提前解除主动免战：立即可被攻击、可出兵，本周免费次数不返还（事件 truce_cancelled）；无生效中的主动免战返回 TRUCE_NOT_ACTIVE；
+ *   城池处于被动免战（被攻破后 4 小时）且无主动免战时返回 PASSIVE_TRUCE_NOT_CANCELLABLE（被动免战不可主动解除）。
+ * v72（科技扩到十六项，AISLG-192，只加不改）：GET_TECHS 的 techs 从 6 项扩到 16 项——新增 drill 练兵 / combat 战斗 /
+ *   protection 防护 / riding 驾驭 / archery 抛射 / supply 补给 / construction 建筑 / research 研究 / looting 掠夺 / repair 维修，
+ *   每项 10 级、账号共享、同一时间只研究一项（规则与成本 / 时长公式沿用 v27）。TechEntryView 新增 category（development 发展 /
+ *   military 军事，前端分两栏），percentPerLevel 与 currentPercent 改为带符号（时长 / 耗粮 / 受伤类为负数）。
+ *   战斗 / 防护 / 驾驭 / 抛射只在世界地图战斗中生效（攻守双方各自一套；竞技场与将星塔不传，NPC 一方不传），且与武将加成叠两层
+ *   （武将 20% 封顶不变）；征兵 / 建造 / 研究时长、部队耗粮、野地掠夺池、分城城防回涨分别按对应科技折扣 / 加成。
+ *   老账号的新科技从 0 级开始（account_techs 无行即 0），其余协议无变化。
+ * v73（城防器械，AISLG-193，只加不改）：城墙里新增四种一次性守城器械（陷阱 trap / 拒马 chevaux / 滚木 rolling_log / 擂石 boulder）：
+ *   新增 CRAFT_DEFENSE（op 117）打造（一次下单若干件，库存上限 = 城墙等级 × 60 四种共用，队列 1 在造 + 2 排队）、
+ *   CANCEL_DEFENSE_CRAFT（op 118）取消（排队中 / 打造中都可，成本全额返还）与 PUSH_DEFENSE_STATE（op 2026）；
+ *   CityView 新增 defenses（cap / stock / total / queue）。守城战（主城与分城，对手为 NPC 或玩家）自动按需使用：
+ *   陷阱 / 拒马开战时结算，滚木 / 擂石在攻方对应兵堆第一次贴墙时结算，用量与杀伤写进战报的 defenses 字段，
+ *   库存由 Worker 结算方在同一事务扣减。ScoutIntel / TileDetailView 新增 defenses（按侦察科技三档：rough 有 / 无、
+ *   kinds 种类、exact 件数）。新增错误码 WALL_NOT_BUILT / DEFENSE_STOCK_FULL / DEFENSE_QUEUE_FULL / DEFENSE_NOT_CANCELLABLE；
+ *   新表 city_defenses / defense_crafts（换季清空），事件 defense_craft_*（四类）。
+ * v74（盟友协防，AISLG-194，只加不改）：MARCH 新增 task='assist'——目标只能是盟友的主城 / 分城，部队到达后驻扎在对方城里
+ *   （每人每城最多 1 支、每城最多 5 支，在途也算；占派出城校场名额、耗粮由出发城按野外 2 倍承担）。
+ *   守城战里协防部队与城主驻军合并成守方（各方科技只作用于各自部队、城守武将只加成城主部队），
+ *   战后伤亡按同兵种开战数量比例拆分（余数归城主），协防方各收到一份带 assistLosses 的战报；协防方也收到来袭预警。
+ *   新增 DISMISS_ASSIST（op 119，派出方召回 / 城主遣返，生成返程行军）；CityView 新增 assistIn / assistOut / assistCap，
+ *   TileDetailView 新增 assists（自己的城与盟友的城可见）；PUSH_CITY_STATE 新增 reason=assist_changed。
+ *   退盟 / 被踢 / 解散与城主放弃分城时相关协防部队自动遣返，分城被占领时协防部队随城覆灭（assist_returned cause=wiped）；新增错误码 ASSIST_NOT_ALLY / ASSIST_LIMIT / ASSIST_NOT_FOUND；
+ *   新表 city_assist（换季清空），事件 assist_arrived / assist_returned。
+ * v75（剧本战场·官渡，AISLG-198，只加不改）：新增 GET_BATTLEFIELD（op 120）查询当前 / 最近一场官渡、9 个据点、
+ *   我的队伍与军功、军功榜前 10、战场商店；SIGNUP_BATTLEFIELD（121，选袁绍军 / 曹操军，主城官府 ≥ 5，
+ *   一方超过另一方 1.5 倍且多 5 人时暂停报名）、ENTER_BATTLEFIELD（122，开战前带一支部队入场，按人口最多 3000、
+ *   从主城扣兵）、SPLIT_BATTLEFIELD_SQUAD（123，每人最多 3 队）、MARCH_BATTLEFIELD_SQUAD（124，战场内行军 / 攻打据点，
+ *   每格 60 秒现实时间、不受全局缩放）与 BUY_BATTLEFIELD_ITEM（125，军功换资源包 / 武将经验 / 兵）。
+ *   日程按北京时间现实时间：每周二 20:00 报名、周三 20:00 开战、周四 20:00 结束；30×30 独立地图，中间一条河只有 3 处渡口；
+ *   军功 = 歼灭敌军参考战力 1:1（首占据点额外 200），结束按胜负与个人名次发奖；乌巢让敌方部队耗粮翻倍、人少补偿、
+ *   守军随报名人数加厚。新增 PUSH_BATTLEFIELD_STATE（op 2027）与错误码 BATTLEFIELD_*；新表 battlefield_*（换季清空）。
+ * v76（声望与爵位，AISLG-197，只加不改）：世界地图上每一场战斗（攻守 / 输赢 / NPC / 玩家 / 黄巾）按歼灭敌军参考战力 1:1
+ *   累计声望；剧本战场军功按 1 军功 = 1 声望再计一次；竞技场与将星塔不计。声望达到门槛自动升爵（10 级：平民 → 王），
+ *   升到大夫及以上全服播报；新增 GET_NOBILITY（op 126）与 CLAIM_NOBILITY_SALARY（127，北京日一次，金币 = 爵位序号 × 200 × 缩放）。
+ *   大夫起才能占领名城（否则 NOBILITY_TOO_LOW，附所需 / 当前爵位），攻打外围与掠夺不受限；五大夫 / 列侯让普通武将上限各 +1。
+ *   CityView 新增 title（城池 / 县城 / 郡城 / 州城 / 都城）与 nobility；cities[]、聊天 sender / recipient、TileView.owner 同口径带爵位；
+ *   GET_LEADERBOARD 新增 kind=nobility，个人榜条目带 nobility / nobilityName；BattleReportDetail 新增 prestigeGained。
+ *   新增错误码 NOBILITY_TOO_LOW / NOBILITY_SALARY_CLAIMED / NOBILITY_SALARY_NONE；accounts 新增 prestige / nobility，
+ *   新表 nobility_claims（换季清空）；换季时声望与爵位清零，爵位榜与其他个人榜一起进入名人堂。
+ * v77（联盟外交，AISLG-195，只加不改）：联盟之间新增中立 / 友好 / 敌对三种关系（默认中立）。友好由一方邀请、另一方同意
+ *   （48 小时过期）；友盟成员互不攻击（与盟友同口径，返回 ALLY_NOT_ATTACKABLE）并可互相协防；解除友好后 24 小时内仍不能
+ *   互相攻击、72 小时内不能再次结好。敌对单方面宣布，只在地图上标红并在来袭预警标「敌对联盟」，不改变战斗规则。
+ *   每个联盟最多 2 个友盟、5 个敌对。新增 ALLIANCE_DIPLOMACY_INVITE（128）/ RESPOND（129）/ END（130）/ HOSTILE（131）与
+ *   GET_ALLIANCE_DIPLOMACY（132，玩家与 Agent 通用；管理类仅玩家盟主 / 副盟主）。TileView.owner 新增 relation
+ *   （self / ally / friendly / hostile / neutral），GET_MAP_OVERVIEW 的 side 新增 friendly / hostile，PUSH_ATTACK_WARNING
+ *   新增 hostileAlliance；GET_ALLIANCE 的联盟详情新增 friends / hostiles。新增错误码 DIPLOMACY_LIMIT / COOLDOWN /
+ *   EXISTS / INVITE_NOT_FOUND；新表 alliance_relations（跨季保留）与 alliance_friend_invites（换季清空）。
+ * v78（玩家交易所，AISLG-196，只加不改）：集市新增挂单交易所：玩家卖出一种资源、标价收取另一种资源或金币；
+ *   新增 GET_MARKET（op 133）/ CREATE_MARKET_ORDER（134）/ BUY_MARKET_ORDER（135）/ CANCEL_MARKET_ORDER（136）。
+ *   挂单立即冻结卖出资源，48 小时未卖完自动撤单退款；吃单整单 / 部分成交，锁挂单行防超卖；双方各扣 5% 手续费，
+ *   各派一支商队（marches.purpose='caravan'，每格 15 秒基准、吃驿站与行军科技，不会被截击）送货。
+ *   单价范围资源间 0.5–2、收金币 0.125–0.5；单张 ≥ 1000、每账号最多 5 张；每日额度 = 主城官府 × 3000 × 缩放，
+ *   北京日重置。门槛主城官府 ≥ 5 且不在新手保护期；可勾选只卖给盟友。新增错误码 MARKET_* / PRICE_OUT_OF_RANGE /
+ *   ORDER_* / DAILY_TRADE_LIMIT；新表 market_orders / market_trades（换季清空），事件 market_*。
+ * v79（洛阳争夺，AISLG-200，只加不改）：洛阳仍是名城分城，占领者所在联盟成为「洛阳之主」，占领者为洛阳太守。
+ *   洛阳被玩家占领后，只在每周六 21:00–23:00（北京时间现实时间）可攻打 / 侦察，窗口外返回 LUOYANG_CLOSED（附 nextOpenAt）；
+ *   窗口内没有被动免战、城防不回涨，窗口结束回满 100 并进入保护；洛阳可接收 10 支协防（普通城 5 支）。
+ *   洛阳之主联盟全员所有城四资源产量 +5%（与名城 / 科技 / 城守同池）。盟主每 7 天可发一道政令（持续 7 天）：
+ *   征兵 −15% / 行军 +10% / 研究 −15%，洛阳易主立即失效。赛季末洛阳之主联盟进名人堂，在盟成员各得 1 万金 + 四资源各 5 万。
+ *   新增 GET_LUOYANG（op 137）/ PUBLISH_DECREE（138）与错误码 LUOYANG_CLOSED / DECREE_NOT_HOLDER / DECREE_COOLDOWN；
+ *   CityView 新增 luoyangBonusPercent；alliances 新增 luoyang_holder / decree_*（跨季重置）；推送/播报 luoyang_window。
+ * v80（剧本战场二：讨伐董卓 / 赤壁之战，AISLG-199，只加不改）：剧本每周轮换（官渡 → 讨董 → 赤壁，循环），GET_BATTLEFIELD 新增
+ *   event.script（guandu / dongzhuo / chibi）、event.wind（赤壁专有：风向、切换时刻与切换前 30 分钟预告）、nextScript、
+ *   strongholds[].unlocked / chainUntil / fireNextAt、rewards.progressTiers，商店赤壁多一个 iron_cavalry（铁骑兵 20，800 军功，每场限 1）。
+ *   讨伐董卓：单阵营合作本（报名统一记为 yuan），汜水关 → 虎牢关 → 洛阳顺序解锁，守军 ×15 / ×40 / ×30 × max(1, 报名 ÷ 10)，
+ *   虎牢关守将吕布带武将加成，全员按最远进度领一档奖励。赤壁之战：孙刘联军对曹操军，爵位大夫才能报名；风向每 6 小时交替，
+ *   顺风方远程兵种与床弩射程 +10%（走科技乘数入口）；火攻（FIRE_BATTLEFIELD_STRONGHOLD，op 139）东南风期间孙刘方花 300 军功，
+ *   对相邻曹方据点立即造成总生命 20% 伤害（写入余伤池、按生命比例折算阵亡），每目标 2 小时一次；连锁战船（CHAIN_BATTLEFIELD_STRONGHOLD，
+ *   op 140）曹方花 200 军功连锁 6 小时：守军受伤 −15%、被火攻翻倍。新增错误码 BATTLEFIELD_STRONGHOLD_LOCKED / WIND_MISMATCH /
+ *   FIRE_COOLDOWN / CHAIN_ACTIVE / SKILL_UNAVAILABLE / NOT_ENTERED；事件 battlefield_skill；PUSH_BATTLEFIELD_STATE reason 新增 wind。
+ * v81（城防器械分城化，AISLG-204，只加不改）：CRAFT_DEFENSE（op 117）新增可选 cityId，缺省主城（与其他城池类协议一致）。
+ *   此前带 cityId 的打造一律记到主城（扣款、队列与库存）；现在按指定城扣款、进该城队列与库存，城墙等级与库存上限按该城算。
+ *   CANCEL_DEFENSE_CRAFT 不变（按条目所属城定位）。
+ *   v82（设为主城，AISLG-205，只加不改）：新增 SET_CAPITAL（op 141，cityId / confirm 必填）——分城与当前主城对调身份，
+ *   原主城变为分城（城防从 100 满值开始计，无额外免战），新主城无城防值；换完后的分城数不超新上限 floor(新主城官府 ÷ 2)。
+ *   冷却 24 小时（按时间缩放，不随官府等级变，新号第一次不受限）；名城不能设为主城；被来袭 / 城防未满时不能设。
+ *   新错误码 FAMOUS_CITY_NOT_CAPITAL / CAPITAL_SWAP_COOLDOWN（附 retryAfterSeconds）/ CAPITAL_SWAP_UNDER_ATTACK /
+ *   CAPITAL_SWAP_DURABILITY_LOW / BRANCH_LIMIT_EXCEEDED（附 limit 与 branchCount）。GET_STATE 新增 capitalSwap
+ *   （cooldownUntil / underAttack / 逐分城 blocked）；事件 capital_changed；PUSH_CITY_STATE 新增 reason=capital_changed。
+ *   新表 capital_swaps（每账号一条冷却）；对调时 cities.created_at 改写为账号最小值减 1 秒（主城判定口径，见 handlers-capital.ts）。
+ * v83（部分撤回，AISLG-207，只加不改）：RECALL_GARRISON（op 33）新增可选 troops（按兵种的正整数数量）。不带 troops 与改动前一致
+ *   （全撤、放弃占领）；带 troops 只撤指定数量、保留占领，被撤的兵走 purpose='return' 返程行军回占领城，剩余驻军继续守地，
+ *   占领加成与连片加成不变。部分撤回后地块至少留 1 兵：撤空返回 GARRISON_WOULD_EMPTY，某兵种超过驻军返回 INSUFFICIENT_GARRISON；
+ *   troops 为空对象 / 未知兵种 / 非正整数返回 INVALID_PARAMS；出错不改任何数据。响应仍为 { march }（返程行军视图）。
+ *   新错误码 GARRISON_WOULD_EMPTY / INSUFFICIENT_GARRISON。
+ * v84（遣散士兵，AISLG-209，只加不改）：新增 DISBAND_TROOPS（op 142，玩家与 Agent 通用，可选 cityId）——把指定城
+ *   **城内驻军**按兵种解散（troops = { 兵种: 正整数 }），立即生效，返还征兵成本的 50%（DISBAND_REFUND_PERCENT，
+ *   每种资源 = floor(Σ 单兵成本 × 数量 × 50%)，多兵种先累加再取整），**不返还人口**；返还入账该城、不钳储量
+ *   （与 CANCEL_RECRUIT 同口径）。只认城市驻军：在外部队（行军 / 返程 / 运输 / 侦察）、野地驻军与协防部队不动。
+ *   该城或其名下野地有行军指向、或有未结 NPC 来袭时返回 CITY_IN_BATTLE（与放弃分城同一判定，判定抽到
+ *   common/src/city-battle.ts）；某兵种超过城内数量返回 INSUFFICIENT_TROOPS；troops 为空 / 未知兵种 / 非正整数
+ *   → INVALID_PARAMS；以上出错都不改任何数据。不含断粮 / 欠饷 / 免战限制（断粮时遣散正是止损）。
+ *   响应 { disbanded, refunded, city }；事件 troops_disbanded（detail = { cityId, troops, refunded }）；
+ *   PUSH_CITY_STATE 新增 reason=troops_disbanded；CityView 新增 inBattle（界面据此置灰遣散按钮）。
+ *   不新增错误码（复用 CITY_IN_BATTLE / INSUFFICIENT_TROOPS）。
+ * v85（伤兵、俘虏、逃兵，AISLG-212，只加不改）：世界地图战斗的战损不再是纯减员——玩家一方各兵种损失
+ *   20% 进伤兵营（WOUNDED_PERCENT，NPC 无伤兵），胜方从败方损失抓 10% 当俘虏（CAPTURED_PERCENT，
+ *   只抓基础七兵种，平局不抓，NPC 打赢玩家不抓；败方是玩家时被俘从阵亡里扣）；断粮兵变的 10%/小时
+ *   减兵改为进逃兵营。伤兵 / 俘虏 72 小时、逃兵 24 小时过期（随全局时间缩放）；三池不吃粮、不参战、
+ *   城池消失时一起清空。新增 RESTORE_TROOPS（op 143，可选 cityId，data.pool = wounded|captive|deserter
+ *   + data.troops）：治疗 50% / 招降 60% / 劝回 50% 征兵资源（先累加后取整，同遣散口径），招降另扣人口
+ *   （军营等级不设限），立即完成回城内驻军，消耗按最早一批优先；劝回逃兵在断粮中被拒（新错误码
+ *   CITY_STARVING）。RELEASE_TROOPS（op 144）：放弃治疗 / 释放俘虏（免费，不返还，deserter 不适用）。
+ *   战报各侧新增 wounded / captured，胜方新增 captives；GET_STATE 每城新增 wounded / captives /
+ *   deserters 三组（troops 合计 + earliestExpireAt）；PUSH_CITY_STATE 新增 reason=troop_pools_changed。
+ *   新表 city_troop_pools（ON DELETE CASCADE 跟随 cities，向后兼容）。
+ * v86（计谋，AISLG-211，只加不改）：新增 GET_STRATAGEMS（op 145）与 CAST_STRATAGEM（op 146，请求
+ *   { heroId, stratagem, target: { cityId } | { marchId } | { attackId } }）与推送 PUSH_STRATAGEM（op 2028）；
+ *   武将在家（不在出征 / 厉练 / 重伤）且冷却结束时消耗 1 张对应类别的计谋令施计（成功失败都扣令、
+ *   不扣金币），施计后该武将冷却 1 小时（随缩放）。8 个计谋：草木皆兵 / 空城计（欺敌：别人侦察该城
+ *   看到倍数换算后的假驻军，先换算再按侦察科技降级；侦察科技 × 5% 概率识破并标 deception）、
+ *   焚烧粮草（立即烧粮，最多 8%）、趁火打劫（仓库防掠保护最多降 30%、持续 1 小时）、
+ *   十面埋伏（锁城最多 60 分钟不能派兵，出兵类 op 返回 CITY_AMBUSHED）、金蝉脱壳（自己返程部队缩短最多 50%，
+ *   每支一次）、八门金锁（开往自己城 / 野地的敌方部队最多延长 30%，含 NPC 袭击与带埋伏的截击行军）、
+ *   蛛丝马迹（列目标玩家全部城池坐标与在外部队去向）。成功率 = 50% + (施计智力 − 城守智力) × 1%，
+ *   鉗 20..90；成功中计后同种计免疫（6/24 小时随缩放）。会失败的计谋不论成败都给目标玩家推 PUSH_STRATAGEM
+ *   警报与 stratagem_received 事件；欺敌与金蝉脱壳不通知。进攻类计谋受 PvP 保护（TARGET_PROTECTED /
+ *   TRUCE_ACTIVE / ALLY_TARGET；自己新手保护中施计即失效）。计谋令只能用战场军功在 BUY_BATTLEFIELD_ITEM
+ *   （op 125）兑换（三种剧本货架都有 4 类令，每场限购、持有上限 STRATAGEM_TOKEN_FULL、换季清零）。
+ *   新错误码 HERO_STRATAGEM_COOLDOWN / HERO_NOT_AVAILABLE / TARGET_PROTECTED / TRUCE_ACTIVE / ALLY_TARGET /
+ *   INVALID_TARGET / STRATAGEM_TOKEN_SHORT / STRATAGEM_TOKEN_FULL / CITY_AMBUSHED；新事件 stratagem_cast /
+ *   stratagem_received；PUSH_MARCH_STATE 新增 reason=march_time_changed；PUSH_CITY_STATE 新增 reason=stratagem；
+ *   CityView 新增 stratagems；ScoutIntel 新增 deception；新表 account_stratagem_tokens / city_stratagem_effects /
+ *   stratagem_immunity；account_heroes 新增 stratagem_cooldown_until、marches 新增 stratagem_used。
+ * v87（酒馆 / 书院只在主城，AISLG-217）：酒馆 tavern 与书院 academy 的效果本来就是账号级的（科技全账号生效、
+ *   武将上限取主城酒馆等级、研究门槛按主城书院），现在只在主城建。BUILD / UPGRADE（含连续升级 toLevel）对分城
+ *   的这两项返回新错误码 BUILDING_MAIN_ONLY，不扣资源、不入队；分城的 CityView.levels / costs / buildings
+ *   不再下发 tavern / academy 两个键（主城照旧）。使用侧一律按主城判定：GET_TECHS 的 academyLevel / academyOk、
+ *   RESEARCH_TECH 的门槛与扣费、GET_HEROES 的候选与 maxTavernLevel / normalCap 都取主城，请求里的 cityId 保留但
+ *   忽略（不报错，结果与不传相同）。酒馆候选账号只有一份，tavern_candidates.city_id 固定为主城（4 小时基准刷新 3 名
+ *   的常量不变）。上线存量数据一次性幂等迁移：全账号最高等级合并到主城（主城更高则不变）、分城两项记录删除、
+ *   分城在建 / 排队的这两项取消并全额返还到该城（沿用 CANCEL_BUILD 的返还规则）、分城候选清空；进行中的研究不受影响。
+ *   SET_CAPITAL（v82）对调身份时两城的酒馆 / 书院记录一并互换（等级跟着「主城」身份走），清空两城候选，
+ *   两城在建 / 排队的这两项同样取消并返还。分城被占领 / 放弃不再有任何等级损失（建筑随城，规则不变）。
+ * v88（伤兵营全城汇总，AISLG-218，只加不改）：新增 GET_TROOP_POOLS（op 147，无参数、只读、玩家与 Agent 通用）——
+ *   一次返回账号全部城的伤兵 / 俘虏 / 逃兵三池与各城断粮时刻：cities[] 每项 { cityId, name, isMain,
+ *   starveAt, wounded, captives, deserters }，三池结构与 CityView 的 wounded / captives / deserters 完全相同
+ *   （troops 按兵种合计 + earliestExpireAt，过期行已过滤），starveAt 与 CityView.starveAt 同口径；主城在前，
+ *   其余按创建时间；三池全空的城也返回。不新增批量协议：一键处理仍由客户端逐城带 cityId 调
+ *   RESTORE_TROOPS（143）/ RELEASE_TROOPS（144），两条协议的行为与数值完全不变。
+ * v89（礼金，AISLG-221，只加不改）：账号新增礼金余额 accounts.gift。每个赛季开始固定发 1000（SEASON_GIFT），
+ *   新号归入当前赛季时、老号进入新赛季的惰性加入时置为 1000（同赛季重复登录不回弹），换季清零；存量账号在
+ *   v89 迁移里按当前赛季一次性补发（列不存在时才建，幂等）。重置账号不动礼金。GET_STATE 新增账号级
+ *   gift（当前余额）与 giftSeasonGrant（= 1000）。新增错误码 INSUFFICIENT_GIFT（扣除失败、余额不变，附 balance）
+ *   与事件 gift_spent（detail = { reason, amount, balance }）。本版本不新增 op，礼金暂无消耗方（用途见 AISLG-222）。
+ * v90（道具，AISLG-222，只加不改）：新增道具背包 user_items（每账号每种道具一行数量，换季随 RESET 表清空）、
+ *   道具配置 ITEM_DEFS（迁城令 50 礼金 / 高级迁城令 100 礼金，堆叠上限 99；代码常量，不进数据库）。新增 GET_ITEMS（op 148，
+ *   背包 items、目录 catalog、礼金 gift）与 BUY_ITEM（op 149，礼金买道具，必须带 expectedPrice；单价不一致返回 ITEM_PRICE_CHANGED）；
+ *   GET_STATE 新增 items；PUSH_ACCOUNT_STATE（op 2020）新增 reason = items_changed（带 items 与 gift）。新增错误码
+ *   INSUFFICIENT_ITEM / ITEM_STACK_FULL / ITEM_PRICE_CHANGED 与事件 item_granted / item_used / item_bought。
+ *   公共函数 grantItem / consumeItem 在 common/src/items-db.ts（仅事务内调用）；消耗由各玩法 op 自己调用（迁城令由 AISLG-220 的 MOVE_CITY 消耗）。
+ * v91（城池迁移，AISLG-220，只加不改）：新增 MOVE_CITY（op 150）：把账号名下的一座城（主城或分城，名城除外）迁到空野地。
+ *   mode = random（消耗 1 张迁城令 city_order，系统按注册落位同一算法选址）或 pointing（消耗 1 张高级迁城令 city_order_adv，
+ *   指定 x / y，目标须为无主空野地，离他人城池格 ≥ 3）；执行须 confirm = true，preview = true 只预览（条件不满足同样返回错误码）。
+ *   拦截顺序：名城 MOVE_CITY_FAMOUS → 本城军队在外 MOVE_CITY_ARMY_OUTSIDE → 盟友驻军 MOVE_CITY_HAS_ALLY_FORCE → 战乱 MOVE_CITY_IN_BATTLE
+ *   → 目标格 MOVE_CITY_TILE_INVALID / MOVE_CITY_TOO_CLOSE / MOVE_CITY_NO_SPACE → 令不足 INSUFFICIENT_ITEM → 并发抢格 MOVE_CITY_TILE_TAKEN。
+ *   旧格：主城 → 空野地（地形保留、等级重抽）；分城 → 回归 NPC 城（等级 = origin_level，并写放弃冷却 city_discards）。
+ *   pointing 迁后 12 小时（随时间缩放）内这座城的掠夺 / 占领 / 侦察 / 派协防返回 MOVE_CITY_ATTACK_LOCK（附 retryAfterSeconds），
+ *   运输、调兵、增援自己名下野地不受限；random 迁城无此限制。城池行新增 move_lock_until。
+ *   GET_STATE 新增 moveCity（逐城 reasons / moveLockUntil，与 random / pointing 两种令的持有数）。
+ *   事件 city_moved；PUSH_CITY_STATE reason = city_moved（带 from / to）与 PUSH_TILE_STATE reason = city_moved（新旧两格）。
+ *   新增 9 个错误码 MOVE_CITY_*（FAMOUS / ARMY_OUTSIDE / HAS_ALLY_FORCE / IN_BATTLE / TILE_INVALID / TILE_TAKEN / TOO_CLOSE / NO_SPACE / ATTACK_LOCK）。
+ * v92（AISLG-224，战争迷雾）：未探索的地块对玩家与 Agent 不可见（开关 fog_enabled 默认关闭）。新增推送 PUSH_EXPLORATION_REPORT（op 2029）与事件 exploration_report；新错误码 TILE_UNEXPLORED / CHAT_COORD_UNEXPLORED / MOVE_CITY_TILE_UNEXPLORED（随各协议落地）。
+ * v93（AISLG-227，战争迷雾的遗迹与探索）：只加不改。地图新增遗迹（200 处，普通 / 稀有 / 传说，8 个种类）与 8 位一线在野名将的名将处所：
+ *   TileView 新增 relic（{ tier, kind }，已探索 / 视野内且未领取才有）与 heroSite（{ name, hero, claimed }，已探索 / 视野内才有），
+ *   迷雾关闭时两者恒为 null；FamousTileView 新增 firstExplorer（迷雾开启时给首探者用户名，尚无人首探为 null，关闭时缺省）。
+ *   行军到达遗迹格（掠夺 / 占领 / 增援 / 侦察，盲打被拒的 fog_denied 除外）即领取，奖励发到主城，每账号每北京日最多 2 处。
+ *   名城首探（8 座）与名将处所首探（8 处）各全服唯一，首探奖励与全服播报见 docs。
+ *   小地图 MapOverviewSide 新增 relic / hero_site / hero_site_claimed。
+ *   探索榜 GET_LEADERBOARD kind = exploration（数值为已探索区块数，前端按 ÷100 显示百分比）；HALL_KINDS 同步新增 exploration。
+ *   新增事件 relic_claimed / famous_first_explored / hero_site_first_explored；新增全服播报 famous_first_explored / hero_site_first_explored / legendary_relic_claimed（必达，不带坐标）。
+ *   探索简报 exploration_report 新增 relics（按种类计数）与 cells 中的 relic 坐标。
+ *   随机落城、随机迁城跳过未领取的遗迹格；高级迁城令指定遗迹格返回 MOVE_CITY_TILE_INVALID。
+ *   开关 fog_enabled 关闭时以上全部不显示、不领取、不记首探；探索榜返回空。
+ * v94（名将忠诚度与被俘，AISLG-228，只加不改）：只有 29 位在野名将有忠诚度（招揽 / 上线迁移时为 100，每 24 小时 −10 从招揽时刻起算，赏赐 +10，欠饷每小时 −1，忠诚度 0 下野，30 及以下提醒一次）。玩家打玩家战败时：攻方随队名将 / 守城失守的城守名将可能被俘（概率 5% + (100 − 忠诚度) × 0.25%，每账号 7 天最多 1 名），囚禁 24 小时，期间不能出征 / 侦察 / 任城守 / 历练 / 赏赐 / 解雇 / 加点 / 洗点 / 施计（新错误码 HERO_CAPTURED）。主人用新增 RANSOM_HERO（op 151）赎回：赎金 2000 × 等级从主城扣，胜方主城收 50%；超时未赎回则下野，胜方得结交资格。GET_HEROES 的 heroes[] 新增 loyalty 与 captive；新错误码 HERO_NOT_CAPTURED；新事件 hero_left / hero_captured / hero_ransomed / hero_loyalty_low；全服播报新增 hero_left / hero_captured；PUSH_HERO_STATE reason 新增 loyalty_changed / captured / ransomed / left。新表 hero_capture_limits（换季清空）；account_heroes 新增 loyalty / loyalty_at / loyalty_warned / loyalty_arrears_at / captured_by / captured_until。
+ * v95（AISLG-226，只加不改）：TileOwnerView 新增 canAssist（tiles[].owner、GET_TILE 等占领者视图）：本账号现在能否向该占领者协防。
+ *   同联盟或友盟（relation 行为 friendly）为 true；自己、解除友好后 24 小时冷却期（relation 仍显示 friendly，只为不能互打）、中立、敌对均为 false，
+ *   与 MARCH task=assist 的校验（ASSIST_NOT_ALLY）口径一致。relation 与其它字段语义不变。
+ * v96（视野内的他人部队上图，AISLG-230，只加不改）：新增 GET_VISIBLE_MARCHES（op 152），请求 data.x / y / w / h
+ *   含义与限制同 GET_WORLD_MAP（窗口最大 20×20，缺省以主城为中心）。返回 { serverTime, marches[] }，每项
+ *   { id, x, y, vx, vy, returning, scale, owner: { username, allianceName, relation } }：
+ *   id 为行军 id（与来袭预警的 marchId 匹配），位置保留 1 位小数，vx / vy 为每秒格数（只供图标平滑移动）。
+ *   上图的部队须是其他账号、status = marching、当前位置（四舍五入到整格）在查看者自己的实时视野内，
+ *   且 fog_enabled 开启（关闭时返回空数组，不报错、不碰迷雾表）。盟友视野不共享；自己的部队、侦察
+ *   （purpose=scout 或编队只有斥候，去程返程都算）、已过 ambush_at 的埋伏、已到达的部队、剧本战场小队不上图。
+ *   规模档位 scale = small（1–499）/ medium（500–4 999）/ large（5 000+）；relation = ally / friendly /
+ *   hostile / neutral，与地块 owner.relation 同口径（解除友好冷却期内算 friendly）；allianceName 无联盟为 null。
+ *   最多返回离窗口中心最近的 50 支。**不下发**出发城、目标格、出发 / 到达时间、精确兵力、兵种、将领与任务类型。
+ *   玩家与 Agent 同一接口、同一套裁剪；服务端在本进程内存里缓存全服在途部队的位置快照（3 秒过期）。
+ * v97（野地设施·望楼，AISLG-232，只加不改）：新增 FACILITY_BUILD（op 153，请求 { x, y }）——在自己**已占领的野地**上
+ *   建望楼，没盖过就新建 1 级、盖过就升一级（最高 3 级）。视野半径 1 / 2 / 3 级 = 6 / 8 / 10 格（切比雪夫，**取代**
+ *   野地原来的 3 格、不叠加），花费 金 / 木 / 石 300·200·100 / 600·400·200 / 900·600·300，基准耗时 120 / 240 / 360 秒
+ *   （÷ time_scale，不低于 1 秒，不吃「建筑」科技折扣）；望楼不占城池建造队列，自带计时（Worker 到期完成）。
+ *   每块地最多一座、每座城名下最多 2 座；资源从占着这块地的那座城扣。
+ *   city.territory[] 每项新增 facility（{ kind: 'watchtower', level, visionRadius, building: { toLevel, finishAt } | null } | null），
+ *   TileView 新增 facility（{ kind, level } | null，别人看到的版本、不含进度），TileDetailView 新增 facilityBuilding
+ *   （只有主人能看到进度）；新事件 facility_completed / facility_lost，PUSH_TILE_STATE 新增 reason facility_completed
+ *   （望楼随野地毁掉时不单独推，那一格另有 wilderness_lost）。
+ *   野地易主、所属分城易主或被放弃、召回驻军放弃占领、账号重置时望楼一并毁掉（不转给新主人、不退资源）。
+ *   新错误码 FACILITY_TILE_INVALID / FACILITY_MAX_LEVEL / FACILITY_BUILDING / FACILITY_LIMIT（资源不足沿用 INSUFFICIENT_RESOURCES）。
+ *   新表 wilderness_facilities（换季清空）；fog_seen 新增 facility_level（上次看到的望楼等级，向后兼容）。
+ *   迷雾开关 fog_enabled 关闭时望楼仍可建，但不产生视野效果。
+ *   同批的丘陵视野（AISLG-233）只改取值、不加字段、不升版本：占领的丘陵野地视野 +2（没望楼 3 → 5，
+ *   1 / 2 / 3 级望楼 6 / 8 / 10 → 8 / 10 / 12），上限 12；主城 / 分城 / 行军中的部队即使脚下是丘陵也不加成。
+ * v98（长期不活跃账号的野地收回，AISLG-238，只加不改）：本人和 Agent 都 7 天没上线（阈值现实时间，
+ *   不随 time_scale 变化，与盟主自动转让同一个 7 天）的账号，Worker 每小时扫一轮，把名下（所有城合计）
+ *   野地一次全部收回：地块变无主（当前储量不重置、不设换主保护，其他玩家可立即占领），驻军直接回到
+ *   这块地所属的城（不走行军、不损失），地上的望楼毁掉（不退资源）。主城 / 分城与城内资源兵力不受影响；
+ *   已收回的地不退还，玩家回来后新占的地需再连续 7 天不活跃才会被收回；收完后重复扫描不再产生事件。
+ *   wilderness_lost 的 detail.cause 新增 inactive（与 facility_lost 的 cause 同名取值）；离线日报
+ *   offline 新增 wildernessInactiveLost（离线期间因长期未上线被收回的野地数，与 wildernessLost 分开计）。
+ *   无新增 op / 推送号 / 错误码，现有客户端无需改动。
+ * v99（五方势力骨架，AISLG-239，只加不改）：地图四角与中央放五方势力——凉州军（韩遂，(80,80)）、乌桓（蹋顿，(920,80)）、
+ *   南蛮（孟获，(80,920)）、山越（费栈，(920,920)）、黑山军（张燕，(500,500)）。老巢是独立的新地块（kind 仍是 wilderness、
+ *   不可出征、不占名城），周围 5 格内不放玩家（注册落位 claimCityTile 与迁城都避开）。势力范围是以老巢为中心的方块，
+ *   半径按本季实际天数变大（第 1~7 天 100、8~14 天 150、15~21 天 200、22 天起 250，不随 time_scale 变化），
+ *   重叠格归离老巢更近的一家（距离相同按上述顺序）。开季时老巢周围 25 格内的 NPC 城全部归该势力，
+ *   之后每家每 6 小时（随缩放）在当前范围内随机吞一座无主 NPC 城；名城 / 玩家城 / 已被吞的城不吞。
+ *   势力城仍是 NPC 城，守军与可掠夺库存是同等级普通 NPC 城的 1.5 倍（写在 npc 快照上，掠夺 / 占领 / 侦察三条路径同时生效），
+ *   玩家占下后不再属于势力。新增 GET_FACTIONS（op 154，只读、玩家与 Agent 通用）：五家的名称 / 首领 / 老巢坐标 /
+ *   当前半径 / 持城数；TileView 新增 faction（{ key, name, nameEn, isLair }，迷雾里已探索但不在视野内为 null）。
+ *   新错误码 FACTION_LAIR_TARGET（MARCH / SCOUT 打老巢被拒）；新全服播报 faction_expanded（半径扩大，每周最多一次）。
+ *   总开关 faction_enabled 存 settings、默认关闭：关闭时行为与上线前完全一致（不放老巢、不吞城、地块无归属、
+ *   落位与迁城不避开老巢、GET_FACTIONS 返回 enabled=false）；打算跟换季一起上线——世界重新生成时才放老巢。
+ *   新表 factions（换季清空）+ world_tiles.faction_lair 列；本张单只做势力本身：不出兵打玩家、不围攻（AISLG-240）、
+ *   老巢不可攻打（AISLG-241）。
+ * v100（势力出兵：袭击打旗号 + 围攻吞分城，AISLG-240，只加不改；开关 faction_enabled 关闭时行为与上线前一致）：
+ *   一、势力范围内的 NPC 袭击打上旗号——发起频率（全服仍每 120 分钟一次）与目标选择都不变，只是落在某家
+ *   势力范围内的这次袭击记下势力与出发老巢：npc_attacks 新增 faction / from_x / from_y（可空），
+ *   npc_attack_warning 事件与 PUSH_NPC_ATTACK_WARNING 推送新增 faction（{ key, name, nameEn }）与 lair，
+ *   npc_raid 事件与战报里的袭击方改成「南蛮袭击部队」，如「南蛮来袭」；范围外的袭击与上线前完全一样。
+ *   黄巾之乱不受影响。
+ *   二、围攻玩家分城：本季满 7 天后（第 8 天起），每家势力在自己范围内选离老巢最近的玩家分城围攻——
+ *   每家同一时间最多围 1 座、同一座城 6 小时最多打一次、打输（守方守住）后 24 小时内不再打这座城；
+ *   每家每周最多吞 2 座玩家分城（一周按本季第 8、15、22 天起算），一季五家合计最多 30 座。
+ *   主城、名城分城（含洛阳）、目标在新手保护 / 主动免战 / 被动免战中的城都不入池，目标失效（免战、
+ *   已易主、迁走、变主城）时本次围攻作废、不战斗。以上时长都是基准时长，随 time_scale 缩放；
+ *   满 7 天与每周界按本季真实天数算，不随缩放。
+ *   围城军战力 = 该分城官府等级 × 倍率（第 8~14 天 100、15~21 天 150、22 天起 200），编成按 3 级 NPC 城
+ *   守军的比例缩放（义兵 100 : 刀盾 30 : 弓箭 40 : 轻骑 12，不带冲车）；战斗走守城战（城墙 / 箭塔 /
+ *   城防器械 / 城守 / 协防全部生效）。每次围攻提前 60 分钟预警（吃烽火台提前量加成，敌情详细度同样按
+ *   烽火台等级分档，与来袭预警同一套），被围城的主人与驻扎在该城的协防方都收到。势力打赢（全灭守军）
+ *   扣 35 城防、这座城进入 4 小时被动免战、不掠夺资源；城防归零时城被吞。
+ *   三、城被吞后（与玩家换主基本一致）：建筑与等级留在城里、剩余资源变成这座城的可掠夺库存、排队中的
+ *   建造 / 征兵 / 研究作废不退资源、城守卸任（武将仍归原主人）、名下野地变无主（望楼按现有规则毁掉、
+ *   驻军回原主人主城）、驻军回原主人主城、在外部队改从原主人主城返程、指向这座城的运输 / 调兵到达时
+ *   按现有失效路径返回、协防部队返回各自的城、针对这座城的 NPC 袭击与别家的围攻作废。地块变成归属该势力
+ *   的 NPC 城（npc 快照带 faction，守军 = 围城军编成与战力，不再乘势力城的 1.5 倍），任何玩家都能按占领
+ *   NPC 城的流程打下它（官府门槛、分城名额照旧）并接收建筑与库存；原主人腾出分城名额、收到失城事件与
+ *   全服播报，**不写放弃冷却**（打回来不受放弃分城冷却限制）。
+ *   四、协议：新增推送 PUSH_FACTION_SIEGE（op 2030，reason = warning / repelled / hit / swallowed），
+ *   PUSH_NPC_ATTACK_WARNING 新增可选 faction 与 lair；新事件 faction_siege_warning / faction_siege /
+ *   faction_city_lost；新全服播报 faction_city_swallowed（必达）。新表 faction_sieges（换季清空）+
+ *   npc_attacks 三列。打老巢、奖励、势力灭亡不在本版本（AISLG-241）。
+ * v101（攻破老巢：20 营、歼灭奖励、灭亡与重生，AISLG-241，只加不改；开关 faction_enabled 关闭时行为与上线前一致）：
+ *   一、怎么打：老巢分成 20 营，每次进攻只打当前一营、走守城战（城墙减伤 50%）。当前营的守军打掉多少算多少，
+ *   打输也保留残血；这一营清空才进入下一营，已打掉的营不会回来。连续 24 小时（随 time_scale 缩放）没人进攻
+ *   恢复 1 营（最多 20 营，当前营残血同时回满）。每营战力 = 全服战力前 10 名合计 ÷ 15，每天刷新一次、只升不降、
+ *   最低 10,000（全服战力算城内 + 野地驻军 + 行军中 + 协防），没打掉的营按新值、当前营保留残血比例；编成按
+ *   义兵 100 : 刀盾 30 : 弓箭 40 : 轻骑 12 缩放。任何玩家都能打（不要求入盟，不算攻击玩家、不破新手保护）。
+ *   二、奖励：每场战斗按歼灭的守军战力发金币 2 / 木粮石铁各 10（打输也发、不占负重，直接入账到出征城）；
+ *   声望按歼灭战力的 1%（不走世界地图 1:1）；最后一击的玩家获得该势力首领名将（韩遂 / 蹋顿 / 孟获 / 费栈 / 张燕，
+ *   全服唯一，名将总数 40 → 45）；灭亡时按贡献名次（累计歼灭守军战力）再发一次，数额是黄巾之乱同名次的 3 倍
+ *   （第 1 名 18,000 金 + 各 90,000；2~3 名 12,000 + 各 60,000；4~10 名 7,500 + 各 36,000；其余参与者 2,400 + 各 9,000）。
+ *   三、灭亡以后：本季灭亡并全服播报（带最后一击玩家名）；不再吞城、在途围攻作废；势力持有的城全部变回普通
+ *   NPC 城（普通的势力城守军与库存从 1.5 倍除回 1 倍，被吞的玩家分城保留建筑与库存）；原范围内的 NPC 袭击
+ *   恢复成无旗号（全服袭击频率不变）；老巢地块变成废墟（本季不能占领、不能再出征）；其他势力范围不扩大
+ *   （原归灭亡势力的格不会改归别家）。换季后五家重生、贡献清零。
+ *   四、协议：GET_FACTIONS 的 factions[] 新增 destroyed / campsTotal / campsRemaining / campRemainingPercent /
+ *   campPower，TileView.faction 新增可选 destroyed（老巢废墟）；新增推送 PUSH_FACTION_LAIR（op 2031，
+ *   reason = attacked / recovered / destroyed，全服广播）；新事件 faction_lair_battle / faction_lair_reward /
+ *   faction_lair_destroyed；新全服播报 faction_lair_destroyed（必达）；战报 kind 新增 faction_lair。
+ *   新表 faction_lairs / faction_contrib（均换季清空）。faction_enabled 关闭时以上全部不出现。
+ * v102（势力当季启用，AISLG-243，只加不改；开关 faction_enabled 关闭时行为与上线前一致）：
+ *   一、启用时间：新增 settings 的 faction_started_at（开关第一次打开、或换季 / 世界重建生成老巢时记下当时时刻）。
+ *   势力的「第几天」改为从 max(本季开始时间, 启用时间) 算起：换季启用时两者相同、行为完全不变；赛季中途打开开关时
+ *   从开启当天算第 1 天（半径 100 格、满 7 天即第 8 天才开始围攻、之后每周 +50 格），玩家有一周准备。
+ *   受影响的只有计算口径：势力范围半径、半径扩大播报、围攻起算日与每周吞城上限的周界、GET_FACTIONS 的 day / radius。
+ *   二、当季启用：开关打开后不等换季，Worker 一旦发现开关已开而 faction_started_at 还没记录，就在一个事务内放一次老巢
+ *   （写启用时间、打老巢标记、插 factions 行、吞周围 25 格内的 NPC 城）。老巢格上或周围 5 格（切比雪夫）内有玩家城的那家
+ *   本季不放：不吞城、不围攻、不出现在 GET_FACTIONS 与地图图层、原范围内的 NPC 袭击也不带它的旗号；不为让位迁玩家的城，
+ *   下季换季再生成。只执行一次（以 faction_started_at 是否已有记录为准）：关掉再打开不重复放老巢，也不补放当初跳过的那家。
+ *   启用后发一条公告：说明天数从开启当天算第 1 天，以及是哪几家本季没放（原因：该处已有玩家城）。
+ *   三、换季路径不变：换季后五家照旧全部生成，faction_started_at 重置为新赛季开始时间，天数从新赛季开始算
+ *   （开关在换季时关着的则删掉记录）。协议结构无变化，只有 GET_FACTIONS 的 day 语义改为「势力的第几天」。
  */
-export const PROTOCOL_VERSION = 70;
+export const PROTOCOL_VERSION = 102;

@@ -9,6 +9,9 @@ import { upgradeChainPreview } from '../../api/chainPlan';
 import { buildingEffectText, costParts, formatDurationText } from '../../api/mapping';
 import { useCopy } from '../../i18n/bundle';
 import type { ConnectionStatus } from '../../state/useGameSession';
+import type { DefenseKind } from '../../api/protocol';
+import { DefenseCraftPanel } from './DefenseCraftPanel';
+import { CostPart } from '../ui/ShortfallMenu';
 
 interface BuildingDetailProps {
   city: CityView;
@@ -18,11 +21,25 @@ interface BuildingDetailProps {
   onStartBuild: (kind: BuildingKind) => void;
   /** toLevel（当前+2..MAX）为连续升级目标（v22，AISLG-68）；缺省升到下一等级 */
   onStartUpgrade: (kind: BuildingKind, toLevel?: number) => void;
+  /** 城防器械（v73，AISLG-193）：仅城墙详情使用 */
+  defenseError?: string | null;
+  onCraftDefense?: (kind: DefenseKind, count: number) => void;
+  onCancelDefenseCraft?: (craftId: string) => void;
 }
 
-export function BuildingDetail({ city, kind, connection, onClose, onStartBuild, onStartUpgrade }: BuildingDetailProps) {
+export function BuildingDetail({
+  city,
+  kind,
+  connection,
+  onClose,
+  onStartBuild,
+  onStartUpgrade,
+  defenseError = null,
+  onCraftDefense,
+  onCancelDefenseCraft,
+}: BuildingDetailProps) {
   const copy = useCopy();
-  const { BUILDING_DESC, BUILDING_LABEL, COPY, buildActionText } = copy;
+  const { BUILDING_DESC, BUILDING_LABEL, COPY, SHORTFALL_COPY, buildActionText } = copy;
   // 连升目标等级（AISLG-68）：null = 单级（当前+1）；换建筑时由父级 key 复位
   const [targetLevel, setTargetLevel] = useState<number | null>(null);
   const label = BUILDING_LABEL[kind];
@@ -45,6 +62,8 @@ export function BuildingDetail({ city, kind, connection, onClose, onStartBuild, 
       : null;
   // 展示用消耗：连升时为整链预估总成本，单级 / 建造为服务端下发的下一步成本
   const displayCost: Resources | null = chain ? chain.totalCost : actionCost;
+  const parts = displayCost ? costParts(displayCost, city.resources) : [];
+  const lacking = parts.some((part) => part.insufficient);
   const disabled = connection !== 'online' || queueFull || level >= levelMax || entry != null;
 
   const hint =
@@ -54,11 +73,13 @@ export function BuildingDetail({ city, kind, connection, onClose, onStartBuild, 
         ? COPY.buildingModal.hintInQueue
         : queueFull
           ? COPY.buildingModal.hintQueueFull
-          : chain
-            ? COPY.buildingModal.hintChain
-            : level > 0
-              ? COPY.buildingModal.hintUpgradeCost
-              : COPY.buildingModal.hintEnqueue;
+          : lacking
+            ? SHORTFALL_COPY.hintClick
+            : chain
+              ? COPY.buildingModal.hintChain
+              : level > 0
+                ? COPY.buildingModal.hintUpgradeCost
+                : COPY.buildingModal.hintEnqueue;
 
   return (
     <div role="城池页-建筑详情" className="flex min-h-0 flex-col gap-2">
@@ -94,12 +115,16 @@ export function BuildingDetail({ city, kind, connection, onClose, onStartBuild, 
       {displayCost ? (
         <div role="城池页-建筑详情-消耗" className="font-mono text-[12px] leading-snug text-dim">
           <span className="text-faint">{chain ? COPY.buildingModal.costChainLabel(chain.levels) : COPY.buildingModal.costLabel} </span>
-          {costParts(displayCost, city.resources).map((part, index) => (
-            <span key={part.label} className={part.insufficient ? 'text-accent' : undefined}>
-              {index > 0 ? ' · ' : ''}
-              {part.label} {part.value}
-              {part.insufficient ? COPY.buildingModal.insufficient : ''}
-            </span>
+          {parts.map((part, index) => (
+            <CostPart
+              key={part.key}
+              part={part}
+              city={city}
+              rolePrefix="城池页-建筑详情"
+              insufficientLabel={COPY.buildingModal.insufficient}
+              prefix={index > 0 ? ' · ' : ''}
+              currentKind={kind}
+            />
           ))}
           {chain ? (
             <span className="ml-1.5 text-faint">{COPY.buildingModal.durationLine(formatDurationText(chain.totalSeconds))}</span>
@@ -133,6 +158,16 @@ export function BuildingDetail({ city, kind, connection, onClose, onStartBuild, 
         {entry ? (entry.status === 'building' ? COPY.buildingModal.queueActive : COPY.buildingModal.queueQueued) : COPY.buildingModal.queueNotIn}
         {entry ? `（${buildActionText(entry.level)}）` : ''}
       </p>
+
+      {kind === 'wall' && level > 0 && onCraftDefense && onCancelDefenseCraft ? (
+        <DefenseCraftPanel
+          city={city}
+          connection={connection}
+          error={defenseError}
+          onCraft={onCraftDefense}
+          onCancel={onCancelDefenseCraft}
+        />
+      ) : null}
 
       <div role="城池页-建筑详情-操作" className="flex items-center justify-between gap-2">
         <span className="line-clamp-2 min-w-0 flex-1 text-[11.5px] text-faint" title={hint}>

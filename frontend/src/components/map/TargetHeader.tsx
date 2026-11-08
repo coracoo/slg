@@ -10,8 +10,12 @@ import { tName } from '../../i18n/names';
 import { useScoutReportModal } from '../../state/scoutReportModal';
 import type { WorldSession } from '../../state/worldSession';
 import { FamousCityNote } from '../FamousCityNote';
+import { WorldSiteNote } from './WorldSiteNote';
+import { TargetCloseButton } from './TargetCloseButton';
 import { relativeAgo } from '../ScoutReportModal';
 import { YellowTurbanCampNote } from '../YellowTurbanCampNote';
+import { tileFactionText } from '../worldMapTip';
+import { FactionLairNote } from './FactionLairNote';
 import { plunderCooldownLeft, protectionLeftText } from '../worldPanelText';
 
 interface TargetHeaderProps {
@@ -52,7 +56,7 @@ function iconOf(detail: TileDetailView, mover: 'caravan' | 'bandit' | null, isOw
 
 export function TargetHeader({ world, city, x, y, detail, origin, branch, now, mover, isOwnCity, onClose }: TargetHeaderProps) {
   const copy = useCopy();
-  const { COPY, CITY_COPY, RESOURCE_LABEL, TERRAIN_LABEL, TILE_KIND_LABEL, TARGET_COPY, TECH_COPY, HERO_COPY, ALLIANCE_COPY } = copy;
+  const { COPY, CITY_COPY, RESOURCE_LABEL, TERRAIN_LABEL, TILE_KIND_LABEL, TARGET_COPY, TECH_COPY, HERO_COPY, ALLIANCE_COPY, TROOP_LABEL } = copy;
   const { openScoutReport } = useScoutReportModal();
   const [lookup, setLookup] = useState<'idle' | 'loading' | 'missing'>('idle');
 
@@ -74,8 +78,12 @@ export function TargetHeader({ world, city, x, y, detail, origin, branch, now, m
     }
   };
 
+  /** 老巢地块（AISLG-241）：底层是一块野地，但不能按野地展示 */
+  const lair = detail?.faction?.isLair ? detail.faction : null;
   const name = !detail
     ? TARGET_COPY.detailTitle(x, y)
+    : lair
+      ? tileFactionText(detail)
     : detail.camp
       ? detail.camp.label
       : detail.kind === 'city'
@@ -87,13 +95,20 @@ export function TargetHeader({ world, city, x, y, detail, origin, branch, now, m
           : `${TERRAIN_LABEL[detail.terrain]} Lv${detail.level}`;
   const distance = origin ? Math.abs(x - origin.x) + Math.abs(y - origin.y) : null;
   const range = detail?.npc?.scoutDetail && detail.npc.scoutDetail !== 'exact' ? detail.npc.garrisonTotal : null;
-  const garrison = !detail
+  const garrison = !detail || lair
     ? TARGET_COPY.unknown
     : range
       ? TECH_COPY.scout.garrisonRangeShort(range.min, range.max)
       : detail.kind === 'city' && detail.garrison <= 0
         ? TARGET_COPY.unknown
         : String(TROOP_KINDS.reduce((sum, kind) => sum + (detail.garrisonDetail?.[kind] ?? 0), 0) || detail.garrison);
+  /** 守军按兵种展开（GET_TILE 的 garrisonDetail，纯展示）；侦察粗略档只有总数范围，不展开 */
+  const garrisonBreakdown =
+    detail && !range
+      ? TROOP_KINDS.filter((kind) => (detail.garrisonDetail?.[kind] ?? 0) > 0)
+          .map((kind) => `${TROOP_LABEL[kind].name} ${detail.garrisonDetail[kind]}`)
+          .join(' · ')
+      : '';
   const cooldown = plunderCooldownLeft(detail?.plunderedAt ?? null, now, city.timeScale);
   /** 对方保护 / 免战状态（v38 AISLG-122）：任一截止未到即受保护，出征会被服务端拒绝 */
   const protectionLeft = protectionLeftText(detail?.protection ?? null, now);
@@ -110,20 +125,19 @@ export function TargetHeader({ world, city, x, y, detail, origin, branch, now, m
           </b>
           <small className="block truncate text-[11.5px] text-dim">
             ({x},{y})
-            {detail ? ` · ${TERRAIN_LABEL[detail.terrain]} · ${TILE_KIND_LABEL[detail.kind]}` : ''}
+            {detail ? ` · ${TERRAIN_LABEL[detail.terrain]}${lair ? '' : ` · ${TILE_KIND_LABEL[detail.kind]}`}` : ''}
           </small>
         </span>
-        <button
-          type="button"
-          role="选中详情-关闭按钮"
-          aria-label={TARGET_COPY.close}
-          title={TARGET_COPY.close}
-          onClick={onClose}
-          className="cursor-pointer rounded px-1.5 py-0.5 text-[14px] leading-none text-faint hover:text-fg"
-        >
-          ✕
-        </button>
+        <TargetCloseButton onClose={onClose} />
       </div>
+
+      {/* 势力归属（v99，AISLG-239）：势力城在这儿标出来；老巢标题已写明，这里给战况 */}
+      {lair ? <FactionLairNote faction={lair} /> : null}
+      {detail?.faction && !lair ? (
+        <div role="选中详情-势力归属" className="text-[11.5px] text-gold">
+          {tileFactionText(detail)}
+        </div>
+      ) : null}
 
       {detail === null ? (
         <p className="text-[12px] text-faint">{TARGET_COPY.loading}</p>
@@ -131,7 +145,7 @@ export function TargetHeader({ world, city, x, y, detail, origin, branch, now, m
         <>
           <div role="选中详情-要点" className="grid grid-cols-3 gap-1">
             <Fact label={TARGET_COPY.factDistance} value={distance === null ? TARGET_COPY.unknown : TARGET_COPY.distance(distance)} />
-            <Fact label={TARGET_COPY.factGarrison} value={garrison} />
+            <Fact label={TARGET_COPY.factGarrison} value={garrison} sub={garrisonBreakdown} />
             <div role="世界地图详情区-上次侦察" className="min-w-0 rounded-[5px] border border-line-soft bg-panel-2 px-2 py-0.5">
               <span className="block text-[10.5px] text-faint">{TARGET_COPY.factScout}</span>
               {detail.scoutedAt ? (
@@ -151,12 +165,28 @@ export function TargetHeader({ world, city, x, y, detail, origin, branch, now, m
             </div>
           </div>
           <div role="世界地图详情区-地块摘要" className="flex flex-col gap-1 text-[11.5px]">
-            {detail.kind !== 'npc_city' ? (
+            {/* 丘陵上的野地视野 +2（AISLG-233）：地形是公开信息，别人的丘陵野地也显示 */}
+            {detail.kind === 'wilderness' && detail.terrain === 'hill' && !lair ? (
+              <p role="选中详情-高地视野" className="truncate text-accent">
+                {copy.EXTRA_MAP.hillVision.detail}
+              </p>
+            ) : null}
+            {detail.kind !== 'npc_city' && !lair ? (
               <p className="truncate text-dim" title={detail.owner ? `${detail.owner.username} · ${tName(detail.owner.cityName)}` : undefined}>
                 {detail.owner ? COPY.worldMap.ownerRow(`${detail.owner.username} · ${tName(detail.owner.cityName)}`) : COPY.worldMap.ownerNone}
               </p>
             ) : null}
-            {detail.owner?.ally ? (
+            {detail.owner?.relation === 'friendly' ? (
+              <p role="选中详情-友盟" className="truncate font-semibold text-accent">
+                {ALLIANCE_COPY.diplomacy.friends}
+              </p>
+            ) : null}
+            {detail.owner?.relation === 'hostile' ? (
+              <p role="选中详情-敌对" className="truncate font-semibold text-st-error">
+                {ALLIANCE_COPY.diplomacy.hostiles}
+              </p>
+            ) : null}
+            {detail.owner?.ally || detail.owner?.relation === 'ally' ? (
               <p role="选中详情-盟友" className="truncate font-semibold text-st-online">
                 {ALLIANCE_COPY.ally.tag}
               </p>
@@ -167,6 +197,7 @@ export function TargetHeader({ world, city, x, y, detail, origin, branch, now, m
               </p>
             ) : null}
             {detail.famous ? <FamousCityNote famous={detail.famous} /> : null}
+            <WorldSiteNote relic={detail.relic} heroSite={detail.heroSite} />
             {detail.camp ? <YellowTurbanCampNote camp={detail.camp} now={now} /> : null}
             {detail.nativePower > 0 ? <p className="truncate text-warn">{COPY.worldMap.nativePowerRow(detail.nativePower)}</p> : null}
             {detail.wildFamousIntel ? (
@@ -181,13 +212,13 @@ export function TargetHeader({ world, city, x, y, detail, origin, branch, now, m
                   : HERO_COPY.wild.intelHidden}
               </p>
             ) : null}
-            {detail.wilderness ? (
+            {detail.wilderness && !lair ? (
               <p className="truncate text-dim">
                 {COPY.worldMap.wildernessBonusRow(RESOURCE_LABEL[detail.wilderness.resource], detail.wilderness.bonusRate)}
                 {detail.wilderness.gatherRate > 0 ? ` · ${COPY.worldMap.wildernessGatherRow(RESOURCE_LABEL[detail.wilderness.resource], detail.wilderness.gatherRate)}` : ''}
               </p>
             ) : null}
-            {detail.reserve ? (
+            {detail.reserve && !lair ? (
               <p role="世界地图详情区-野地储量" className="truncate text-dim">
                 {COPY.worldMap.reserveRow(COPY.worldMap.reserveTier[detail.reserve.tier], detail.reserve.current, detail.reserve.cap)}
                 {detail.reserve.eta ? ` · ${COPY.worldMap.reserveEta(detail.reserve.eta.kind, formatClock(detail.reserve.eta.at))}` : ''}
@@ -223,13 +254,18 @@ export function TargetHeader({ world, city, x, y, detail, origin, branch, now, m
   );
 }
 
-function Fact({ label, value }: { label: string; value: string }) {
+function Fact({ label, value, sub = '' }: { label: string; value: string; sub?: string }) {
   return (
     <div className="min-w-0 rounded-[5px] border border-line-soft bg-panel-2 px-2 py-0.5">
       <span className="block text-[10.5px] text-faint">{label}</span>
       <b className="block truncate font-mono text-[12.5px] font-medium tabular-nums" title={value}>
         {value}
       </b>
+      {sub ? (
+        <small role="选中详情-守军明细" className="block truncate text-[10.5px] text-dim" title={sub}>
+          {sub}
+        </small>
+      ) : null}
     </div>
   );
 }

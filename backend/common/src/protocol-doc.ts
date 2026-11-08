@@ -218,9 +218,17 @@ export const ERROR_DOC: Record<ErrorCode, ErrorDoc> = {
     desc: '建筑已达等级上限（当前为 20 级，v31 AISLG-85 由 10 级开放；占位数值）。UPGRADE 的 toLevel 超过上限同样返回本错误码。',
     action: '该类型已无法继续升级，转投其他建筑或系统。',
   },
+  BUILDING_MAIN_ONLY: {
+    desc: '该建筑只能在主城建造 / 升级（v87，AISLG-217：酒馆 tavern 与书院 academy）。两者的效果本来就是账号级的（科技全账号生效、武将上限取主城酒馆等级），分城建了无用，因此只在主城建造；分城的 BUILD / UPGRADE（含连续升级 toLevel）一律返回本错误码，不扣资源、不入队。',
+    action: '改用主城（不带 cityId 或传 GET_STATE 的 cities[] 中 isMain 为 true 的那座）发起 BUILD / UPGRADE；分城的 city.levels / city.costs 与建筑清单里不含这两项，不要再尝试建造。',
+  },
   BUILD_NOT_CANCELLABLE: {
-    desc: '目标建造不存在、不属于本账号或不在排队状态。进行中任务能否取消待设计，当前仅排队条目（status=queued）可取消（v7）。',
-    action: '用 GET_STATE 查看 city.queue，只对 status=queued 的条目发起 CANCEL_BUILD。',
+    desc: '目标建造不存在、不属于本账号，或已完成 / 已取消。排队中与建造中的条目都可取消（v7 起排队可取消，v71 AISLG-190 起建造中也可取消）。',
+    action: '用 GET_STATE 查看 city.queue，只对 status=queued 或 building 的条目发起 CANCEL_BUILD。',
+  },
+  TRAINING_NOT_CANCELLABLE: {
+    desc: '（v71，AISLG-190）没有可取消的历练：武将未在历练中、历练已到点结算（经验已到账），或武将不属于本账号。',
+    action: '用 GET_HEROES 看该武将的 training 是否为 null；为 null 即历练已结束，无需取消。',
   },
   AGENT_FORBIDDEN: {
     desc: '该协议对连接声明的登录类型有限制：RESET_ACCOUNT 仅玩家连接可调用，AGENT_REPORT_PLAN 仅 Agent 连接可调用。注意：role 是连接自报的标记，本限制拦住诚实声明的对端，不是可独立验证的安全边界。',
@@ -243,20 +251,28 @@ export const ERROR_DOC: Record<ErrorCode, ErrorDoc> = {
     action: '等队首完成后重试，或先取消排队条目腾出位置。',
   },
   RECRUIT_NOT_CANCELLABLE: {
-    desc: '目标征兵不存在、不属于本账号或不在排队状态。征募中条目能否取消待设计，当前仅排队条目可取消（v11）。',
-    action: '用 GET_STATE 查看 city.recruitQueue，只对 status=queued 的条目发起 CANCEL_RECRUIT。',
+    desc: '目标征兵不存在、不属于本账号，或已完成 / 已取消。排队中与征募中的条目都可取消（v11 起排队可取消，v71 AISLG-190 起征募中也可取消）。',
+    action: '用 GET_STATE 查看 city.recruitQueue，只对 status=queued 或 recruiting 的条目发起 CANCEL_RECRUIT。',
   },
   TARGET_NOT_ATTACKABLE: {
     desc: '出征目标当前不可攻击（v12）：坐标在世界外、玩家城池地块（含自己的城），或已被其他玩家占领的野地。玩家对抗（攻城与争夺野地）随后续阶段开放，当前只能出征无主 / 本账号占领的野地与 NPC 城池。',
     action: '用 GET_WORLD_MAP / GET_TILE 确认目标类别与归属；换一块无主野地或 NPC 城池，或先撤回对本账号地块的出征计划。',
   },
   INSUFFICIENT_TROOPS: {
-    desc: '城内驻军不足以派出请求的编队（v12：出征在发起时立即扣减 city.army，行军中的部队不在城内）。',
-    action: '失败响应附当前城池状态（data.city.army）；按城内驻军调整编队，或等待征兵完成 / 部队返程后再出征。',
+    desc: '城内驻军不足以派出请求的编队（v12：出征在发起时立即扣减 city.army，行军中的部队不在城内），或 DISBAND_TROOPS 要遣散的某兵种数量超过该城城内驻军（v84，AISLG-209；不改任何数据）。',
+    action: '出征：失败响应附当前城池状态（data.city.army），按城内驻军调整编队，或等待征兵完成 / 部队返程后再出征。遣散：用 GET_STATE 的 city.army 核对各兵种城内数量（在外部队与野地驻军不算），按实际数量重发。',
   },
   TILE_NOT_OCCUPIED: {
     desc: '该地块未被本账号占领（无主、他人占领或不是野地），无法召回驻军（v12）。',
     action: '用 GET_STATE 的 city.territory 核对本账号占领的野地坐标，只对列表中的地块发起 RECALL_GARRISON。',
+  },
+  GARRISON_WOULD_EMPTY: {
+    desc: '部分撤回（RECALL_GARRISON 带 troops，v83）的撤回总数等于或超过该地块驻军总数，会把地块撤空。部分撤回不放弃占领，因此地块至少要留 1 个兵；不改任何数据。',
+    action: '减少撤回数量，使地块至少留 1 兵；若要全部撤回并放弃占领，不带 troops 重新发起 RECALL_GARRISON。',
+  },
+  INSUFFICIENT_GARRISON: {
+    desc: '部分撤回（RECALL_GARRISON 带 troops，v83）中某兵种的撤回数量超过该地块现有驻军。不改任何数据。',
+    action: '用 GET_STATE 的 city.territory 或 GET_TILE 的 tile.garrisonDetail 核对各兵种现有驻军，按实际数量重发。',
   },
   MARCH_NOT_RECALLABLE: {
     desc: '行军不存在、不属于本账号、不在行军途中或已是返程，无法撤回（v13）。',
@@ -295,16 +311,40 @@ export const ERROR_DOC: Record<ErrorCode, ErrorDoc> = {
     action: '如要放弃的是分城，请传该分城的 cityId（GET_STATE 的 cities[]，isMain 为 false）。',
   },
   CITY_IN_BATTLE: {
-    desc: '该城或其名下野地正有行军在途（来袭、运输或占领），或有未结的 NPC 来袭，暂不能放弃（v57，AISLG-153）。',
-    action: '等待这些行军结算或 NPC 来袭结束后再放弃。',
+    desc: '该城或其名下野地正有行军在途（来袭、运输或占领），或有未结的 NPC 来袭：此时不能放弃分城（v57，AISLG-153），也不能遣散士兵（v84，AISLG-209，否则会变成「躲战损 + 拿回一半资源」的投机）。不改任何数据。',
+    action: '等这些行军结算或 NPC 来袭结束后再放弃 / 遣散；GET_STATE 的 city.inBattle 为 true 时可以先不发起。',
   },
   ARMY_OUTSIDE: {
     desc: '该分城仍有部队在外（行军 / 返程 / 运输 / 侦察），不能放弃（v57，AISLG-153）。',
     action: '等部队回城或结算后再放弃。',
   },
+  CITY_STARVING: {
+    desc: 'RESTORE_TROOPS 劝回逃兵被拒：该城正在断粮（粮食归零且净产量为负，v85，AISLG-212）。不改任何数据。',
+    action: '先恢复粮食净产出（运送粮食、减少驻军或提高产量），断粮结束后再劝回逃兵（注意逃兵 24 小时过期）。',
+  },
   WILDERNESS_GARRISONED: {
     desc: '名下野地里仍有驻军，不能放弃（v57，AISLG-153）：放弃后野地转为无主，驻军无处安放。',
     action: '先用 RECALL_MARCH 召回各块野地的驻军，再放弃。',
+  },
+  FAMOUS_CITY_NOT_CAPITAL: {
+    desc: '名城（洛阳、长安、官渡、成都、建业、邺城、许昌、襄阳）不能设为主城（v82，AISLG-205）：名城是争夺型资源，主城不可被占领会让名城失去意义，名城效果与专属兵都跟着「可被占领」走。',
+    action: '改选普通分城；名城不能当主城。',
+  },
+  CAPITAL_SWAP_COOLDOWN: {
+    desc: '本账号距上次设为主城不满 24 小时（v82，AISLG-205；按全局时间缩放换算，不随官府等级变，新号第一次不受限）。响应 data.retryAfterSeconds 为剩余秒数。',
+    action: '等待 retryAfterSeconds 后再试（GET_STATE 的 capitalSwap.cooldownUntil 为截止时刻）。',
+  },
+  CAPITAL_SWAP_UNDER_ATTACK: {
+    desc: '本账号任一城或任一块野地正有他人玩家的掠夺 / 占领出征在途（v82，AISLG-205）：不允许在被攻击期间对调主城，避免「看到来袭的最后一刻换成不可占领主城」。',
+    action: '等来袭结算或被召回后再设为主城（GET_STATE 的 capitalSwap.underAttack 为真时即是）。',
+  },
+  CAPITAL_SWAP_DURABILITY_LOW: {
+    desc: '目标分城的城防值未满 100（v82，AISLG-205）：被打残的城不能临时换成不可占领的主城。',
+    action: '等城防回满（免战结束后每小时回涨），或改选城防满的分城。',
+  },
+  BRANCH_LIMIT_EXCEEDED: {
+    desc: '设为主城后分城数会超过新主城的分城上限（v82，AISLG-205）：上限 = floor(新主城官府等级 ÷ 2)；响应 data.limit 为新上限、data.branchCount 为当前分城数（对调前后不变）。',
+    action: '先升级目标分城的官府到能容纳当前分城数的等级，或放弃一座分城（DISCARD_CITY）后再设为主城。',
   },
   OUTER_NOT_CLEARED: {
     desc: '名城外围驻军尚未清空时对其发起 task=occupy（v24，AISLG-56）：名城分两阶段攻打，先清外围、外围清空后才能攻城守并占领。',
@@ -323,7 +363,7 @@ export const ERROR_DOC: Record<ErrorCode, ErrorDoc> = {
     action: '等待 PUSH_TECH_STATE（research_completed）后再发起，或用 CANCEL_RESEARCH 取消当前研究（全额返还）。',
   },
   ACADEMY_TOO_LOW: {
-    desc: '发起研究的城书院等级低于目标等级（v27，AISLG-77：第 N 级科技要求书院 ≥ N 级，未建书院按 0 级）；失败 data 附 academyRequired（要求的书院等级）与 academyLevel（该城现有）。',
+    desc: '书院等级低于目标等级（v27，AISLG-77：第 N 级科技要求书院 ≥ N 级，未建书院按 0 级；v87 AISLG-217 起按主城的书院判定）；失败 data 附 academyRequired（要求的书院等级）与 academyLevel（主城现有）。',
     action: '先在该城建造 / 升级书院（academy）到 academyRequired，或改用书院更高的分城发起（data.cityId）。',
   },
   RESEARCH_NOT_CANCELLABLE: {
@@ -331,7 +371,7 @@ export const ERROR_DOC: Record<ErrorCode, ErrorDoc> = {
     action: '先用 GET_TECHS 确认 research 字段；已完成的研究无法取消。',
   },
   DEPLOY_LIMIT: {
-    desc: '本城同时在外的部队数已达校场等级上限（v30，AISLG-80）：MARCH / SCOUT 发起时校验，上限 = 校场等级（未建校场按 1），计入行军中、返程中、驻守野地的部队（每块占领野地算一支），不计城内驻军；上线前已在外的部队不受影响、不强制召回，只拦新的出征，直到在外数量降到上限以下。失败 data 附 city（city.deploy = { count, limit }）。分城各算各的。',
+    desc: '本城同时在外的部队数已达校场等级上限（v30，AISLG-80）：MARCH / SCOUT 发起时校验，上限 = 校场等级（未建校场按 1），计入行军中、返程中、驻守野地的部队（每块占领野地算一支），不计城内驻军与交易所商队（不带兵）；上线前已在外的部队不受影响、不强制召回，只拦新的出征，直到在外数量降到上限以下。失败 data 附 city（city.deploy = { count, limit }）。分城各算各的。',
     action: '等在外部队回城 / 用 RECALL_GARRISON 召回驻军降到上限以下再出征，或升级本城校场（parade_ground）；GET_STATE 的 city.deploy 可提前判断。',
   },
   MOVING_TARGET_GONE: {
@@ -347,7 +387,7 @@ export const ERROR_DOC: Record<ErrorCode, ErrorDoc> = {
     action: '重拉 GET_HEROES 取当前候选再招募。',
   },
   HERO_CAP_REACHED: {
-    desc: '（v36，AISLG-114）普通将数量已达上限 = ⌈酒馆最高等级 ÷ 2⌉ + 1（附 normalCap）。',
+    desc: '（v36，AISLG-114）普通将数量已达上限 = ⌈主城酒馆等级 ÷ 2⌉ + 1（附 normalCap；v87 起只读主城酒馆）。',
     action: '升级酒馆提高上限，或先 DISMISS_HERO 腾名额。',
   },
   HERO_NOT_FOUND: {
@@ -365,6 +405,14 @@ export const ERROR_DOC: Record<ErrorCode, ErrorDoc> = {
   HERO_ARREARS: {
     desc: '（v36，AISLG-114）武将欠饷中（主城金币不足以支付俸禄），不能出征。',
     action: '给主城补足金币，俸禄结算成功后自动恢复（收到 reason=salary_paid 推送）。',
+  },
+  HERO_CAPTURED: {
+    desc: '（v94，AISLG-228）武将被俘囚禁中（24 小时基准），不能出征 / 侦察 / 任城守 / 历练 / 赏赐 / 解雇 / 加点 / 洗点 / 施计。',
+    action: '主人用 RANSOM_HERO 在囚禁截止前赎回；超时则名将下野，不必再操作。',
+  },
+  HERO_NOT_CAPTURED: {
+    desc: '（v94，AISLG-228）武将未被俘，或囚禁已到期（即将下野），不能赎回。',
+    action: '用 GET_HEROES 查看 heroes[].captive；为 null 即无需赎回。',
   },
   HERO_TRAINING: {
     desc: '（v54，AISLG-144）武将正在历练中，不能出征 / 任城守 / 解雇 / 加点 / 洗点 / 再次历练（赏赐不受限）。',
@@ -423,8 +471,16 @@ export const ERROR_DOC: Record<ErrorCode, ErrorDoc> = {
     action: '无需处理；city.shieldUntil 可查当前免战截止。',
   },
   TRUCE_WEEKLY_USED: {
-    desc: '（v38，AISLG-122）本周的主动免战已用过（每周一次免费，7 天基准随缩放）。data.nextAvailableAt / retryAfterSeconds 为下次可开启时刻与剩余秒数。',
+    desc: '（v38，AISLG-122）本周的主动免战已用过（每周一次免费，7 天基准随缩放）。data.nextAvailableAt / retryAfterSeconds 为下次可开启时刻与剩余秒数。提前解除（CANCEL_TRUCE）不返还本周次数。',
     action: '按 retryAfterSeconds 睡满后重发 TRUCE；city.shieldNextAt 可查下次可开时刻。',
+  },
+  TRUCE_NOT_ACTIVE: {
+    desc: '（v71，AISLG-190）没有生效中的主动免战可解除（未开启、已到期，或已提前解除）。',
+    action: '无需处理；city.shieldUntil 为空即无主动免战。',
+  },
+  PASSIVE_TRUCE_NOT_CANCELLABLE: {
+    desc: '（v71，AISLG-190）城池处于被动免战中（被攻破 / 被抢后 4 小时基准），被动免战不能主动解除；CANCEL_TRUCE 只解除账号级的主动免战。data.until / data.retryAfterSeconds 为被动免战截止时刻与剩余秒数。',
+    action: '等被动免战结束（city.truceUntil）后再行动；期间可开启主动免战（TRUCE）不影响被动免战。',
   },
   TILE_PROTECTED: {
     desc: '（v39，AISLG-123）该野地刚换主人（被玩家抢占），处于保护期（1 小时基准随缩放）：期间玩家与 NPC 都不能再抢。data.until / data.retryAfterSeconds 为截止时刻与剩余秒数。',
@@ -602,6 +658,310 @@ export const ERROR_DOC: Record<ErrorCode, ErrorDoc> = {
     desc: '（v47）该站点不开放账号密码登录：游戏有两个站（同一套服务与数据库、账号通用），国际站 slg.yuntianyou.cc 只有 Google / GitHub 登录，国内站才有账号密码。',
     action: '网页端改用 Google / GitHub 登录；老密码账号先在国内站登录并绑定 Google / GitHub，再来本站用绑定方式登录进同一个号。Agent 不涉及（Agent 只用令牌）。',
   },
+  WALL_NOT_BUILT: {
+    desc: '（v73，AISLG-193）城墙尚未建造：四种城防器械只能囤在城墙里，城墙 0 级时库存上限为 0，不能打造。响应的 data 附 cap（= 0）。',
+    action: '先建造并升级城墙再打造器械；城墙等级同时也是库存上限（每级 60 件，四种共用）。',
+  },
+  DEFENSE_STOCK_FULL: {
+    desc: '（v73，AISLG-193）库存 + 在造 + 本次数量超过上限（城墙等级 × 60，四种器械共用）。响应的 data 附 cap / stock（已入库合计）/ pending（在造 + 排队合计）。',
+    action: '减少本次件数，或先把库存用在守城（守城战自动消耗）后再生出；升级城墙可提高上限。',
+  },
+  DEFENSE_QUEUE_FULL: {
+    desc: '（v73，AISLG-193）打造队列已满：与征兵同规则，同一时间 1 条在造 + 最多 2 条排队。',
+    action: '等队首完成（或取消已有条目腾位置）后再发起。',
+  },
+  DEFENSE_NOT_CANCELLABLE: {
+    desc: '（v73，AISLG-193）没有可取消的打造条目：条目不存在、不属于本账号，或已完成 / 已取消。',
+    action: '用 GET_STATE 的 city.defenses.queue 取当前条目的 craftId 再取消；已完成 / 已取消的不要重试。',
+  },
+  ASSIST_NOT_ALLY: {
+    desc: '（v74，AISLG-194）协防目标不是盟友的城池：MARCH task=assist 只能派往同一联盟成员的城（自己的城请用 transfer 调兵）。',
+    action: '确认目标城的主人与你同属一个联盟；不是盟友就换目标，或先拉对方入盟。',
+  },
+  ASSIST_LIMIT: {
+    desc: '（v74，AISLG-194）协防名额已满：每座城最多接收 5 支协防部队（在途部队也计入），同一账号对同一座城最多 1 支。到达时复核不通过，部队原路返回（事件 cause=ASSIST_LIMIT）。',
+    action: '换一座盟友城协防，或等该城已有部队召回 / 遣返后再派；同一座城不要重复派第二支。',
+  },
+  ASSIST_NOT_FOUND: {
+    desc: '（v74，AISLG-194）协防部队不存在、已经返回（战斗全灭 / 主动召回 / 退盟 / 放弃分城自动遣返 / 分城被占领时随城覆灭），或不属于你（只有派出方与城主能召回 / 遣返）。',
+    action: '重新 GET_STATE / GET_TILE 拿最新的 assistIn / assistOut 列表后再操作。',
+  },
+  BATTLEFIELD_GOVERNMENT_TOO_LOW: {
+    desc: '（v75，AISLG-198）报名剧本战场要求主城官府 ≥ 5 级；响应附 required / current。',
+    action: '先升级主城官府到 5 级；分城官府不计。',
+  },
+  BATTLEFIELD_SIGNUP_CLOSED: {
+    desc: '（v75，AISLG-198）当前不在剧本战场的报名期（北京时间每周二 20:00 至周三 20:00）。',
+    action: '用 GET_BATTLEFIELD 的 nextSignupAt 等下一场报名；报名开始后 SERVER 会全服播报。',
+  },
+  BATTLEFIELD_ALREADY_JOINED: {
+    desc: '（v75，AISLG-198）本场已经报过名（阵营选定后不能改）。',
+    action: '直接 GET_BATTLEFIELD 查自己的阵营与队伍，或等开战后入场。',
+  },
+  BATTLEFIELD_NOT_JOINED: {
+    desc: '（v75，AISLG-198）没有报名本场战场，不能入场或操作队伍。',
+    action: '先在报名期 SIGNUP_BATTLEFIELD 选阵营。',
+  },
+  BATTLEFIELD_CAMP_FULL: {
+    desc: '（v75，AISLG-198）该阵营报名人数超过另一方 1.5 倍且多出 5 人以上，暂停报名；响应附 count / otherCount / limit。',
+    action: '改选另一方；或等双方人数接近后再报名。',
+  },
+  BATTLEFIELD_ENTRY_CLOSED: {
+    desc: '（v75，AISLG-198）战场已经开战，不能再带部队入场（报名期结束即锁死入场）。',
+    action: '本场只能在已入场的队伍里拆队 / 行军；下一场报名时再入场。',
+  },
+  BATTLEFIELD_ALREADY_ENTERED: {
+    desc: '（v75，AISLG-198）本场已经带过部队入场（每人每场只能入场一次，开战后也不能追加）。',
+    action: '用 SPLIT_BATTLEFIELD_SQUAD 拆分已有队伍，或等下一场。',
+  },
+  BATTLEFIELD_POPULATION_LIMIT: {
+    desc: '（v75，AISLG-198）带入部队的人口超过 3000；响应附 limit / current。',
+    action: '减少铁骑兵等高人口兵种的数量，或只带主力兵种。',
+  },
+  BATTLEFIELD_SQUAD_LIMIT: {
+    desc: '（v75，AISLG-198）每人最多 3 支队伍。',
+    action: '把要拆出的兵力并回现有队伍，或等有队伍阵亡后再拆。',
+  },
+  BATTLEFIELD_SQUAD_NOT_FOUND: {
+    desc: '（v75，AISLG-198）队伍不存在、已阵亡，或不属于本账号。',
+    action: '重新 GET_BATTLEFIELD 拿最新队伍列表。',
+  },
+  BATTLEFIELD_SQUAD_BUSY: {
+    desc: '（v75，AISLG-198）队伍正在行军，不能再次下令。',
+    action: '等 arriveAt 到达后再下令。',
+  },
+  BATTLEFIELD_UNREACHABLE: {
+    desc: '（v75，AISLG-198）目标不可达：30×30 地图中间的河只有 3 处渡口（y = 5 / 15 / 25）能过，或坐标越界。',
+    action: '先走到渡口再渡河，或改选同侧目标。',
+  },
+  BATTLEFIELD_NOT_ACTIVE: {
+    desc: '（v75，AISLG-198）剧本战场不在进行中（报名期或已结束）。',
+    action: '报名期只做报名 / 入场；行军与攻打在开战后才能做。',
+  },
+  BATTLEFIELD_SHOP_LIMIT: {
+    desc: '（v75，AISLG-198）本场该商品已达到限购数量。',
+    action: '换其他商品，或等下一场额度重置（军功余额跨场保留）。',
+  },
+  BATTLEFIELD_MERIT_INSUFFICIENT: {
+    desc: '（v75，AISLG-198）战场军功余额不足；响应附 cost / balance。',
+    action: '继续在战场里歼灭敌军攒军功；军功跨场累积、换季清零。',
+  },
+  BATTLEFIELD_TARGET_INVALID: {
+    desc: '（v75，AISLG-198）行军目标参数缺失或对不上：必须给 strongholdId，或给合法的 x / y。',
+    action: '用 GET_BATTLEFIELD 的 strongholds 里的 id / 坐标重发。',
+  },
+  BATTLEFIELD_STRONGHOLD_LOCKED: {
+    desc: '（v80，AISLG-199）讨伐董卓的关卡按顺序解锁：汜水关 → 虎牢关 → 洛阳，前一关没被讨董联军打下时不能攻打（GET_BATTLEFIELD 的 strongholds[].unlocked 为 false）。',
+    action: '先攻下前一关（看 strongholds 里 unlocked 为 true 的据点再下令）。',
+  },
+  BATTLEFIELD_WIND_MISMATCH: {
+    desc: '（v80，AISLG-199）赤壁火攻只能在东南风期间发动（event.wind.direction = se）。',
+    action: '等下一次风向切换（event.wind.nextAt）再发动，切换前 30 分钟会预告。',
+  },
+  BATTLEFIELD_FIRE_COOLDOWN: {
+    desc: '（v80，AISLG-199）同一目标据点每 2 小时最多被火攻一次；响应附 nextAt。',
+    action: '换一个目标，或等 nextAt 之后再火攻。',
+  },
+  BATTLEFIELD_CHAIN_ACTIVE: {
+    desc: '（v80，AISLG-199）该据点的连锁战船仍在生效（6 小时内不能重复连锁）；响应附 chainUntil。',
+    action: '等 chainUntil 之后再连锁；连锁期内被火攻伤害翻倍，留意守军。',
+  },
+  BATTLEFIELD_SKILL_UNAVAILABLE: {
+    desc: '（v80，AISLG-199）本场剧本没有这个技能（只有赤壁有火攻 / 连锁），或阵营不对：火攻只给孙刘方，连锁只给曹方。',
+    action: '看 event.script 与自己的 me.camp 再发。',
+  },
+  BATTLEFIELD_NOT_ENTERED: {
+    desc: '（v80，AISLG-199）报名了但还没带兵入场，不能使用战场技能。',
+    action: '本场已开战就只能等下一场；报名期内要在开战前 ENTER_BATTLEFIELD。',
+  },
+  LUOYANG_CLOSED: {
+    desc: '（v79，AISLG-200）洛阳只在每周六 21:00–23:00（北京时间现实时间）开放攻打 / 侦察；响应附 nextOpenAt / retryAfterSeconds。',
+    action: '等到 nextOpenAt 再发起。窗口内洛阳没有被动免战、城防不回涨。',
+  },
+  DECREE_NOT_HOLDER: {
+    desc: '（v79，AISLG-200）只有洛阳之主联盟的盟主可以发布政令。',
+    action: '先占领洛阳，且由该联盟盟主操作。',
+  },
+  DECREE_COOLDOWN: {
+    desc: '（v79，AISLG-200）政令每 7 天只能发布一次；响应附 nextAt / retryAfterSeconds。',
+    action: '等 nextAt 之后再发。',
+  },
+  MARKET_LOCKED: {
+    desc: '（v78，AISLG-196）交易所需要主城官府 ≥ 5 级且不在新手保护期；响应附 reason / government / required。',
+    action: '升级主城官府或等新手保护结束后再来。',
+  },
+  PRICE_OUT_OF_RANGE: {
+    desc: '（v78，AISLG-196）单价超出允许范围：资源之间 0.5–2，收金币 0.125–0.5；响应附 min / max。',
+    action: '按 GET_MARKET 的 limits.priceRangeResource / priceRangeGold 调整单价。',
+  },
+  ORDER_LIMIT: {
+    desc: '（v78，AISLG-196）同时挂单已达 5 张。',
+    action: '先撤单或等成交后再挂。',
+  },
+  DAILY_TRADE_LIMIT: {
+    desc: '（v78，AISLG-196）今日成交额度不足（主城官府等级 × 3000 × 缩放，买卖合计）；响应附 limit / used / remaining。',
+    action: '明天（北京日）额度重置后再交易；额度按卖出资源数量折算、买卖双方都计。',
+  },
+  ORDER_NOT_FOUND: {
+    desc: '（v78，AISLG-196）挂单不存在、已售罄、已过期或不属于你。',
+    action: '重新 GET_MARKET 拉最新挂单；过期挂单会自动退款。',
+  },
+  MARKET_ALLY_ONLY: {
+    desc: '（v78，AISLG-196）挂单勾选了「只卖给盟友」，你与卖家不在同一个联盟。',
+    action: '换一张公开挂单，或加入卖家所在联盟。',
+  },
+  ORDER_NOT_CANCELLABLE: {
+    desc: '（v78，AISLG-196）挂单已售罄或已过期，无法撤回。',
+    action: '刷新挂单列表确认状态。',
+  },
+  DIPLOMACY_LIMIT: {
+    desc: '（v77，AISLG-195）友盟 / 敌对数量已达上限（每联盟最多 2 个友盟、5 个敌对），响应附 limit。',
+    action: '先解除一个现有关系，再结新友盟 / 宣布新敌对。',
+  },
+  DIPLOMACY_COOLDOWN: {
+    desc: '（v77，AISLG-195）刚解除友好，72 小时内同一对联盟不能再次结好；响应附 refriendAfter / retryAfterSeconds。',
+    action: '等到 refriendAfter 之后再发邀请 / 同意邀请。',
+  },
+  DIPLOMACY_EXISTS: {
+    desc: '（v77，AISLG-195）与目标联盟已经是友盟 / 敌对，或已有待处理邀请。',
+    action: '用 GET_ALLIANCE_DIPLOMACY 查当前关系与邀请，避免重复操作。',
+  },
+  DIPLOMACY_INVITE_NOT_FOUND: {
+    desc: '（v77，AISLG-195）友好邀请不存在、已过期（48 小时）或已处理。',
+    action: '重新发起邀请；过期邀请不会出现在 GET_ALLIANCE_DIPLOMACY 里。',
+  },
+  NOBILITY_TOO_LOW: {
+    desc: '（v76，AISLG-197）爵位不足：占领名城需要「大夫」（爵位序号 3）及以上；响应附 required / current。攻打外围与掠夺不受限。',
+    action: '先在世界地图战斗里累计声望升到大夫（2000 声望）再来占领名城。',
+  },
+  NOBILITY_SALARY_CLAIMED: {
+    desc: '（v76，AISLG-197）今日（北京日）俸禄已领，响应附 nextClaimAt。',
+    action: '明天北京时间 0 点后再领；金额随爵位提高。',
+  },
+  NOBILITY_SALARY_NONE: {
+    desc: '（v76，AISLG-197）平民没有俸禄，需要先累计 100 声望升到公士。',
+    action: '打世界地图战斗或参加剧本战场攒声望。',
+  },
+  HERO_STRATAGEM_COOLDOWN: {
+    desc: '（v86，AISLG-211）这名武将刚施过计，冷却未结束（施计后 1 小时基准，随全局时间缩放）；响应附 retryAfterSeconds。',
+    action: '换一名在家的武将，或等到 retryAfterSeconds 之后再施。',
+  },
+  HERO_NOT_AVAILABLE: {
+    desc: '（v86，AISLG-211）武将不在家：历练中 / 重伤中 / 随队出征中不能施计；响应附 reason（training / wounded / busy）。',
+    action: '用 GET_STRATAGEMS 的 heroes[].available 挑一名在家的武将；历练 / 重伤等状态结束或部队回城后再施。',
+  },
+  TARGET_PROTECTED: {
+    desc: '（v86，AISLG-211）目标玩家处于新手保护或免战期，不能对其施进攻类计谋（焚烧粮草 / 趁火打劫 / 十面埋伏 / 蛛丝马迹）；响应可能附 until / retryAfterSeconds。欺敌、金蝉脱壳、八门金锁是防守类，不受限。',
+    action: '等保护结束后再施，或换其他目标。',
+  },
+  TRUCE_ACTIVE: {
+    desc: '（v86，AISLG-211）自己正在主动免战中，不能施进攻类计谋（与免战期间不能攻击玩家同一口径）。',
+    action: '免战结束（响应附 until / retryAfterSeconds）后再施，或只用防守类计谋。',
+  },
+  ALLY_TARGET: {
+    desc: '（v86，AISLG-211）目标是同盟或友盟成员，不能对其施进攻类计谋。',
+    action: '换非同盟 / 非友盟的目标；要打盟友先解除联盟关系。',
+  },
+  INVALID_TARGET: {
+    desc: '（v86，AISLG-211）施计目标不合法：城 / 行军不存在、不是本账号的城（欺敌 / 金蝉脱壳）、不是其他玩家的城（攻心 / 情报）、不是返程行军、不是开往自己城池或野地的敌方部队等。不扣令、不写冷却。',
+    action: '按 GET_STRATAGEMS 的 target 判定重新选目标（自己的城 / 敌方玩家的城 / 行军列表里的部队）。',
+  },
+  STRATAGEM_TOKEN_SHORT: {
+    desc: '（v86，AISLG-211）对应类别的计谋令不足；响应附 tokenKind 与 have。此时不扣令、不写冷却、不改任何数据。',
+    action: '用战场军功在战场商店（BUY_BATTLEFIELD_ITEM 的 stratagem_* 商品）兑换计谋令后再施。',
+  },
+  STRATAGEM_TOKEN_FULL: {
+    desc: '（v86，AISLG-211）该类计谋令持有数已达上限，兑换被拒且不扣军功；响应附 tokenKind / have / limit。上限防止囤到某一周集中施计，换季与军功一起清零。',
+    action: '先把手上的令用掉一些再兑换，或改买其他商品。',
+  },
+  CITY_AMBUSHED: {
+    desc: '（v86，AISLG-211）这座城中了十面埋伏，期间不能派出任何部队（MARCH 的各用途、侦察、协防出发、交易所商队、剧本战场入场都被拒）；响应附 retryAfterSeconds。已经在外的部队照常行动、照常可以召回。',
+    action: '等到 retryAfterSeconds 之后再派兵；已在外的部队用 RECALL_MARCH 召回不受影响。',
+  },
+  INSUFFICIENT_GIFT: {
+    desc: '（v89，AISLG-221）礼金余额不足，扣除被拒；响应附 balance（当前余额）。不扣、不写事件，其他数据不变。礼金每赛季固定发 1000，换季清零，不能转让或兑换。',
+    action: '等下一个赛季（换季后重新登录即回到 1000）或改用金币等其他方式；用 GET_STATE 的 gift 查看当前余额。',
+  },
+  INSUFFICIENT_ITEM: {
+    desc: '（v90，AISLG-222）道具数量不足，消耗被拒；响应附 itemId 与 count（当前数量）。不扣、不写事件，其他数据不变。',
+    action: '先用 GET_ITEMS 确认数量；不够时用 BUY_ITEM 用礼金买，或等获得途径（任务 / 活动）发放。',
+  },
+  ITEM_STACK_FULL: {
+    desc: '（v90，AISLG-222）购买后会超过该道具的堆叠上限，购买被拒；响应附 stackMax、have（当前数量）、canBuy（还能买几张，已满为 0）。礼金与道具都不变。',
+    action: '把购买数量降到 canBuy 以内；已满时先用掉道具再买。',
+  },
+  ITEM_PRICE_CHANGED: {
+    desc: '（v90，AISLG-222）BUY_ITEM 的 expectedPrice 与当前单价不一致（道具调价过）；响应附 price（当前单价）。不扣礼金、不加道具。',
+    action: '用 GET_ITEMS 刷新目录，把新单价告诉玩家，让玩家重新确认后带新单价重发；不要自动用新价重试。',
+  },
+  MOVE_CITY_FAMOUS: {
+    desc: '（v91，AISLG-220）名城（特殊城池）不能迁移；不扣令、不改任何数据。',
+    action: '换一座非名城的城迁移；名城只能靠攻占 / 经营保有。',
+  },
+  MOVE_CITY_ARMY_OUTSIDE: {
+    desc: '（v91，AISLG-220）这座城有部队在外：本城发出的行军（出征 / 返程 / 运输 / 调兵）或派去别人城里的协防。响应附 count。',
+    action: '等部队回到本城（或用 RECALL_MARCH 召回、DISMISS_ASSIST 撤回协防）后再迁。驻守自己野地的部队不算在外。',
+  },
+  MOVE_CITY_HAS_ALLY_FORCE: {
+    desc: '（v91，AISLG-220）盟友的部队正在协防这座城；响应附 count。迁城时不会自动遣返。',
+    action: '请盟友召回协防，或城主用 DISMISS_ASSIST 遣返后再迁。',
+  },
+  MOVE_CITY_IN_BATTLE: {
+    desc: '（v91，AISLG-220）这座城或其名下野地正有行军指向，或有未结的 NPC 来袭（与放弃分城、遣散士兵同一口径）。只看这一座城。',
+    action: '等战斗结算或来袭结束后再迁；若是自己的行军，可用 RECALL_MARCH 撤回。',
+  },
+  MOVE_CITY_TILE_INVALID: {
+    desc: '（v91，AISLG-220）指定坐标不是无主、无 NPC 的空野地（NPC 城、他人城池、已被占领的野地、城池格等一切非空野地的格都算）。不扣令。',
+    action: '用 GET_MAP_OVERVIEW / GET_WORLD_MAP 找一块空野地（kind=wilderness 且无归属）后重试。',
+  },
+  MOVE_CITY_TILE_TAKEN: {
+    desc: '（v91，AISLG-220）目标格在判定与落库之间被别人抢先占走（并发）。令与坐标都未改动。',
+    action: '重新 GET_WORLD_MAP 选一块空野地后再发起迁城。',
+  },
+  MOVE_CITY_TOO_CLOSE: {
+    desc: '（v91，AISLG-220）目标离其他账号的城池格（分城、名城含在内）不足 3 格（Chebyshev 距离）。自己的城不受此限。',
+    action: '选离他人城池至少 3 格的空野地；随机迁不受此限。',
+  },
+  MOVE_CITY_NO_SPACE: {
+    desc: '（v91，AISLG-220）随机迁城时世界中已没有可选的空野地。',
+    action: '改用指定坐标迁城（高级迁城令）选一块空野地，或等世界有空地后再试。',
+  },
+  TILE_UNEXPLORED: {
+    desc: '该地块在战争迷雾中未探索，且不在任何视野来源（城池 / 领地 / 行军 / 同盟或友盟的城池格）覆盖内，服务端不返回它的任何信息（v92，AISLG-224）。仅在 fog_enabled 开启时出现。',
+    action: '先派斥候或部队去这个方向探索（派去未探索坐标的出征本身允许，盲打时前端应提示“目标在迷雾中”）。也可以改查已探索的格子。',
+  },
+  CHAT_COORD_UNEXPLORED: {
+    desc: '聊天坐标卡片指向未探索的格子；服务端不会把这个格子的地形、等级等信息填进卡片（v92，AISLG-224）。',
+    action: '先探索该坐标再发送卡片，或只发送文字坐标。',
+  },
+  MOVE_CITY_TILE_UNEXPLORED: {
+    desc: '高级迁城令（指定坐标）的目标格未探索，也不在实时视野内，无法指定为迁城目标（v92，AISLG-224）。随机迁城令不受影响。',
+    action: '先探索目标区域（派斥候或部队去那里），或改用随机迁城令。',
+  },
+  MOVE_CITY_ATTACK_LOCK: {
+    desc: '（v91，AISLG-220）指定坐标迁城后 12 小时内，这座城的掠夺 / 占领 / 侦察 / 派协防（以及其他攻击类出征）被拒；响应附 retryAfterSeconds。运输、调兵、增援自己名下野地与召回不受限。',
+    action: '等待 retryAfterSeconds 之后再出征打别人；期间可以正常运输、调兵与增援。',
+  },
+  FACILITY_TILE_INVALID: {
+    desc: '（v97，AISLG-232）目标格不是本账号占领的野地：城池格、NPC 城池、无主野地、别人占领的野地都算。不扣任何资源。',
+    action: '用 GET_STATE 的 city.territory 核对本账号占领的野地坐标，只对列表中的地块发起 FACILITY_BUILD。',
+  },
+  FACILITY_MAX_LEVEL: {
+    desc: '（v97，AISLG-232）这块地的望楼已经满级（3 级），不能再升级。不扣任何资源。',
+    action: '换一块自己占领的野地建望楼；每座城最多 2 座。',
+  },
+  FACILITY_BUILDING: {
+    desc: '（v97，AISLG-232）这块地的望楼正在建造或升级中，同一块地同一时间只能有一个进行中的工程。不扣任何资源。',
+    action: '等 city.territory[].facility.building.finishAt 到点（Worker 到期完成）后再发起下一次升级。',
+  },
+  FACILITY_LIMIT: {
+    desc: '（v97，AISLG-232）这座城名下的望楼已达上限：每座城最多 2 座（主城 2 座，每座分城各 2 座）。响应附 limit 与 count。不扣任何资源。',
+    action: '换另一座城名下的野地建望楼，或先把这块地的望楼升到更高级（升级不受名额限制）。',
+  },
+  FACTION_LAIR_TARGET: {
+    desc: '（v99，AISLG-239；v101，AISLG-241 起改成只拒绝三种情况）目标是五方势力的老巢格，但不满足出征条件：1) 这家本季已被攻破，老巢是废墟（不能再出征 / 侦察 / 占领）；2) 任务是 occupy / transport / assist（老巢只能打，不能占领、运输或协防）；3) 开关 faction_enabled 关闭（没有老巢）。本季未灭亡的老巢可以正常 MARCH（task=plunder，打当前一营）与 SCOUT（看当前营守军）。',
+    action: '要打老巢请用 MARCH 带 task=plunder 指向 faction.isLair = true 的坐标（一次只打当前一营，守城战、城墙减伤 50%）；想看当前营守军先 SCOUT。已灭亡（GET_FACTIONS 的 destroyed = true，地块 faction.destroyed = true）的老巢本季不再能打，等换季后重生。要占领 NPC 城请选 faction.isLair = false 的势力城。',
+  },
   INTERNAL: {
     desc: '服务端内部错误。',
     action: '可稍后重试同一请求；持续出现时向运营方反馈。INTERNAL 可能出现在任何请求的响应中。',
@@ -642,7 +1002,7 @@ export const GLOSSARY: Array<{ term: string; desc: string }> = [
   },
   {
     term: '征兵队列（recruitQueue）',
-    desc: '军营处理征兵：RECRUIT 无征募中时立即开始（status=recruiting，时长 = 单兵时长 × 数量），有征募中且未满时入队（status=queued）；队列 = 1 征募中 + 最多 2 排队（占位）。资源与人口在发起时扣减，取消排队条目全额返还；征募中能否取消待定。队列独立于建造队列。',
+    desc: '军营处理征兵：RECRUIT 无征募中时立即开始（status=recruiting，时长 = 单兵时长 × 数量），有征募中且未满时入队（status=queued）；队列 = 1 征募中 + 最多 2 排队（占位）。资源与人口在发起时扣减，取消排队条目全额返还；征募中条目也可取消（v71，全额返还，排队的下一条立即开始）。队列独立于建造队列。',
   },
   {
     term: '守城加成（defenseBonus）',
@@ -684,11 +1044,11 @@ export const GLOSSARY: Array<{ term: string; desc: string }> = [
   },
   {
     term: '行军（march）',
-    desc: `MARCH 从主城派出部队（发起时立即扣减城内驻军），时长 = Chebyshev 距离 × 每格秒数（默认 15 秒，占位）÷ 编队最慢兵种的行军速度系数（斥候 ×2、轻骑兵 ×1.5，占位），总时长再 ÷ 全局时间缩放（钳 1 秒）；到达由服务端自动结算（战斗 / 增援 / 调兵 / 侦察）。RECALL_GARRISON 撤回占领野地的全部驻军（即放弃占领）；RECALL_MARCH 把行军途中（status=marching 且非返程）的部队原地折返（同速回程）。`,
+    desc: `MARCH 从主城派出部队（发起时立即扣减城内驻军），时长 = Chebyshev 距离 × 每格秒数（默认 15 秒，占位）÷ 编队最慢兵种的行军速度系数（斥候 ×2、轻骑兵 ×1.5，占位），总时长再 ÷ 全局时间缩放（钳 1 秒）；到达由服务端自动结算（战斗 / 增援 / 调兵 / 侦察）。RECALL_GARRISON 不带 troops 时撤回占领野地的全部驻军（即放弃占领），带 troops（v83）时按兵种部分撤回（保留占领）；RECALL_MARCH 把行军途中（status=marching 且非返程）的部队原地折返（同速回程）。`,
   },
   {
     term: '战报（battle report）',
-    desc: `每场战斗（出征野地 / 攻 NPC 城池 / NPC 袭击驻军 / NPC 袭击主城，v21 新增 city_raid 类别）生成一份战报，账号以攻方或守方身份持有、可查询（GET_BATTLE_REPORTS）并实时推送（PUSH_BATTLE_REPORT）：含双方编成与损失、汇总口径（v21：units 总单位数、totalHp 总血量、avgRange 平均射程；v23：maxRange 单兵射程最大值、rangedUnits 远程单位数——avgRange 是数量加权平均、会被大量近战稀释，判断远程威胁用 maxRange + rangedUnits，AISLG-49；读取时按编成汇总，历史战报同样下发）、总输出 damage、逐回合伤害与损失统计、终局原因与城墙减伤。战损不进入伤兵治疗、俘虏招降或逃兵召回系统（一期确认）——损失即最终减员。`,
+    desc: `每场战斗（出征野地 / 攻 NPC 城池 / NPC 袭击驻军 / NPC 袭击主城，v21 新增 city_raid 类别）生成一份战报，账号以攻方或守方身份持有、可查询（GET_BATTLE_REPORTS）并实时推送（PUSH_BATTLE_REPORT）：含双方编成与损失、汇总口径（v21：units 总单位数、totalHp 总血量、avgRange 平均射程；v23：maxRange 单兵射程最大值、rangedUnits 远程单位数——avgRange 是数量加权平均、会被大量近战稀释，判断远程威胁用 maxRange + rangedUnits，AISLG-49；读取时按编成汇总，历史战报同样下发）、总输出 damage、逐回合伤害与损失统计、终局原因与城墙减伤。v85（AISLG-212）起战损不再“损失即最终减员”：各侧带 wounded（伤兵）/ captured（被俘），胜方带 captives（抓到的俘虏）——阵亡 = losses − wounded − captured，伤兵 / 俘虏的处置见 RESTORE_TROOPS。`,
   },
   {
     term: '掠夺（plunder）',
@@ -728,7 +1088,7 @@ export const GLOSSARY: Array<{ term: string; desc: string }> = [
   },
   {
     term: '建造队列（queue）',
-    desc: 'BUILD / UPGRADE 采用排队制：无在建时立即开工（status=building，dueAt 为预计完成时间）；有在建时进入排队（status=queued，dueAt 为 null），队首完成后由后台自动激活为 building。队列 = 1 条在建 + 最多 2 条排队（占位数值），再发起返回 QUEUE_FULL。排队条目可随时 CANCEL_BUILD 取消并全额返还成本（确认规则）；进行中任务能否取消待定。原游戏的元宝加速第一期未实现。',
+    desc: 'BUILD / UPGRADE 采用排队制：无在建时立即开工（status=building，dueAt 为预计完成时间）；有在建时进入排队（status=queued，dueAt 为 null），队首完成后由后台自动激活为 building。队列 = 1 条在建 + 最多 2 条排队（占位数值），再发起返回 QUEUE_FULL。排队条目与建造中的条目都可随时 CANCEL_BUILD 取消并全额返还成本（确认规则；v71 起建造中也可取消）。原游戏的元宝加速第一期未实现。',
   },
   { term: 'building / queued / completed / cancelled', desc: '建筑条目状态：在建 / 排队 / 已完成 / 已取消（取消仅限排队条目，条目保留为历史，不再出现在 queue 里）。' },
 ];

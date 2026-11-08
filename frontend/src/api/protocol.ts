@@ -2,8 +2,10 @@
 // 对外文档为 docs/agent-api.md；协议调整时以后端生成文档为准同步本文件。
 
 import type { CityGuardView } from './protocol-hero';
+import type { CityStratagemView } from './protocol-stratagem';
+import { RESOURCE_KEYS } from './protocol-wire';
 
-export const PROTOCOL_VERSION = 70;
+export const PROTOCOL_VERSION = 88;
 
 /** 协议号（请求与响应用同一值，推送以 op 区分类型） */
 export const Op = {
@@ -17,7 +19,7 @@ export const Op = {
   BUILD: 21,
   /** 发起建筑升级（升到下一等级，v5，与建造共用队列） */
   UPGRADE: 22,
-  /** 取消建造队列中的排队条目（v7）：全额返还已扣成本；在建条目不可取消（BUILD_NOT_CANCELLABLE） */
+  /** 取消建造队列中的条目（v7 排队可取消，v71 起建造中也可取消）：全额返还已扣成本（连升只退未完成级）；已完成 / 已取消返回 BUILD_NOT_CANCELLABLE */
   CANCEL_BUILD: 24,
   /** 城池改名（v7） */
   RENAME_CITY: 25,
@@ -56,7 +58,7 @@ export const Op = {
   GET_SERVER_BROADCASTS: 42,
   /** 查询全服排行榜（v23 AISLG-61）：三榜快照，前 50 名 + 我的名次 */
   GET_LEADERBOARD: 43,
-  /** 查询科技状态（v27 AISLG-77）：6 项科技等级 / 下一级成本与耗时 / 进行中的研究 */
+  /** 查询科技状态（v27 AISLG-77；v72 AISLG-192 起 16 项）：等级 / 下一级成本与耗时 / 进行中的研究 */
   GET_TECHS: 44,
   /** 发起科技研究（v27 AISLG-77）：data.tech；账号同一时间只研究一项，需书院 */
   RESEARCH_TECH: 45,
@@ -172,6 +174,72 @@ export const Op = {
   ALLIANCE_MARK_REMOVE: 113,
   /** 查询本联盟的有效地图标记（v69，AISLG-184） */
   GET_ALLIANCE_MARKS: 114,
+  /** 取消进行中的武将历练（v71，AISLG-190）：武将立刻回家，不返还经验 */
+  CANCEL_TRAINING: 115,
+  /** 提前解除主动免战（v71，AISLG-190）：本周免费次数不返还；被动免战不可解除 */
+  CANCEL_TRUCE: 116,
+  CRAFT_DEFENSE: 117,
+  CANCEL_DEFENSE_CRAFT: 118,
+  DISMISS_ASSIST: 119,
+  /** 查询剧本战场（v75，AISLG-198）：当前 / 最近一场（官渡 / 讨董 / 赤壁）、据点、我的队伍与军功、军功榜、商店 */
+  GET_BATTLEFIELD: 120,
+  /** 报名剧本战场（v75）：data.camp = yuan | cao */
+  SIGNUP_BATTLEFIELD: 121,
+  /** 带部队入场（v75）：data.troops；开战前，按人口最多 3000 */
+  ENTER_BATTLEFIELD: 122,
+  /** 拆分战场队伍（v75）：data.squadId + troops；每人最多 3 队 */
+  SPLIT_BATTLEFIELD_SQUAD: 123,
+  /** 战场内行军 / 攻打据点（v75）：data.squadId + strongholdId 或 x / y */
+  MARCH_BATTLEFIELD_SQUAD: 124,
+  /** 战场商店兑换（v75）：data.item（+ hero_exp 时的 heroId） */
+  BUY_BATTLEFIELD_ITEM: 125,
+  /** 查询声望与爵位、今日俸禄状态（v76，AISLG-197） */
+  GET_NOBILITY: 126,
+  /** 领取每日爵位俸禄（v76：北京日每天一次，平民无俸禄） */
+  CLAIM_NOBILITY_SALARY: 127,
+  ALLIANCE_DIPLOMACY_INVITE: 128,
+  ALLIANCE_DIPLOMACY_RESPOND: 129,
+  ALLIANCE_DIPLOMACY_END: 130,
+  ALLIANCE_DIPLOMACY_HOSTILE: 131,
+  GET_ALLIANCE_DIPLOMACY: 132,
+  GET_MARKET: 133,
+  CREATE_MARKET_ORDER: 134,
+  BUY_MARKET_ORDER: 135,
+  CANCEL_MARKET_ORDER: 136,
+  GET_LUOYANG: 137,
+  PUBLISH_DECREE: 138,
+  /** 赤壁火攻（v80，AISLG-199）：data.strongholdId；东南风、孙刘方，花 300 军功 */
+  FIRE_BATTLEFIELD_STRONGHOLD: 139,
+  /** 赤壁连锁战船（v80，AISLG-199）：data.strongholdId；曹方己方据点，花 200 军功，持续 6 小时 */
+  CHAIN_BATTLEFIELD_STRONGHOLD: 140,
+  /** C→S 设为主城（v82，AISLG-205：data.cityId 必填、data.confirm 必须为 true；分城与主城对调身份，换完 24 小时内不能再换） */
+  SET_CAPITAL: 141,
+  /** C→S 遣散士兵（v84，AISLG-209）：data.troops 按兵种给数量，可选 cityId；返还征兵成本的 50%，不退人口 */
+  DISBAND_TROOPS: 142,
+  /** C→S 治疗 / 招降 / 劝回（v85，AISLG-212）：data.pool = wounded|captive|deserter + data.troops，可选 cityId；治疗 50% / 招降 60%（另扣人口）/ 劝回 50% 征兵资源，立即回城内驻军 */
+  RESTORE_TROOPS: 143,
+  /** C→S 放弃治疗 / 释放俘虏（v85，AISLG-212）：data.pool = wounded|captive + data.troops，可选 cityId；免费，池子消失不返还 */
+  RELEASE_TROOPS: 144,
+  /** C→S 查询计谋（v86，AISLG-211）：8 个计谋定义 + 4 类计谋令持有数 + 逐武将效果预览；带 target 时附成功率 / 免疫 / 保护判定 */
+  GET_STRATAGEMS: 145,
+  /** C→S 施计（v86，AISLG-211）：data.heroId + data.stratagem + data.target = { cityId } | { marchId } | { attackId }；扣 1 张令并冷却 1 小时 */
+  CAST_STRATAGEM: 146,
+  /** C→S 查询全账号伤兵营（v88，AISLG-218）：无参数、只读；账号全部城的伤兵 / 俘虏 / 逃兵三池 + 各城断粮时刻 */
+  GET_TROOP_POOLS: 147,
+  /** C→S 查询道具背包 / 目录 / 礼金（v90，AISLG-222） */
+  GET_ITEMS: 148,
+  /** C→S 礼金买道具（v90，AISLG-222：itemId / count / expectedPrice 必填） */
+  BUY_ITEM: 149,
+  /** 城池迁移（v91，AISLG-220）：随机迁（迁城令）/ 指定坐标迁（高级迁城令），preview 只预览 */
+  MOVE_CITY: 150,
+  /** 赎回被俘名将（v94，AISLG-228）：data.heroId，赎金 = 2000 × 等级从主城扣 */
+  RANSOM_HERO: 151,
+  /** 在自己占领的野地上建望楼 / 升级望楼（v97，AISLG-232）：data.x / data.y；资源从占着这块地的城扣 */
+  FACILITY_BUILD: 153,
+  /** 查询窗口内视野里的他人部队（v96，AISLG-230）：data.x/y/w/h 同 GET_WORLD_MAP；只给位置 / 方向 / 去返程 / 规模档位 / 主人关系 */
+  GET_VISIBLE_MARCHES: 152,
+  /** 查询五方势力（v99，AISLG-239）：无参数、只读；五家的名称 / 首领 / 老巢坐标 / 当前半径 / 持城数；开关关闭时 enabled=false */
+  GET_FACTIONS: 154,
   /** 用 Google ID Token 换会话令牌（v44）：data.credential；登录前可发，仅供网页；第一次自动建号 */
   GOOGLE_LOGIN: 60,
   /** 给当前账号绑定 Google（v44）：data.credential；仅玩家连接，仅供网页 */
@@ -226,6 +294,17 @@ export const Op = {
   PUSH_ALLIANCE_STATE: 2024,
   /** 联盟地图标记变化推送（v69，AISLG-184）：reason = added / removed */
   PUSH_ALLIANCE_MARK: 2025,
+  PUSH_DEFENSE_STATE: 2026,
+  /** 剧本战场报名 / 开战 / 据点易手 / 收场（v75，AISLG-198）：全部在线连接收到 */
+  PUSH_BATTLEFIELD_STATE: 2027,
+  /** 被施计警报（v86，AISLG-211）：会失败的计谋不论成败都推给目标玩家（欺敌类与金蝉脱壳不推） */
+  PUSH_STRATAGEM: 2028,
+  /** S→C 探索简报（v92，AISLG-224） */
+  PUSH_EXPLORATION_REPORT: 2029,
+  /** S→C 势力围攻分城（v100，AISLG-240）：reason = warning / repelled / hit / swallowed */
+  PUSH_FACTION_SIEGE: 2030,
+  /** v101（AISLG-241）：老巢战况（有人进攻 / 恢复 1 营 / 势力灭亡），全服广播 */
+  PUSH_FACTION_LAIR: 2031,
   /** 赛季预告 / 换季中 / 新赛季开始（v65，AISLG-134）：全部在线连接收到，含 Agent；started 后服务端断开全部连接 */
   PUSH_SEASON: 2023,
   /** 查询将星塔（v55，AISLG-146） */
@@ -269,7 +348,9 @@ export type ErrorCode =
   | 'BUILDING_EXISTS'
   | 'BUILDING_NOT_BUILT'
   | 'BUILDING_LEVEL_MAX'
+  | 'BUILDING_MAIN_ONLY'
   | 'BUILD_NOT_CANCELLABLE'
+  | 'TRAINING_NOT_CANCELLABLE'
   | 'AGENT_FORBIDDEN'
   | 'TROOP_NOT_AVAILABLE'
   | 'ELITE_TROOP_LOCKED'
@@ -279,6 +360,8 @@ export type ErrorCode =
   | 'TARGET_NOT_ATTACKABLE'
   | 'INSUFFICIENT_TROOPS'
   | 'TILE_NOT_OCCUPIED'
+  | 'GARRISON_WOULD_EMPTY'
+  | 'INSUFFICIENT_GARRISON'
   | 'MARCH_NOT_RECALLABLE'
   | 'PLUNDER_COOLDOWN'
   | 'TASK_INVALID_FOR_TARGET'
@@ -301,6 +384,8 @@ export type ErrorCode =
   | 'HERO_BUSY'
   | 'HERO_WOUNDED'
   | 'HERO_ARREARS'
+  | 'HERO_CAPTURED'
+  | 'HERO_NOT_CAPTURED'
   | 'GUARD_ASSIGN_DENIED'
   | 'HERO_TRAINING'
   | 'HERO_POINTS_INSUFFICIENT'
@@ -316,8 +401,33 @@ export type ErrorCode =
   | 'SELF_TRUCE_ACTIVE'
   | 'TRUCE_ALREADY_ACTIVE'
   | 'TRUCE_WEEKLY_USED'
+  | 'TRUCE_NOT_ACTIVE'
+  | 'PASSIVE_TRUCE_NOT_CANCELLABLE'
   | 'TILE_PROTECTED'
   | 'ALLY_NOT_ATTACKABLE'
+  | 'DIPLOMACY_LIMIT'
+  | 'DIPLOMACY_COOLDOWN'
+  | 'DIPLOMACY_EXISTS'
+  | 'DIPLOMACY_INVITE_NOT_FOUND'
+  | 'LUOYANG_CLOSED'
+  | 'DECREE_NOT_HOLDER'
+  | 'DECREE_COOLDOWN'
+  | 'BATTLEFIELD_STRONGHOLD_LOCKED'
+  | 'BATTLEFIELD_WIND_MISMATCH'
+  | 'BATTLEFIELD_FIRE_COOLDOWN'
+  | 'BATTLEFIELD_CHAIN_ACTIVE'
+  | 'BATTLEFIELD_SKILL_UNAVAILABLE'
+  | 'BATTLEFIELD_NOT_ENTERED'
+  | 'MARKET_LOCKED'
+  | 'PRICE_OUT_OF_RANGE'
+  | 'ORDER_LIMIT'
+  | 'DAILY_TRADE_LIMIT'
+  | 'ORDER_NOT_FOUND'
+  | 'MARKET_ALLY_ONLY'
+  | 'ORDER_NOT_CANCELLABLE'
+  | 'NOBILITY_TOO_LOW'
+  | 'NOBILITY_SALARY_CLAIMED'
+  | 'NOBILITY_SALARY_NONE'
   | 'ALLIANCE_MARK_LIMIT'
   | 'ALLIANCE_MARK_EXISTS'
   | 'WX_TICKET_INVALID'
@@ -341,8 +451,14 @@ export type ErrorCode =
   | 'DISCARD_COOLDOWN'
   | 'DISCARD_MAIN_CITY'
   | 'CITY_IN_BATTLE'
+  | 'CITY_STARVING'
   | 'ARMY_OUTSIDE'
   | 'WILDERNESS_GARRISONED'
+  | 'FAMOUS_CITY_NOT_CAPITAL'
+  | 'CAPITAL_SWAP_COOLDOWN'
+  | 'CAPITAL_SWAP_UNDER_ATTACK'
+  | 'CAPITAL_SWAP_DURABILITY_LOW'
+  | 'BRANCH_LIMIT_EXCEEDED'
   | 'ARENA_NOT_JOINED'
   | 'ARENA_TARGET_INVALID'
   | 'ARENA_NO_CHALLENGES'
@@ -351,6 +467,40 @@ export type ErrorCode =
   | 'STAR_TOWER_CLEARED'
   | 'STAR_TOWER_NO_CITY'
   | 'STAR_TOWER_NO_LINEUP'
+  | 'HERO_STRATAGEM_COOLDOWN'
+  | 'HERO_NOT_AVAILABLE'
+  | 'TARGET_PROTECTED'
+  | 'TRUCE_ACTIVE'
+  | 'ALLY_TARGET'
+  | 'INVALID_TARGET'
+  | 'STRATAGEM_TOKEN_SHORT'
+  | 'STRATAGEM_TOKEN_FULL'
+  | 'CITY_AMBUSHED'
+  /** 礼金不足（v89，AISLG-221；响应附 balance） */
+  | 'INSUFFICIENT_GIFT'
+  /** 道具不足（v90，AISLG-222；响应附 itemId、count） */
+  | 'INSUFFICIENT_ITEM'
+  /** 道具堆叠上限（v90，AISLG-222；响应附 stackMax、have、canBuy） */
+  | 'ITEM_STACK_FULL'
+  /** 道具单价已变（v90，AISLG-222；响应附 price） */
+  | 'ITEM_PRICE_CHANGED'
+  /** 城池迁移（v91，AISLG-220）：名城不能迁 / 本城有部队在外 / 盟友驻军 / 战乱 / 目标格不合法 / 太近 / 无空地 / 抢先占格 / 出征限制 */
+  | 'MOVE_CITY_FAMOUS'
+  | 'MOVE_CITY_ARMY_OUTSIDE'
+  | 'MOVE_CITY_HAS_ALLY_FORCE'
+  | 'MOVE_CITY_IN_BATTLE'
+  | 'MOVE_CITY_TILE_INVALID'
+  | 'MOVE_CITY_TILE_TAKEN'
+  | 'MOVE_CITY_TOO_CLOSE'
+  | 'MOVE_CITY_NO_SPACE'
+  | 'MOVE_CITY_ATTACK_LOCK'
+  /** 野地设施·望楼（v97，AISLG-232）：非自己的野地 / 已满级 / 正在建造 / 该城望楼已达 2 座 */
+  | 'FACILITY_TILE_INVALID'
+  | 'FACILITY_MAX_LEVEL'
+  | 'FACILITY_BUILDING'
+  | 'FACILITY_LIMIT'
+  /** 五方势力（v99，AISLG-239）：目标是势力老巢，本版本只能查询、不能出征 / 侦察 */
+  | 'FACTION_LAIR_TARGET'
   /** 换季维护中（v65）：除 GET_SEASON 与登录相关协议外一律返回，响应附 retryAfterSec（秒） */
   | 'MAINTENANCE'
   | 'INTERNAL';
@@ -358,6 +508,10 @@ export type ErrorCode =
 // 协议载荷补齐（v65）：请求 / 响应类型、枚举常量与守卫，以及赛季协议（GET_SEASON / GET_HALL_OF_FAME / PUSH_SEASON）
 export * from './protocol-wire';
 export * from './protocol-season';
+export * from './protocol-stratagem';
+export * from './protocol-items';
+export * from './protocol-move-city';
+export * from './protocol-faction';
 
 export interface Resources {
   gold: number;
@@ -609,6 +763,10 @@ export type {
   FamousTileView,
   FamousEffectView,
   WorldMapResponseData,
+  VisibleMarchScale,
+  VisibleMarchRelation,
+  VisibleMarchView,
+  GetVisibleMarchesResponseData,
   MapOverviewResponseData,
   MapOverviewSide,
   MarchRequestData,
@@ -632,6 +790,7 @@ export type {
 export { TERRAIN_KINDS } from './protocol-world';
 export type {
   TechKind,
+  TechCategory,
   TechLevels,
   TechEntryView,
   ResearchView,
@@ -678,6 +837,8 @@ export type {
   YellowTurbanPushData,
 } from './protocol-yt';
 import type { TechLevels } from './protocol-tech';
+import type { DefenseStockView } from './protocol-defense';
+import type { AssistOutView, AssistView } from './protocol-assist';
 import type { FamousEffectView, MarchView, TerritoryView } from './protocol-world';
 
 /**
@@ -806,17 +967,23 @@ export interface CityView {
   famousName: string | null;
   /** 该城的独占产量加成百分数（v24 AISLG-56：名城分城 +20%，已计入 production）；普通城为 0 */
   productionBonusPercent: number;
+  /** 洛阳之主联盟的全员产量加成（v79 AISLG-200；0 或 5，已计入 production） */
+  luoyangBonusPercent: number;
   /** 名城独有效果（v62，AISLG-166）：只有占领者享受、跟着城走；普通城为 null */
   famousEffect: FamousEffectView | null;
   /** 城池等级（v24 起 = 该城官府等级） */
   level: number;
+  /** 城池称号（v76，AISLG-197）：城池 / 县城 / 郡城 / 州城 / 都城（分城最高州城） */
+  title: string;
+  /** 账号爵位（v76）：{ index（0 = 平民）, name } */
+  nobility: { index: number; name: string };
   resources: Resources;
-  /** 按建筑类型统计的已建数量（单实例规则下为 0 或 1） */
-  buildings: BuildingCounts;
-  /** 各建筑类型的当前等级（0 = 未建造；产量、人口上限与储量上限均按等级推导） */
-  levels: BuildingCounts;
-  /** 各建筑「下一步动作」成本：build=建造（未建时），upgrade=升级（已建未满级时），null=不可用 */
-  costs: Record<BuildingKind, KindActionCosts>;
+  /** 按建筑类型统计的已建数量（单实例规则下为 0 或 1）。v87：分城不含 tavern / academy */
+  buildings: Partial<BuildingCounts>;
+  /** 各建筑类型的当前等级（0 = 未建造；产量、人口上限与储量上限均按等级推导）。v87：分城不含 tavern / academy */
+  levels: Partial<BuildingCounts>;
+  /** 各建筑「下一步动作」成本：build=建造（未建时），upgrade=升级（已建未满级时），null=不可用。v87：分城不含 tavern / academy */
+  costs: Partial<Record<BuildingKind, KindActionCosts>>;
   /** 各建筑的等级上限（v63）：普通 20；占有对应名城时其主题建筑为 25 */
   levelMax: Record<BuildingKind, number>;
   /** 兼容字段：已建成的农田数量（= buildings.farm） */
@@ -828,8 +995,18 @@ export interface CityView {
   storage: StorageCaps;
   /** 城内驻军，按兵种统计（v11；征兵完成时入城） */
   army: ArmyCounts;
+  /** 伤兵营（v85，AISLG-212）：战斗中己方损失 20% 进的池子，可花征兵资源 50% 治好回城内驻军（RESTORE_TROOPS pool=wounded）；72 小时不治死亡 */
+  wounded: TroopPoolView;
+  /** 俘虏营（v85）：战胜后从败方损失抓的 10%（仅基础七兵种），招降花 60% 且扣人口（pool=captive）或免费释放（RELEASE_TROOPS）；72 小时后自动释放 */
+  captives: TroopPoolView;
+  /** 逃兵营（v85）：断粮兵变每小时减少的 10% 驻军进池，断粮结束后花 50% 劝回（pool=deserter）；24 小时后消失；断粮中不能劝回 */
+  deserters: TroopPoolView;
   /** 全军小时耗粮（v14）：城内 1 倍 + 行军/野地驻军 2 倍；production.food 为毛产量，净粮 = 两者之差 */
   armyFoodUsePerHour: number;
+  /** 是否有敌情（v84，AISLG-209）：本城或其名下野地正有行军在途指向，或有未结的 NPC 来袭；为 true 时遣散会被 CITY_IN_BATTLE 拒绝 */
+  inBattle: boolean;
+  /** 生效中的计谋效果（v86，AISLG-211）：欺敌（倍数只对城主自己可见）/ 十面埋伏锁城截止 / 趁火打劫 */
+  stratagems: CityStratagemView;
   /** 全局时间缩放（v20，AISLG-38）：本地折算时长（如掠夺冷却剩余）时使用，勿按文档基准硬算 */
   timeScale: number;
   /** 主城免战截止（v22，AISLG-40）：被 NPC 攻破后 2×袭击间隔（÷timeScale）内不再入袭击目标池；null = 不在免战。
@@ -845,6 +1022,14 @@ export interface CityView {
   durability: number | null;
   /** 征兵队列（v11）：第 1 项为征募中（dueAt 非空），其余为排队；已取消的条目不在其中 */
   recruitQueue: RecruitView[];
+  /** 城防器械（v73）：库存、上限（城墙等级 × 60）与打造队列 */
+  defenses: DefenseStockView;
+  /** 协防（v74）：驻扎在本城的盟友部队（城主视图） */
+  assistIn: AssistView[];
+  /** 本城派出、正在盟友城里驻扎的部队（派出方视图，可召回；占校场名额） */
+  assistOut: AssistOutView[];
+  /** 本城可接收的协防部队上限 */
+  assistCap: number;
   /** 城墙守城防御加成（v11，占位 = 城墙等级 × 5，百分数数值；战斗结算上线后由其消费） */
   defenseBonus: number;
   /** 账号科技等级（v27 AISLG-77；全账号共享，已计入 production / storage / defenseBonus；负重与行军加成由客户端折算） */
@@ -869,7 +1054,7 @@ export interface CityView {
   building: BuildView | null;
 }
 
-/** CANCEL_BUILD（op 24）请求载荷：取消排队中的建造条目并全额返还其成本 */
+/** CANCEL_BUILD（op 24）请求载荷：取消建造条目（排队中 / 建造中）并全额返还其成本 */
 export interface CancelBuildRequestData {
   buildId: string;
 }
@@ -897,11 +1082,37 @@ export interface BuildStatePushData {
 
 /** PUSH_CITY_STATE（op 2002）推送载荷：城池级状态变化 */
 export interface CityStatePushData {
-  /** city_renamed=城池改名；account_reset=账号数据被重置（v9）；city_discarded=分城被放弃（v57） */
-  reason: 'city_renamed' | 'account_reset' | 'city_discarded';
+  /** city_renamed=城池改名；account_reset=账号数据被重置（v9）；city_discarded=分城被放弃（v57）；capital_changed=设为主城（v82，cityId 为新主城）；troops_disbanded=城内驻军被遣散（v84）；troop_pools_changed=伤兵 / 俘虏 / 逃兵池子变化（v85，附 cityId 与 pool） */
+  reason: 'city_renamed' | 'account_reset' | 'city_discarded' | 'capital_changed' | 'troops_disbanded' | 'troop_pools_changed' | 'stratagem';
   cityId: string;
   /** reason=city_renamed 时的新名称 */
   name?: string;
+  /** reason=capital_changed 时的原主城 id（已变为分城） */
+  formerCapitalId?: string;
+}
+
+/** SET_CAPITAL（op 141，v82，AISLG-205）请求载荷：cityId 为要设为主城的分城，confirm 必须显式为 true */
+export interface SetCapitalRequestData {
+  cityId: string;
+  confirm: boolean;
+}
+
+/** SET_CAPITAL 响应载荷：新主城、原主城（已变为分城）、下次可再换的时刻（ISO 8601）与新的分城上限 */
+export interface SetCapitalResponseData {
+  capitalId: string;
+  formerCapitalId: string;
+  cooldownUntil: string;
+  branchLimit: number;
+}
+
+/** 逐分城的不可设为主城原因（GET_STATE 的 capitalSwap.blocked） */
+export type CapitalSwapBlockCode = 'FAMOUS_CITY_NOT_CAPITAL' | 'CAPITAL_SWAP_DURABILITY_LOW' | 'BRANCH_LIMIT_EXCEEDED';
+
+/** GET_STATE 响应的 capitalSwap（v82，AISLG-205）：冷却截止（未结束才有值）、来袭状态与逐分城不可设原因 */
+export interface CapitalSwapView {
+  cooldownUntil: string | null;
+  underAttack: boolean;
+  blocked: Record<string, CapitalSwapBlockCode>;
 }
 
 /** DISCARD_CITY（op 94，v57）请求载荷：放弃分城，不可撤销，confirm 必须显式为 true */
@@ -935,10 +1146,10 @@ export interface SetNicknameResponseData {
 
 /** PUSH_ACCOUNT_STATE（op 2020）推送载荷：账号级状态变化（v52） */
 export interface AccountStatePushData {
-  /** account_renamed=昵称被修改 */
-  reason: 'account_renamed';
-  /** 新昵称 */
-  username: string;
+  /** account_renamed=昵称被修改；items_changed=道具背包 / 礼金变化（v90，带 items 与 gift） */
+  reason: 'account_renamed' | 'items_changed';
+  /** 新昵称（account_renamed 时有） */
+  username?: string;
 }
 
 /** RESET_ACCOUNT 响应载荷：重置完成后的城池现状（即开号初始状态） */
@@ -956,7 +1167,7 @@ export interface RecruitResponseData {
   recruit: RecruitView;
 }
 
-/** CANCEL_RECRUIT（op 29）请求载荷：仅排队中的条目可取消，全额返还资源与人口 */
+/** CANCEL_RECRUIT（op 29）请求载荷：取消征兵条目（排队中 / 征募中），全额返还资源与人口 */
 export interface CancelRecruitRequestData {
   recruitId: string;
 }
@@ -964,6 +1175,132 @@ export interface CancelRecruitRequestData {
 export interface CancelRecruitResponseData {
   recruit: RecruitView;
 }
+
+/** 遣散返还比例（v84，AISLG-209）：镜像 backend/common/src/troops.ts 的 DISBAND_REFUND_PERCENT */
+export const DISBAND_REFUND_PERCENT = 50;
+
+/**
+ * 遣散返还预览（v84）：钱包面与服务端 disbandRefund 同一公式——floor(Σ 单兵成本 × 数量 × 50%)，
+ * 五种资源分别累加后各取整一次。仅用于确认弹窗预览，权威结果以服务端响应的 refunded 为准。
+ */
+export function disbandRefundPreview(troops: Partial<Record<TroopKind, number>>): Resources {
+  const totals: Resources = { gold: 0, wood: 0, food: 0, stone: 0, iron: 0 };
+  for (const kind of TROOP_KINDS) {
+    const count = Math.floor(troops[kind] ?? 0);
+    if (count <= 0) {
+      continue;
+    }
+    const cost = TROOP_INFO[kind].cost;
+    for (const key of RESOURCE_KEYS) {
+      totals[key] += cost[key] * count;
+    }
+  }
+  for (const key of RESOURCE_KEYS) {
+    totals[key] = Math.floor((totals[key] * DISBAND_REFUND_PERCENT) / 100);
+  }
+  return totals;
+}
+
+/** DISBAND_TROOPS（op 142，v84）请求载荷：按兵种给出要遣散的数量（正整数，只解散城内驻军） */
+export interface DisbandTroopsRequestData {
+  troops: Partial<Record<TroopKind, number>>;
+}
+
+/** DISBAND_TROOPS 响应载荷：本次解散的兵、返还资源与遣散后的城池状态 */
+export interface DisbandTroopsResponseData {
+  disbanded: Partial<Record<TroopKind, number>>;
+  refunded: Resources;
+  city: CityView;
+}
+
+/** 池子种类（v85，AISLG-212）：wounded 伤兵 / captive 俘虏 / deserter 逃兵 */
+export type TroopPoolKind = 'wounded' | 'captive' | 'deserter';
+
+/** 一个池子的聚合视图（v85；CityView.wounded / captives / deserters 同形态） */
+export interface TroopPoolView {
+  /** 各兵种现有数量（未过期批次的合计） */
+  troops: ArmyCounts;
+  /** 最早一批的过期时刻（ISO 8601）；池子为空为 null */
+  earliestExpireAt: string | null;
+}
+
+/** 池子费用比例（v85，AISLG-212）：镜像 backend/common/src/battle-casualties.ts 的常量 */
+export const HEAL_COST_PERCENT = 50;
+export const CAPTIVE_RECRUIT_COST_PERCENT = 60;
+export const DESERTER_RECALL_COST_PERCENT = 50;
+/** 快过期红点阈值（小时，v85）：剩不足该时长时城池界面给红点 */
+export const POOL_EXPIRE_WARN_HOURS = 6;
+
+/**
+ * 池子费用预览（v85）：与服务端 restoreCost 同一公式——floor(Σ 单兵成本 × 数量 × percent%)，
+ * 五种资源分别累加后各取整一次。仅用于确认弹窗预览，权威结果以服务端响应的 cost 为准。
+ */
+export function restoreCostPreview(troops: Partial<Record<TroopKind, number>>, percent: number): Resources {
+  const totals: Resources = { gold: 0, wood: 0, food: 0, stone: 0, iron: 0 };
+  for (const kind of TROOP_KINDS) {
+    const count = Math.floor(troops[kind] ?? 0);
+    if (count <= 0) {
+      continue;
+    }
+    const cost = TROOP_INFO[kind].cost;
+    for (const key of RESOURCE_KEYS) {
+      totals[key] += cost[key] * count;
+    }
+  }
+  for (const key of RESOURCE_KEYS) {
+    totals[key] = Math.floor((totals[key] * percent) / 100);
+  }
+  return totals;
+}
+
+/** RESTORE_TROOPS（op 143，v85）请求载荷：治疗 / 招降 / 劝回（按 pool 区分），立即完成回城内驻军 */
+export interface RestoreTroopsRequestData {
+  pool: TroopPoolKind;
+  troops: Partial<Record<TroopKind, number>>;
+}
+
+/** RESTORE_TROOPS 响应载荷：本次回城的兵、花费与扣的人口，以及操作后的城池状态 */
+export interface RestoreTroopsResponseData {
+  restored: Partial<Record<TroopKind, number>>;
+  cost: Resources;
+  /** 招降 = Σ 单兵人口 × 数量；治疗 / 劝回为 0 */
+  populationCost: number;
+  city: CityView;
+}
+
+/** RELEASE_TROOPS（op 144，v85）请求载荷：放弃治疗（伤兵消失）/ 释放俘虏（免费不返还）；deserter 不适用 */
+export interface ReleaseTroopsRequestData {
+  pool: Exclude<TroopPoolKind, 'deserter'>;
+  troops: Partial<Record<TroopKind, number>>;
+}
+
+/** RELEASE_TROOPS 响应载荷：本次消失的兵与操作后的城池状态（不返还任何东西） */
+export interface ReleaseTroopsResponseData {
+  released: Partial<Record<TroopKind, number>>;
+  city: CityView;
+}
+
+// 全账号伤兵营（v88，AISLG-218）的类型在 protocol-troop-pools.ts
+export type { AccountTroopPoolsCityView, GetTroopPoolsResponseData } from './protocol-troop-pools';
+
+// 盟友协防（v74，AISLG-194）的类型在 protocol-assist.ts
+export type { AssistView, AssistOutView, DismissAssistRequestData, DismissAssistResponseData } from './protocol-assist';
+export { ASSIST_MAX_PER_CITY } from './protocol-assist';
+
+// 城防器械（v73，AISLG-193）的类型与数值镜像在 protocol-defense.ts
+export type {
+  DefenseKind,
+  DefenseCraftView,
+  DefenseStockView,
+  DefenseUseView,
+  DefenseScoutView,
+  CraftDefenseRequestData,
+  CraftDefenseResponseData,
+  CancelDefenseCraftRequestData,
+  CancelDefenseCraftResponseData,
+  DefenseStatePushData,
+} from './protocol-defense';
+export { DEFENSE_KINDS, DEFENSE_INFO, DEFENSE_STOCK_PER_WALL_LEVEL } from './protocol-defense';
 
 /** PUSH_RECRUIT_STATE（op 2004）推送载荷 */
 export interface RecruitStatePushData {
@@ -1039,3 +1376,58 @@ export type {
   StarTowerChallengeResponseData,
   GetStarTowerReportsResponseData,
 } from './protocol-star-tower';
+
+// 剧本战场（v75，AISLG-198）的载荷类型
+export type {
+  BattlefieldCamp,
+  BattlefieldSquadStatus,
+  BattlefieldStrongholdKind,
+  BattlefieldSquadView,
+  BattlefieldStrongholdView,
+  BattlefieldCampView,
+  BattlefieldEventView,
+  BattlefieldMeritEntryView,
+  BattlefieldMeView,
+  BattlefieldShopItem,
+  BattlefieldShopItemView,
+  BattlefieldRewardTierView,
+  BattlefieldProgressRewardView,
+  BattlefieldScript,
+  GetBattlefieldResponseData,
+  BattlefieldPushData,
+  EnterBattlefieldRequestData,
+  BuyBattlefieldItemResponseData,
+} from './protocol-battlefield';
+
+// 声望与爵位（v76，AISLG-197）
+export type { NobilityStatusView, GetNobilityResponseData, ClaimNobilitySalaryResponseData } from './protocol-nobility';
+
+// 联盟外交（v77，AISLG-195）
+export type {
+  AllianceRelationKind,
+  AllianceDiplomacyEntryView,
+  AllianceFriendInviteView,
+  GetAllianceDiplomacyResponseData,
+  AllianceDiplomacyTargetRequestData,
+  AllianceDiplomacyInviteRequestData,
+  AllianceDiplomacyRespondRequestData,
+} from './protocol-alliance';
+
+// 玩家交易所（v78，AISLG-196）
+export type {
+  MarketSellerView,
+  MarketCityView,
+  MarketOrderView,
+  MarketTradeView,
+  MarketLimitsView,
+  GetMarketResponseData,
+  CreateMarketOrderResponseData,
+  BuyMarketOrderResponseData,
+  CancelMarketOrderResponseData,
+} from './protocol-market';
+export { MARKET_RESOURCES, MARKET_BUY_KINDS } from './protocol-market';
+export type { MarketResource, MarketBuyKind } from './protocol-market';
+
+// 洛阳争夺（v79，AISLG-200）
+export type { LuoyangOwnerView, LuoyangDecreeView, LuoyangStatusView, PublishDecreeResponseData, DecreeKind } from './protocol-luoyang';
+export { DECREE_KINDS } from './protocol-luoyang';

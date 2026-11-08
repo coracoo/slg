@@ -29,6 +29,30 @@ export const SERVER_BROADCAST_TYPES = [
   'star_tower_cleared',
   // v60（AISLG-162）公告：运维发布公告时同步播报一句标题，点开跳到公告；运维主动发布，必达（不受每分钟限频）
   'announcement',
+  // v75（AISLG-198）剧本战场：报名 / 开战 / 据点易手 / 收场，必达（不受每分钟限频）
+  'battlefield_signup',
+  'battlefield_started',
+  'battlefield_stronghold',
+  'battlefield_finished',
+  // v76（AISLG-197）爵位：升到大夫及以上，必达（不受每分钟限频）
+  'nobility_promoted',
+  // v77（AISLG-195）联盟外交：结成友盟 / 宣布敌对，必达（不受每分钟限频）
+  'alliance_diplomacy',
+  // v79（AISLG-200）洛阳：窗口预告 / 开始 / 结束，必达
+  'luoyang_window',
+  // v93（AISLG-227）战争迷雾：名城首探 / 名将处所首探、传说遗迹被领取；必达，播报不带坐标
+  'famous_first_explored',
+  'hero_site_first_explored',
+  'legendary_relic_claimed',
+  // v94（AISLG-228）名将离开主人（下野 / 被俘超时）与被俘：走普通限频（不带坐标）
+  'hero_left',
+  'hero_captured',
+  // v99（AISLG-239）五方势力：势力范围半径扩大（每周最多一次，必达）
+  'faction_expanded',
+  // v100（AISLG-240）势力出兵：围攻吞下玩家分城（大事，必达；owner 城名 + 势力名）
+  'faction_city_swallowed',
+  // v101（AISLG-241）攻破老巢：某家势力本季灭亡（大事，必达；带最后一击的玩家名）
+  'faction_lair_destroyed',
 ] as const;
 
 export type ServerBroadcastType = (typeof SERVER_BROADCAST_TYPES)[number];
@@ -45,7 +69,7 @@ export function isServerBroadcastType(value: unknown): value is ServerBroadcastT
  * 只统计最近 7 天 Agent 上线过的账号，排名 = 该模型实力前 10 名的平均战力。
  * v70（AISLG-185）新增 alliance 联盟榜：按联盟势力排名（成员不足 5 人不上榜），条目见 allianceEntries。
  */
-export const LEADERBOARD_KINDS = ['power', 'territory', 'plunder', 'model', 'alliance'] as const;
+export const LEADERBOARD_KINDS = ['power', 'territory', 'plunder', 'model', 'alliance', 'nobility', 'exploration'] as const;
 
 export type LeaderboardKind = (typeof LEADERBOARD_KINDS)[number];
 
@@ -63,6 +87,9 @@ export interface LeaderboardEntryView {
   agentOnline: boolean;
   /** Agent 自报的模型名原文（v50；null = 从未声明）。自报不验证，展示时标注「自报」 */
   agentModel: string | null;
+  /** 爵位序号与名称（v76，AISLG-197；所有个人榜条目都带，便于在各榜展示身份） */
+  nobility: number;
+  nobilityName: string;
 }
 
 /** 模型榜单行（v50，AISLG-133；GET_LEADERBOARD kind=model 时下发） */

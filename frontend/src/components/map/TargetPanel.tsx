@@ -5,12 +5,15 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import { TROOP_KINDS, type ArmyCounts, type AssistView, type TileDetailView } from '../../api/protocol';
 import { DeployContext } from '../../state/deployContext';
 import { useGame } from '../../state/GameContext';
 import { useHeroPick } from '../../state/heroContext';
 import { interceptCandidates } from '../../state/interceptPlan';
 import { useNow } from '../../state/useNow';
-import { useCopy } from '../../i18n/bundle';
+import { tName } from '../../i18n/names';
+import { formatDurationText } from '../../api/format';
+import { getCopy, useCopy } from '../../i18n/bundle';
 // role 定位值取静态中文文案源（AISLG-137 约定：role 不随界面语言变）
 import { TARGET_COPY as TARGET_COPY_ZH } from '../../copy-pages';
 import { ALLIANCE_COPY as ALLIANCE_COPY_ZH } from '../../copy-alliance';
@@ -22,23 +25,64 @@ import { ScoutForm } from './forms/ScoutForm';
 import { TransportForm } from './forms/TransportForm';
 import type { TargetCtx, TroopInput } from './forms/targetTypes';
 import { TargetHeader } from './TargetHeader';
+import { TargetCloseButton } from './TargetCloseButton';
 import { TargetChatActions } from './TargetChatActions';
+import { MoveCityPickAction } from './MoveCityPick';
 import { TargetMarkNote } from './TargetMarkNote';
+import { WatchtowerNote } from './WatchtowerNote';
+import { StratagemEntry } from '../stratagem/StratagemEntry';
+import { remainingSeconds } from '../stratagem/StratagemCityNote';
 
-type Act = 'plunder' | 'occupy' | 'scout' | 'clear' | 'intercept' | 'reinforce' | 'recall' | 'transfer' | 'transport' | 'mark';
+type Act = 'plunder' | 'occupy' | 'scout' | 'clear' | 'intercept' | 'reinforce' | 'recall' | 'transfer' | 'transport' | 'mark' | 'assist' | 'stratagem';
 
 /** 攻击类操作（AISLG-182 / F2）：目标是盟友时禁用，运输 / 增援 / 调兵 / 截击不受影响 */
 const ATTACK_ACTS: readonly Act[] = ['plunder', 'occupy', 'scout', 'clear'];
+/** 会从这座城派出部队的操作（v86 AISLG-211）：中了十面埋伏时全部置灰并显示剩余时间 */
+const DISPATCH_ACTS: readonly Act[] = ['plunder', 'occupy', 'scout', 'clear', 'intercept', 'reinforce', 'transfer', 'transport', 'assist'];
+
+/** 迷雾中未知格的占位详情（AISLG-224 复核）：只用于启用派斥候 / 盲打，不带任何真实地块信息 */
+function unknownDetailAt(x: number, y: number): TileDetailView {
+  const zeros = Object.fromEntries(TROOP_KINDS.map((kind) => [kind, 0])) as ArmyCounts;
+  return {
+    x,
+    y,
+    terrain: 'plain',
+    kind: 'wilderness',
+    level: 0,
+    owner: null,
+    garrison: 0,
+    npcStockTier: null,
+    famous: null,
+    camp: null,
+    protection: null,
+    durability: null,
+    wildFamous: false,
+    reserve: null,
+    facility: null,
+    facilityBuilding: null,
+    fog: 'explored',
+    seenAt: null,
+    garrisonDetail: zeros,
+    nativePower: 0,
+    wilderness: null,
+    npc: null,
+    scoutedAt: null,
+    defenses: null,
+    assists: null,
+    plunderedAt: null,
+    wildFamousIntel: null,
+  } as TileDetailView;
+}
 
 export function TargetPanel() {
   const copy = useCopy();
-  const { TARGET_COPY, ALLIANCE_COPY } = copy;
+  const { TARGET_COPY, ALLIANCE_COPY, DEFENSE_COPY } = copy;
   const { session, marchOrigin } = useGame();
   const { world, city } = session;
   const branch = session.cityList.branch;
   const hero = useHeroPick();
   const selected = world.selected;
-  const detail = world.detail;
+  const detailRaw = world.detail;
   const accountId = session.account?.accountId ?? null;
   const [troops, setTroops] = useState<TroopInput>({});
   const [act, setAct] = useState<Act | null>(null);
@@ -60,12 +104,20 @@ export function TargetPanel() {
     return null;
   }
   const { x, y } = selected;
+  // 迷雾（AISLG-224 复核）：窗口里没有这一格（且没有详情）即未探索：只给派斥候 / 盲打入口，不显示任何地块信息
+  const win = world.window;
+  const inWindow = win !== null && x >= win.x && x < win.x + win.w && y >= win.y && y < win.y + win.h;
+  const unknownCell = detailRaw === null && inWindow && win !== null && !win.tiles.some((tile) => tile.x === x && tile.y === y);
+  const detail = detailRaw ?? (unknownCell ? unknownDetailAt(x, y) : null);
   const isOwn = detail !== null && detail.owner !== null && detail.owner.accountId === accountId;
+  // 迁城选点（v91）：只有无归属、无营地的空野地才能迁入
+  const isEmptyWilderness = !unknownCell && detail !== null && detail.x === x && detail.y === y && detail.kind === 'wilderness' && !detail.faction?.isLair && detail.owner === null && detail.camp === null;
   const isOwnCity = detail?.kind === 'city' && isOwn;
   /** 调兵 / 运输目标：本账号的分城（非出发主城） */
   const transferable = isOwnCity && detail?.owner?.cityId !== city.id;
   /** 盟友的城池 / 野地（AISLG-182 / F2）：攻击类操作禁用并说明原因 */
-  const allyBlocked = detail?.owner?.ally === true;
+  const allyBlocked =
+    detail?.owner?.relation === 'ally' || detail?.owner?.relation === 'friendly' || detail?.owner?.ally === true;
   /** 有联盟才能打标记（AISLG-184 / F2） */
   const inAlliance = session.alliance.state?.alliance != null;
 
@@ -76,6 +128,11 @@ export function TargetPanel() {
     }
     if (detail.kind === 'npc_city') {
       acts.push('plunder', 'occupy', 'scout');
+    } else if (detail.faction?.isLair) {
+      // 老巢（AISLG-241）：只能进攻和侦察，废墟什么都不能做
+      if (!detail.faction.destroyed) {
+        acts.push('plunder', 'scout');
+      }
     } else if (detail.kind === 'wilderness') {
       if (detail.owner === null) {
         acts.push(...(detail.camp ? (['clear', 'scout'] as const) : (['plunder', 'occupy', 'scout'] as const)));
@@ -89,9 +146,21 @@ export function TargetPanel() {
       if (transferable) {
         acts.push('transfer', 'transport');
       }
+      // v86（AISLG-211）：自己的城可以施欺敌（草木皆兵 / 空城计）
+      acts.push('stratagem');
     } else if (detail.kind === 'city' && detail.owner !== null) {
-      // 他人玩家城（v38 AISLG-122）：可掠夺；分城（v40 AISLG-124，城防值非 null）另可攻占，主城不可占
-      acts.push(...(detail.durability != null ? (['plunder', 'occupy', 'scout'] as const) : (['plunder', 'scout'] as const)));
+      // v74（AISLG-194）：盟友的城只能协防（掠夺 / 占领 / 侦察在 ATTACK_ACTS 里禁用）
+      if (allyBlocked) {
+        // 解除友好的冷却期内 relation 仍为 friendly，但不能协防（v95，AISLG-226）：以服务端给出的 canAssist 为准
+        if (detail.owner.canAssist) {
+          acts.push('assist');
+        }
+      } else {
+        // 他人玩家城（v38 AISLG-122）：可掠夺；分城（v40 AISLG-124，城防值非 null）另可攻占，主城不可占
+        acts.push(...(detail.durability != null ? (['plunder', 'occupy', 'scout'] as const) : (['plunder', 'scout'] as const)));
+      }
+      // v86（AISLG-211）：敌方玩家的城可以施攻心三计与蛛丝马迹（同盟 / 友盟会被服务端拒绝）
+      acts.push('stratagem');
     } else {
       acts.push('scout');
     }
@@ -101,6 +170,9 @@ export function TargetPanel() {
   }
   const current: Act | null = act && acts.includes(act) ? act : (acts[0] ?? null);
   const blockedNow = allyBlocked && current !== null && ATTACK_ACTS.includes(current);
+  // v86（AISLG-211）：本城中了十面埋伏时派不出兵（服务端返回 CITY_AMBUSHED，这里先置灰并显示剩余）
+  const ambushLeft = remainingSeconds(city.stratagems?.ambushedUntil ?? null, now);
+  const ambushBlocked = ambushLeft > 0 && current !== null && DISPATCH_ACTS.includes(current);
 
   const ctx: TargetCtx = {
     world,
@@ -131,6 +203,15 @@ export function TargetPanel() {
   return (
     <DeployContext.Provider value={city.deploy}>
       <div role="世界地图详情区" className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden">
+        <MoveCityPickAction x={x} y={y} empty={isEmptyWilderness} />
+        {unknownCell ? (
+          <div role="世界地图-迷雾目标-头部" className="flex shrink-0 items-start gap-2">
+            <p role="世界地图-迷雾目标" className="min-w-0 flex-1 text-[12px] text-warn">
+              {copy.EXTRA_MAP.fog.unknownNotice(x, y)}
+            </p>
+            <TargetCloseButton onClose={world.deselectTile} />
+          </div>
+        ) : (
         <TargetHeader
           world={world}
           city={city}
@@ -144,8 +225,35 @@ export function TargetPanel() {
           isOwnCity={isOwnCity}
           onClose={world.deselectTile}
         />
-        <TargetChatActions x={x} y={y} detail={detail} accountId={accountId} />
+        )}
+        {unknownCell ? null : <TargetChatActions x={x} y={y} detail={detail} accountId={accountId} />}
+        {detail?.assists && detail.assists.length > 0 ? (
+          <div role="选中详情-协防列表" className="flex max-h-[4.5rem] shrink-0 flex-col gap-0.5 overflow-hidden rounded border border-line-soft bg-panel-2 px-2 py-1">
+            <span className="text-[11px] font-semibold text-faint" title={DEFENSE_COPY.assist.capHint(5)}>
+              {DEFENSE_COPY.assist.inTitle} · {detail.assists.length}
+            </span>
+            {detail.assists.slice(0, 2).map((item) => (
+              <span key={item.id} role="选中详情-协防条目" className="truncate text-[11px] text-dim" title={DEFENSE_COPY.assist.inLine(item.username, tName(item.fromCityName))}>
+                {DEFENSE_COPY.assist.inLine(item.username, tName(item.fromCityName))} · {assistTroops(item)}
+              </span>
+            ))}
+          </div>
+        ) : null}
         {inAlliance ? <TargetMarkNote x={x} y={y} marks={session.allianceMarks} myId={accountId} now={now} /> : null}
+        {/* 望楼（v97，AISLG-232）：自己的野地可建造 / 升级，别人的只显示等级与视野 */}
+        {detail && world.window?.fogEnabled !== undefined ? (
+          <WatchtowerNote
+            detail={detail}
+            city={city}
+            isOwn={isOwn}
+            fogEnabled={world.window.fogEnabled !== false}
+            busy={busy}
+            now={now}
+            onBuild={() => {
+              void ctx.run(() => world.buildFacility(x, y));
+            }}
+          />
+        ) : null}
         {world.error ? (
           <p role="世界地图详情区-错误" className="line-clamp-2 shrink-0 text-[12px] text-warn" title={world.error}>
             {world.error}
@@ -169,7 +277,11 @@ export function TargetPanel() {
                       item === current ? 'border-accent bg-accent-soft text-accent' : 'border-line text-dim hover:text-fg'
                     }`}
                   >
-                    {item === 'mark' ? ALLIANCE_COPY.marks.formTitle : TARGET_COPY.actions[item]}
+                    {item === 'mark'
+                      ? ALLIANCE_COPY.marks.formTitle
+                      : item === 'plunder' && detail.faction?.isLair
+                        ? copy.EXTRA_MAP.faction.lairAttack
+                        : TARGET_COPY.actions[item]}
                   </button>
                 );
               })}
@@ -179,10 +291,39 @@ export function TargetPanel() {
                 {ALLIANCE_COPY.ally.blocked}
               </p>
             ) : null}
+            {detail?.kind === 'city' && allyBlocked && detail.owner && !detail.owner.canAssist ? (
+              <p role="世界地图详情区-协防冷却提示" className="text-[12px] leading-relaxed text-warn">
+                {ALLIANCE_COPY.diplomacy.assistCooldown}
+              </p>
+            ) : null}
+            {ambushLeft > 0 ? (
+              <p role="选中详情-十面埋伏提示" className="text-[12px] leading-relaxed text-warn">
+                {copy.STRATAGEM_COPY.city.ambushed(formatDurationText(ambushLeft))}
+              </p>
+            ) : null}
+            {detail?.owner?.relation === 'hostile' ? (
+              <p role="选中详情-敌对提示" className="text-[12px] leading-relaxed text-st-error">
+                {ALLIANCE_COPY.diplomacy.hostiles}
+              </p>
+            ) : null}
+            {current === 'stratagem' ? (
+              <StratagemEntry
+                role="选中详情-施计入口"
+                label={isOwnCity ? copy.STRATAGEM_COPY.entry.castOnCity : copy.STRATAGEM_COPY.entry.castOnPlayer}
+                target={{
+                  cityId: detail?.owner?.cityId ?? undefined,
+                  label: `${detail?.owner?.cityName ?? ''}（${x},${y}）`,
+                  only: isOwnCity
+                    ? ['phantom_army', 'empty_fort']
+                    : ['burn_granary', 'loot_fire', 'ambush_all_sides', 'spy_trail'],
+                }}
+                className="btn px-3"
+              />
+            ) : null}
             {!blockedNow && current === 'scout' ? <ScoutForm key={`${x},${y}`} ctx={ctx} /> : null}
-            {!blockedNow && current === 'intercept' ? <InterceptForm ctx={ctx} candidates={candidates} onPickCell={world.selectTile} /> : null}
-            {!blockedNow && current === 'transport' ? <TransportForm key={`${x},${y}`} ctx={ctx} /> : null}
-            {!blockedNow && current === 'recall' ? <RecallForm ctx={ctx} /> : null}
+            {!blockedNow && !ambushBlocked && current === 'intercept' ? <InterceptForm ctx={ctx} candidates={candidates} onPickCell={world.selectTile} /> : null}
+            {!blockedNow && !ambushBlocked && current === 'transport' ? <TransportForm key={`${x},${y}`} ctx={ctx} /> : null}
+            {!blockedNow && current === 'recall' ? <RecallForm key={`${x},${y}`} ctx={ctx} /> : null}
             {!blockedNow && current === 'mark' ? (
               <MarkForm
                 key={`${x},${y}`}
@@ -192,7 +333,7 @@ export function TargetPanel() {
                 hasMark={session.allianceMarks.marks.some((item) => item.x === x && item.y === y && Date.parse(item.expiresAt) > now)}
               />
             ) : null}
-            {!blockedNow && (current === 'plunder' || current === 'occupy' || current === 'clear' || current === 'reinforce' || current === 'transfer') ? (
+            {!blockedNow && !ambushBlocked && (current === 'plunder' || current === 'occupy' || current === 'clear' || current === 'reinforce' || current === 'transfer' || current === 'assist') ? (
               <MarchForm ctx={ctx} act={current} />
             ) : null}
           </>
@@ -202,4 +343,13 @@ export function TargetPanel() {
       </div>
     </DeployContext.Provider>
   );
+}
+
+
+/** 协防编成的紧凑写法（兵种简称 + 数量） */
+function assistTroops(view: AssistView): string {
+  const { TROOP_LABEL } = getCopy();
+  return TROOP_KINDS.filter((kind) => (view.troops[kind] ?? 0) > 0)
+    .map((kind) => `${TROOP_LABEL[kind].short}${view.troops[kind]}`)
+    .join(' ') || '—';
 }

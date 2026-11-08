@@ -20,6 +20,8 @@ export const KEEP_TABLES: readonly string[] = [
   // 联盟（v66，AISLG-181）：联盟本身与成员关系跨季保留（账号保留，社交关系随之保留）
   'alliances',
   'alliance_members',
+  // 联盟外交关系（v77，AISLG-195）：与联盟一致跨季保留
+  'alliance_relations',
 ];
 
 /** 换季时清空的表：世界级 + 账号级游戏态 + 榜单快照 */
@@ -37,10 +39,18 @@ export const RESET_TABLES: readonly string[] = [
   'city_discards',
   // 账号级游戏态
   'cities',
+  'capital_swaps',
   'city_buildings',
   'city_army',
   'builds',
   'recruits',
+  'city_defenses',
+  // 野地设施（望楼，AISLG-232，v97）：随城池 / 世界清空
+  'wilderness_facilities',
+  // 伤兵 / 俘虏 / 逃兵三池（v85，AISLG-212）：随城池清空
+  'city_troop_pools',
+  'defense_crafts',
+  'city_assist',
   'marches',
   'battle_reports',
   'scout_intel',
@@ -52,6 +62,8 @@ export const RESET_TABLES: readonly string[] = [
   'famous_heroes',
   'hero_unlocks',
   'hero_friendship',
+  // 名将被俘频率限制（v94，AISLG-228）：每账号最近一次被俘时刻，换季清空
+  'hero_capture_limits',
   'arena_entries',
   'arena_daily',
   'arena_matches',
@@ -71,10 +83,44 @@ export const RESET_TABLES: readonly string[] = [
   // 联盟的申请与邀请（v66，AISLG-181）：换季清空；联盟频道消息在 chat_messages 里一并清
   'alliance_requests',
   'alliance_invites',
+  // 联盟友好邀请（v77，AISLG-195）：换季清空
+  'alliance_friend_invites',
   // 联盟地图标记（v69，AISLG-184）：换季清空
   'alliance_marks',
   // 联盟榜快照（v70，AISLG-185）：与 leaderboard_snapshots 同理，换季清空（换季前已存档前三）
   'alliance_leaderboard_snapshots',
+  // 剧本战场（v75，AISLG-198）：战场、报名 / 队伍 / 据点 / 军功与商店额度都随赛季清空
+  'battlefield_events',
+  'battlefield_participants',
+  'battlefield_squads',
+  'battlefield_strongholds',
+  'battlefield_merit',
+  'battlefield_purchases',
+  // 声望与爵位（v76，AISLG-197）：每日俸禄领取记录换季清空（accounts 的声望 / 爵位在换季时单独清零）
+  'market_orders',
+  'market_trades',
+  'nobility_claims',
+  // 计谋（v86，AISLG-211）：计谋令与军功一起换季清零；城效果与免疫行随城 / 行军（同在 RESET 表里）一并清空
+  'account_stratagem_tokens',
+  'city_stratagem_effects',
+  'stratagem_immunity',
+  // 道具背包（v90，AISLG-222）：数量随换季清空，与礼金同口径
+  'user_items',
+  // 战争迷雾（v92，AISLG-224）：探索位图与上次看到的快照随赛季清空（fog_enabled 设置保留在 settings）
+  'fog_explored',
+  'fog_seen',
+  // 遗迹与首探（v93，AISLG-227）：遗迹随新世界重新生成，首探记录随赛季清空
+  'fog_relics',
+  'fog_first_explores',
+  // 五方势力（v99，AISLG-239）：老巢与吞城进度随赛季清空，下一季按 faction_enabled 重新生成
+  //（势力城的归属记在 world_tiles.npc 快照里，随 world_tiles 一起清空）
+  'factions',
+  // 势力出兵（v100，AISLG-240）：围攻记录（在围 / 已结算 / 每周吞城计数）随赛季清空
+  'faction_sieges',
+  // 攻破老巢（v101，AISLG-241）：老巢战况（营数 / 残血 / 每营战力 / 灭亡）与贡献榜随赛季清空，
+  // 下一季五家全部重生、贡献清零
+  'faction_lairs',
+  'faction_contrib',
 ];
 
 /** 赛季历史：只追加，换季不清空 */

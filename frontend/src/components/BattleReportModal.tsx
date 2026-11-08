@@ -21,6 +21,8 @@ interface BattleReportModalProps {
   onClose: () => void;
   /** 有值时标题栏显示「分享」（AISLG-138：把本场战报放进聊天输入框） */
   onShare?: () => void;
+  /** 有值时坐标旁显示「定位」（AISLG-203：调用方负责关弹窗并跳到地图）；剧本战场战报不显示 */
+  onLocate?: (x: number, y: number) => void;
 }
 
 function totalOf(army: ArmyCounts): number {
@@ -29,12 +31,19 @@ function totalOf(army: ArmyCounts): number {
 
 /** 战斗类别的界面名称（战报弹窗标题与聊天里的战报卡片共用） */
 export function battleKindTitle(kind: BattleReportView['kind']): string {
-  const { COPY, MOVING_COPY, YT_COPY } = getCopy();
+  const { COPY, MOVING_COPY, YT_COPY, BATTLEFIELD_COPY, EXTRA_MAP } = getCopy();
   if (kind === 'intercept') {
     return MOVING_COPY.report.kind;
   }
+  if (kind === 'faction_lair') {
+    // v101（AISLG-241）：打老巢的战报
+    return EXTRA_MAP.faction.reportKind;
+  }
   if (kind === 'yellow_turban') {
     return YT_COPY.report.kind;
+  }
+  if (kind === 'battlefield') {
+    return BATTLEFIELD_COPY.reportKind;
   }
   if (kind === 'wilderness') {
     return COPY.battleReport.kindWilderness;
@@ -78,6 +87,20 @@ function SideCard({ side, roleTag, mine, attacker }: { side: BattleSideView; rol
   const lossesTotal = totalOf(side.losses);
   const survivorsTotal = totalOf(side.survivors);
   const barTone = mine ? 'bg-accent' : 'bg-warn';
+  // v85（AISLG-212）：伤兵进池、被胜方抓走、胜方抓到的俘虏（历史战报缺省视为无）
+  const woundedTotal = side.wounded ? totalOf(side.wounded) : 0;
+  const capturedTotal = side.captured ? totalOf(side.captured) : 0;
+  const captivesTotal = side.captives ? totalOf(side.captives) : 0;
+  const poolParts: string[] = [];
+  if (woundedTotal > 0) {
+    poolParts.push(COPY.battleReport.poolWounded(woundedTotal));
+  }
+  if (capturedTotal > 0) {
+    poolParts.push(COPY.battleReport.poolCaptured(capturedTotal));
+  }
+  if (captivesTotal > 0) {
+    poolParts.push(COPY.battleReport.poolCaptives(captivesTotal));
+  }
   return (
     <div role={mine ? '战报弹窗-我方卡片' : '战报弹窗-敌方卡片'} className="flex min-w-0 flex-col gap-1">
       <p className="flex items-baseline gap-1.5">
@@ -132,6 +155,12 @@ function SideCard({ side, roleTag, mine, attacker }: { side: BattleSideView; rol
           {COPY.battleReport.statDamage} <span className={mine ? 'text-accent' : 'text-warn'}>{Math.round(side.damage)}</span>
         </span>
       </p>
+      {/* v85（AISLG-212）：伤兵 / 被俘 / 俘虏（仅非零时显示；阵亡 = 损失 − 伤兵 − 被俘） */}
+      {poolParts.length > 0 ? (
+        <p role={mine ? '战报弹窗-我方池子' : '战报弹窗-敌方池子'} className="font-mono text-[11.5px] leading-tight text-faint">
+          {poolParts.join(' · ')}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -139,9 +168,9 @@ function SideCard({ side, roleTag, mine, attacker }: { side: BattleSideView; rol
 /** 逐回合明细每页格数（8 列 × 2 行）：长战报分页，不出滚动条 */
 const ROUNDS_PER_PAGE = 16;
 
-export function BattleReportModal({ report, onClose, onShare }: BattleReportModalProps) {
+export function BattleReportModal({ report, onClose, onShare, onLocate }: BattleReportModalProps) {
   const copy = useCopy();
-  const { COPY, DEFENSE_COPY, EXTRA_PANEL, CHAT_COPY } = copy;
+  const { COPY, DEFENSE_COPY, EXTRA_PANEL, CHAT_COPY, TROOP_LABEL } = copy;
   const [view, setView] = useState<'chart' | 'rounds'>('chart');
   const [roundPage, setRoundPage] = useState(0);
   const mineIsAttacker = report.role === 'attacker';
@@ -197,7 +226,18 @@ export function BattleReportModal({ report, onClose, onShare }: BattleReportModa
       }
     >
       <p role="战报弹窗-头部" className="truncate font-mono text-[12px] text-faint">
-        {COPY.battleReport.location(report.x, report.y)} · {COPY.battleReport.idBadge(report.id)} · {formatReportTime(report.createdAt)} · {COPY.battleReport.roundsMeta(report.rounds)} · {endReasonText(report)}
+        {COPY.battleReport.location(report.x, report.y)}
+        {onLocate && report.kind !== 'battlefield' ? (
+          <button
+            type="button"
+            role="战报弹窗-定位"
+            onClick={() => onLocate(report.x, report.y)}
+            className="ml-1.5 cursor-pointer rounded border border-line px-1.5 align-middle text-[11px] text-dim hover:border-accent hover:text-accent"
+          >
+            {COPY.battleReport.locate}
+          </button>
+        ) : null}
+        {' · '}{COPY.battleReport.idBadge(report.id)} · {formatReportTime(report.createdAt)} · {COPY.battleReport.roundsMeta(report.rounds)} · {endReasonText(report)}
         {report.wallDefensePercent > 0 ? <span className="text-dim"> · {COPY.battleReport.wallBadge(report.wallDefensePercent)}</span> : null}
         {report.wallBreak ? (
           <span role="战报弹窗-冲车破墙" className="text-gold"> · {DEFENSE_COPY.report.wallBreak(report.wallBreak.from, report.wallBreak.to)}</span>
@@ -205,7 +245,23 @@ export function BattleReportModal({ report, onClose, onShare }: BattleReportModa
         {(report.towerDamage ?? 0) > 0 ? (
           <span role="战报弹窗-箭塔伤害" className="text-gold"> · {DEFENSE_COPY.report.towerDamage(report.towerDamage ?? 0)}</span>
         ) : null}
+        {report.defenses && report.defenses.length > 0 ? (
+          <span role="战报弹窗-城防器械" className="text-gold">
+            {' · '}
+            {report.defenses.map((use) => DEFENSE_COPY.report.defenseUse(DEFENSE_COPY.names[use.kind], use.used, use.killed)).join(' / ')}
+          </span>
+        ) : null}
       </p>
+
+      {report.assistLosses ? (
+        <p role="战报弹窗-协防损失" className="shrink-0 rounded border border-line-soft bg-panel-2 px-2.5 py-1 text-[12px] text-dim">
+          {DEFENSE_COPY.report.assistLosses(
+            TROOP_KINDS.filter((kind) => (report.assistLosses?.[kind] ?? 0) > 0)
+              .map((kind) => `${TROOP_LABEL[kind].name}×${report.assistLosses?.[kind] ?? 0}`)
+              .join(' · ') || '0',
+          )}
+        </p>
+      ) : null}
 
       {report.comment ? (
         <div role="战报弹窗-Agent点评" className="shrink-0 rounded border border-accent-dim bg-accent-soft px-2.5 py-1">

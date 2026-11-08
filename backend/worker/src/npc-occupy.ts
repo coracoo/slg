@@ -12,8 +12,15 @@ import pg from 'pg';
 import { EventType, RESOURCE_KEYS, type InitiatorRole, type Resources, type TroopKind } from '../../common/src/protocol';
 import { insertEvent } from '../../common/src/events';
 import { armyPower, resolveBattle, wallDefensePercent } from '../../common/src/battle';
+import { splitBattleCasualties } from '../../common/src/battle-casualties';
+import { recordPoolTroops } from '../../common/src/troop-pools-db';
+import { combatTechBonus } from '../../common/src/tech';
+import { loadTechLevels } from '../../common/src/tech-db';
 import { checkOccupyNpcCity } from '../../common/src/branch-city';
 import { famousStage } from '../../common/src/famous-city';
+import { FAMOUS_CITY_NOBILITY_INDEX } from '../../common/src/nobility';
+import { loadNobilityIndex } from '../../common/src/nobility-db';
+import { refreshLuoyangHolder } from '../../common/src/luoyang-db';
 import { DURABILITY_MAX } from '../../common/src/protection';
 import { loadBranchStanding, loadDiscardCooldownActive } from '../../common/src/branch-city-db';
 import { loadBuildingLevels } from '../../common/src/production';
@@ -105,12 +112,24 @@ export async function resolveNpcOccupyArrival(
   const wall = wallDefensePercent((npc.buildings?.wall as number | undefined) ?? 0);
   // v36（AISLG-114）：随队武将加成（按部队规模折算）
   const hero = await loadMarchHeroBonus(client, march, armyTotal(troops));
-  const result = resolveBattle(troops, npc.garrison, { wallDefensePercent: wall, siege: true, attackerHero: hero?.engine ?? null });
+  const result = resolveBattle(troops, npc.garrison, {
+    wallDefensePercent: wall,
+    siege: true,
+    attackerHero: hero?.engine ?? null,
+    attackerTech: combatTechBonus(await loadTechLevels(client, march.account_id)),
+  });
   const naming = await loadCityNaming(client, march.from_city_id);
   const attackerName = naming ? `${naming.username} · ${naming.cityName}` : '出征部队';
+  // v85（AISLG-212）：占领 NPC 城（含名城城守阶段）——攻方伤兵与俘虏（胜时从守军损失抓 10%）进出发城
+  const occupyCasualties = splitBattleCasualties(result, false, true);
+  await recordPoolTroops(client, march.from_city_id, 'wounded', occupyCasualties.attacker.wounded);
+  if (occupyCasualties.winner === 'attacker') {
+    await recordPoolTroops(client, march.from_city_id, 'captive', occupyCasualties.captives);
+  }
   const reportId = await saveBattleReport(
     client, march.account_id, 'attacker', result.attackerWon,
     'npc_city', tile.x, tile.y, result, attackerName, `NPC 城池 Lv${tile.level}`, wall, notifies, hero?.report ?? null,
+    null, null, null, occupyCasualties,
   );
   const heroSettle = await settleMarchHero(client, march, result, notifies);
   const base = {
@@ -143,15 +162,22 @@ export async function resolveNpcOccupyArrival(
   }
 
   // 到达复核分城资格（发起后主城官府 / 分城数可能变化）
+  // v76（AISLG-197）：名城还要求「大夫」及以上爵位（发起后可能已升爵 / 降级）
+  const nobilityDenial =
+    npc.famous !== undefined && (await loadNobilityIndex(client, march.account_id)) < FAMOUS_CITY_NOBILITY_INDEX
+      ? 'NOBILITY_TOO_LOW'
+      : null;
   const standing = await loadBranchStanding(client, march.account_id);
   const fromLevels = await loadBuildingLevels(client, march.from_city_id);
-  const denial = checkOccupyNpcCity({
-    mainGovernment: standing.mainGovernment,
-    fromGovernment: fromLevels.government,
-    branchCount: standing.branchCount,
-    targetLevel: tile.level,
-    discardCooldown: await loadDiscardCooldownActive(client, march.account_id, tile.x, tile.y),
-  });
+  const denial =
+    nobilityDenial ??
+    checkOccupyNpcCity({
+      mainGovernment: standing.mainGovernment,
+      fromGovernment: fromLevels.government,
+      branchCount: standing.branchCount,
+      targetLevel: tile.level,
+      discardCooldown: await loadDiscardCooldownActive(client, march.account_id, tile.x, tile.y),
+    });
   await markMarchArrived(client, march.id);
   if (denial) {
     const returning = await createReturnMarch(client, march, result.attacker.survivors, settled, march.initiator);
@@ -169,6 +195,8 @@ export async function resolveNpcOccupyArrival(
 
   const cityName = npc.famous?.name ?? `分城(${tile.x},${tile.y})`;
   const newCityId = await convertNpcCityToBranch(client, march.account_id, tile, npc, result.attacker.survivors, cityName, notifies);
+  // v79（AISLG-200）：占领洛阳后刷新洛阳之主
+  await refreshLuoyangHolder(client);
   await completeMarchEvent(client, march, 'battle_won', { ...base, occupied: true, cityId: newCityId });
   await insertEvent(client, {
     accountId: march.account_id,

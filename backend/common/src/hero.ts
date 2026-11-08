@@ -5,7 +5,10 @@
 // 前端镜像共用本文件，不各自再实现一套数值；全部数值为占位，上线后按数据调整。
 
 import type { TroopKind } from './protocol';
+import type { FactionKey } from './protocol-faction';
+import { factionNameOf } from './faction';
 import { WILD_FAMOUS_HEROES } from './hero-wild';
+import { nobilityHeroCapBonus } from './nobility';
 
 /** 普通将三项属性随机范围 */
 export const HERO_ATTR_MIN = 10;
@@ -21,8 +24,8 @@ export const TAVERN_CANDIDATE_COUNT = 3;
 export const RECRUIT_BASE_GOLD = 500;
 export const RECRUIT_GOLD_PER_ATTR = 20;
 /** 账号普通将上限 = ⌈酒馆最高等级 ÷ 2⌉ + 1（酒馆取账号所有城中的最高等级） */
-export function normalHeroCap(maxTavernLevel: number): number {
-  return Math.ceil(Math.max(0, Math.floor(maxTavernLevel)) / 2) + 1;
+export function normalHeroCap(maxTavernLevel: number, nobilityIndex = 0): number {
+  return Math.ceil(Math.max(0, Math.floor(maxTavernLevel)) / 2) + 1 + nobilityHeroCapBonus(nobilityIndex);
 }
 /** 账号名将上限（不占普通将上限） */
 export const FAMOUS_HERO_CAP = 3;
@@ -174,11 +177,13 @@ export function applyHeroExp(
 
 // ---- 名将定义（v36，AISLG-115）：只从 PvE 获得，全服唯一 ----
 
-/** 名将来源标识（v54 新增 wild：在野名将，打赢其所在野地守军后结交招揽） */
+/** 名将来源标识（v54 新增 wild：在野名将，打赢其所在野地守军后结交招揽；
+ *  v101（AISLG-241）新增 faction：攻破五方势力老巢（最后一击）获得该势力首领） */
 export type FamousHeroSource =
   | { kind: 'famous_city'; cityName: string }
   | { kind: 'yt_boss' }
   | { kind: 'yt_rank'; rank: 1 | 2 }
+  | { kind: 'faction'; faction: FactionKey }
   | { kind: 'wild' };
 
 export interface FamousHeroDef {
@@ -206,13 +211,31 @@ export const YT_HERO_RANKS: ReadonlyArray<FamousHeroDef> = [
   { name: '张梁', source: { kind: 'yt_rank', rank: 2 } },
 ];
 
-/** 名将来源 → 全部定义（视图 / 授予共用）：名城 8 + 黄巾 3 + 在野 29 = 40 名 */
+/**
+ * 五方势力的首领名将（v101，AISLG-241）：打掉这家老巢最后一营的玩家获得，全服唯一。
+ * 名字与 faction.ts 的 FACTIONS.leader 一一对应；属性与忠诚度规则跟黄巾名将一样（不另设）。
+ */
+export const FACTION_HEROES: ReadonlyArray<FamousHeroDef> = [
+  { name: '韩遂', source: { kind: 'faction', faction: 'liangzhou' } },
+  { name: '蹋顿', source: { kind: 'faction', faction: 'wuhuan' } },
+  { name: '孟获', source: { kind: 'faction', faction: 'nanman' } },
+  { name: '费栈', source: { kind: 'faction', faction: 'shanyue' } },
+  { name: '张燕', source: { kind: 'faction', faction: 'heishan' } },
+];
+
+/** 名将来源 → 全部定义（视图 / 授予共用）：名城 8 + 黄巾 3 + 势力首领 5 + 在野 29 = 45 名 */
 export const ALL_FAMOUS_HEROES: ReadonlyArray<FamousHeroDef> = [
   ...FAMOUS_CITY_HEROES,
   YT_HERO_BOSS,
   ...YT_HERO_RANKS,
+  ...FACTION_HEROES,
   ...WILD_FAMOUS_HEROES,
 ];
+
+/** 按势力标识反查首领名将（v101：这家老巢被攻破时授予） */
+export function famousHeroForFaction(faction: FactionKey): FamousHeroDef | null {
+  return FACTION_HEROES.find((def) => def.source.kind === 'faction' && def.source.faction === faction) ?? null;
+}
 
 /** 按名城名反查绑定名将 */
 export function famousHeroForCity(cityName: string): FamousHeroDef | null {
@@ -230,6 +253,9 @@ export function famousSourceLabel(source: FamousHeroSource): string {
   if (source.kind === 'wild') {
     return '在野名将（打赢守军后结交招揽）';
   }
+  if (source.kind === 'faction') {
+    return `攻破${factionNameOf(source.faction)}老巢（最后一击）`;
+  }
   return `黄巾之乱贡献榜第 ${source.rank} 名`;
 }
 
@@ -243,6 +269,9 @@ export function famousSourceKey(source: FamousHeroSource): string {
   }
   if (source.kind === 'wild') {
     return 'wild';
+  }
+  if (source.kind === 'faction') {
+    return `faction:${source.faction}`;
   }
   return `yt_rank:${source.rank}`;
 }

@@ -28,12 +28,38 @@ import {
 } from './handlers-city';
 import { handleRenameCity, handleResetAccount, handleSetNickname } from './handlers-account';
 import { handleCancelRecruit, handleRecruit, readRecruitParams } from './handlers-army';
+import { handleDisbandTroops, readDisbandTroops } from './handlers-disband';
+import { handleGetTroopPools, handleReleaseTroops, handleRestoreTroops, readTroopPoolRequest } from './handlers-troop-pools';
+import { handleGetStratagems, handleCastStratagem } from './handlers-stratagem';
+import { handleCancelDefenseCraft, handleCraftDefense } from './handlers-defense';
+import { handleDismissAssist } from './handlers-assist';
+import {
+  handleEnterBattlefield,
+  handleGetBattlefield,
+  handleMarchBattlefieldSquad,
+  handleSignupBattlefield,
+  handleSplitBattlefieldSquad,
+} from './handlers-battlefield';
+import { handleBuyBattlefieldItem } from './handlers-battlefield-shop';
+import { handleChainBattlefieldStronghold, handleFireBattlefieldStronghold } from './handlers-battlefield-skill';
+import { handleClaimNobilitySalary, handleGetNobility } from './handlers-nobility';
+import { handleAllianceDiplomacyOp } from './handlers-alliance-diplomacy';
+import { handleGetLuoyang, handlePublishDecree } from './handlers-luoyang';
+import {
+  handleBuyMarketOrder,
+  handleCancelMarketOrder,
+  handleCreateMarketOrder,
+  handleGetMarket,
+} from './handlers-market';
 import {
   handleGetTile,
+  handleGetVisibleMarches,
   handleGetWorldMap,
   handleMarch,
-  handleRecallGarrison,
 } from './handlers-world';
+import { handleRecallGarrison, readRecallTroops } from './handlers-recall';
+import { handleFacilityBuild } from './handlers-facility';
+import { handleGetFactions } from './handlers-faction';
 import { handleGetMapOverview } from './map-overview';
 import { handleAnnouncementOp } from './handlers-announcement';
 import { handleAllianceOp } from './handlers-alliance';
@@ -44,7 +70,7 @@ import { handleGetYellowTurban } from './handlers-yt';
 import { handleCancelResearch, handleGetTechs, handleResearchTech } from './handlers-tech';
 import { handleAssignHero, handleDismissHero, handleGetHeroes, handleRecruitHero } from './handlers-hero';
 import { routeHeroGrowthOp } from './handlers-hero-ops';
-import { handleTruce } from './handlers-pvp';
+import { handleCancelTruce, handleTruce } from './handlers-pvp';
 import { handleArenaChallenge, handleGetArena, handleGetArenaReports, handleSetArenaLineup } from './handlers-arena';
 import { handleGetStarTower, handleGetStarTowerReports, handleStarTowerChallenge } from './handlers-star-tower';
 import {
@@ -66,11 +92,21 @@ import { handleClaimActivity, handleClaimQuest, handleGetActivities, handleGetQu
 import { handleGetLeaderboard } from './handlers-leaderboard';
 import { effectiveLevelSql } from '../../common/src/production';
 import { handleAgentDailyReport, handleGetOfflineReport, markPlayerOffline } from './handlers-offline';
+import { touchActive } from '../../common/src/alliance-db';
 import { loadCityState } from './views';
+import { cityTitle } from '../../common/src/nobility';
 import { CITY_SCOPED_OPS, runWithCity } from './city-scope';
 import { handleDiscardCity } from './handlers-discard';
+import { handleSetCapital } from './handlers-capital';
+import { loadCapitalSwapView } from '../../common/src/capital-swap-db';
+import { loadGift } from '../../common/src/gift-db';
+import { loadItems } from '../../common/src/items-db';
+import { handleBuyItem, handleGetItems } from './handlers-items';
+import { handleMoveCity } from './handlers-move-city';
+import { loadMoveCityView } from '../../common/src/move-city-db';
+import { SEASON_GIFT } from '../../common/src/gift';
 import { BRANCH_MIN_GOVERNMENT, branchCityLimit } from '../../common/src/branch-city';
-import { handleGetHallOfFame, handleGetSeason, respondMaintenance } from './handlers-season';
+import { handleGetSeason, handleGetHallOfFame, respondMaintenance } from './handlers-season';
 import { maintenanceActive } from './maintenance-gate';
 
 export interface HandlerContext {
@@ -192,6 +228,14 @@ async function dispatchOp(
     case Op.GET_WORLD_MAP:
       await handleGetWorldMap(ctx, conn, op, seq, data);
       break;
+    // v96（AISLG-230）：窗口内视野里的他人部队
+    case Op.GET_VISIBLE_MARCHES:
+      await handleGetVisibleMarches(ctx, conn, op, seq, data);
+      break;
+    // v99（AISLG-239）：五方势力（只读；关闭开关时返回 enabled=false）
+    case Op.GET_FACTIONS:
+      await handleGetFactions(ctx, conn, op, seq);
+      break;
     case Op.GET_MAP_OVERVIEW:
       await handleGetMapOverview(ctx, conn, op, seq);
       break;
@@ -244,7 +288,13 @@ async function dispatchOp(
         respondError(ctx.registry, conn, op, seq, 'INVALID_PARAMS');
         break;
       }
-      await handleRecallGarrison(ctx, conn, op, seq, x as number, y as number);
+      // v83（AISLG-207）：troops 缺省 = 全撤；带 troops 按兵种部分撤回，非法返回 INVALID_PARAMS
+      const recall = readRecallTroops(data);
+      if (!recall) {
+        respondError(ctx.registry, conn, op, seq, 'INVALID_PARAMS');
+        break;
+      }
+      await handleRecallGarrison(ctx, conn, op, seq, x as number, y as number, recall.troops);
       break;
     }
     case Op.SCOUT: {
@@ -275,7 +325,8 @@ async function dispatchOp(
       await handleGetMovingTargets(ctx, conn, op, seq);
       break;
     case Op.GET_HEROES:
-      await handleGetHeroes(ctx, conn, op, seq, data);
+      // v87（AISLG-217）：酒馆候选账号只有一份（主城），请求里的 cityId 忽略
+      await handleGetHeroes(ctx, conn, op, seq);
       break;
     case Op.RECRUIT_HERO:
       await handleRecruitHero(ctx, conn, op, seq, data);
@@ -289,13 +340,18 @@ async function dispatchOp(
     case Op.ALLOCATE_HERO_POINTS:
     case Op.RESET_HERO_POINTS:
     case Op.TRAIN_HERO:
+    case Op.CANCEL_TRAINING:
     case Op.GIFT_HERO:
     case Op.BEFRIEND_HERO:
     case Op.RECRUIT_FAMOUS_HERO:
+    case Op.RANSOM_HERO:
       await routeHeroGrowthOp(ctx, conn, op, seq, data);
       break;
     case Op.TRUCE:
       await handleTruce(ctx, conn, op, seq);
+      break;
+    case Op.CANCEL_TRUCE:
+      await handleCancelTruce(ctx, conn, op, seq);
       break;
     case Op.GET_ARENA:
       await handleGetArena(ctx, conn, op, seq);
@@ -387,6 +443,123 @@ async function dispatchOp(
       await handleCancelRecruit(ctx, conn, op, seq, recruitId);
       break;
     }
+    case Op.DISBAND_TROOPS: {
+      // v84（AISLG-209）：troops 必须是非空对象、键为已知兵种、值为正整数，否则 INVALID_PARAMS
+      const params = readDisbandTroops(data);
+      if (!params) {
+        respondError(ctx.registry, conn, op, seq, 'INVALID_PARAMS');
+        break;
+      }
+      await handleDisbandTroops(ctx, conn, op, seq, params.troops);
+      break;
+    }
+    case Op.RESTORE_TROOPS: {
+      // v85（AISLG-212）：pool 必须是已知池子（含逃兵），troops 解析失败 INVALID_PARAMS
+      const params = readTroopPoolRequest(data, true);
+      if (!params) {
+        respondError(ctx.registry, conn, op, seq, 'INVALID_PARAMS');
+        break;
+      }
+      await handleRestoreTroops(ctx, conn, op, seq, params.pool, params.troops);
+      break;
+    }
+    case Op.RELEASE_TROOPS: {
+      // v85（AISLG-212）：只认 wounded / captive（逃兵不能释放，只能劝回或等过期）
+      const params = readTroopPoolRequest(data, false);
+      if (!params) {
+        respondError(ctx.registry, conn, op, seq, 'INVALID_PARAMS');
+        break;
+      }
+      await handleReleaseTroops(ctx, conn, op, seq, params.pool, params.troops);
+      break;
+    }
+    case Op.GET_TROOP_POOLS:
+      // v88（AISLG-218）：只读汇总，无参数；不开事务、不加锁、不需要 cityId
+      await handleGetTroopPools(ctx, conn, op, seq);
+      break;
+    case Op.CRAFT_DEFENSE:
+      // 参数校验在 handler 内（kind 枚举 + count 正整数），失败附当前城池状态
+      await handleCraftDefense(ctx, conn, op, seq, data);
+      break;
+    case Op.CANCEL_DEFENSE_CRAFT:
+      await handleCancelDefenseCraft(ctx, conn, op, seq, data);
+      break;
+    case Op.DISMISS_ASSIST:
+      await handleDismissAssist(ctx, conn, op, seq, data);
+      break;
+    case Op.GET_ITEMS:
+      // v90（AISLG-222）：道具背包 / 目录 / 礼金余额，只读
+      await handleGetItems(ctx, conn, op, seq);
+      break;
+    case Op.BUY_ITEM:
+      // v90（AISLG-222）：礼金买道具
+      await handleBuyItem(ctx, conn, op, seq, data);
+      break;
+    case Op.MOVE_CITY:
+      // v91（AISLG-220）：城池迁移（随机迁 / 指定坐标迁，支持 preview）
+      await handleMoveCity(ctx, conn, op, seq, data);
+      break;
+    case Op.GET_STRATAGEMS:
+      await handleGetStratagems(ctx, conn, op, seq, data);
+      break;
+    case Op.CAST_STRATAGEM:
+      await handleCastStratagem(ctx, conn, op, seq, data);
+      break;
+    case Op.GET_BATTLEFIELD:
+      await handleGetBattlefield(ctx, conn, op, seq);
+      break;
+    case Op.SIGNUP_BATTLEFIELD:
+      await handleSignupBattlefield(ctx, conn, op, seq, data);
+      break;
+    case Op.ENTER_BATTLEFIELD:
+      await handleEnterBattlefield(ctx, conn, op, seq, data);
+      break;
+    case Op.SPLIT_BATTLEFIELD_SQUAD:
+      await handleSplitBattlefieldSquad(ctx, conn, op, seq, data);
+      break;
+    case Op.MARCH_BATTLEFIELD_SQUAD:
+      await handleMarchBattlefieldSquad(ctx, conn, op, seq, data);
+      break;
+    case Op.BUY_BATTLEFIELD_ITEM:
+      await handleBuyBattlefieldItem(ctx, conn, op, seq, data);
+      break;
+    case Op.FIRE_BATTLEFIELD_STRONGHOLD:
+      await handleFireBattlefieldStronghold(ctx, conn, op, seq, data);
+      break;
+    case Op.CHAIN_BATTLEFIELD_STRONGHOLD:
+      await handleChainBattlefieldStronghold(ctx, conn, op, seq, data);
+      break;
+    case Op.ALLIANCE_DIPLOMACY_INVITE:
+    case Op.ALLIANCE_DIPLOMACY_RESPOND:
+    case Op.ALLIANCE_DIPLOMACY_END:
+    case Op.ALLIANCE_DIPLOMACY_HOSTILE:
+    case Op.GET_ALLIANCE_DIPLOMACY:
+      await handleAllianceDiplomacyOp(ctx, conn, op, seq, data);
+      break;
+    case Op.GET_LUOYANG:
+      await handleGetLuoyang(ctx, conn, op, seq);
+      break;
+    case Op.PUBLISH_DECREE:
+      await handlePublishDecree(ctx, conn, op, seq, data);
+      break;
+    case Op.GET_MARKET:
+      await handleGetMarket(ctx, conn, op, seq, data);
+      break;
+    case Op.CREATE_MARKET_ORDER:
+      await handleCreateMarketOrder(ctx, conn, op, seq, data);
+      break;
+    case Op.BUY_MARKET_ORDER:
+      await handleBuyMarketOrder(ctx, conn, op, seq, data);
+      break;
+    case Op.CANCEL_MARKET_ORDER:
+      await handleCancelMarketOrder(ctx, conn, op, seq, data);
+      break;
+    case Op.GET_NOBILITY:
+      await handleGetNobility(ctx, conn, op, seq);
+      break;
+    case Op.CLAIM_NOBILITY_SALARY:
+      await handleClaimNobilitySalary(ctx, conn, op, seq);
+      break;
     case Op.BUILD: {
       const kind = readString(data, 'kind');
       if (!isBuildingKind(kind)) {
@@ -437,6 +610,9 @@ async function dispatchOp(
     case Op.DISCARD_CITY:
       await handleDiscardCity(ctx, conn, op, seq, data);
       break;
+    case Op.SET_CAPITAL:
+      await handleSetCapital(ctx, conn, op, seq, data);
+      break;
     case Op.SET_NICKNAME:
       await handleSetNickname(ctx, conn, op, seq, data);
       break;
@@ -478,6 +654,16 @@ async function dispatchOp(
     case Op.GET_HALL_OF_FAME:
       await handleGetHallOfFame(ctx, conn, op, seq, data);
       break;
+    case Op.FACILITY_BUILD: {
+      const x = data?.x;
+      const y = data?.y;
+      if (!Number.isInteger(x) || !Number.isInteger(y)) {
+        respondError(ctx.registry, conn, op, seq, 'INVALID_PARAMS');
+        break;
+      }
+      await handleFacilityBuild(ctx, conn, op, seq, x as number, y as number);
+      break;
+    }
     case Op.BUILD_FARM:
       // 兼容入口（协议 v2 及以前）：等价于 BUILD 且 kind='farm'，忽略请求参数
       await handleBuild(ctx, conn, op, seq, 'farm');
@@ -515,6 +701,8 @@ async function handleGetState(
     x: row.x,
     y: row.y,
     isMain: index === 0,
+    title: cityTitle(row.level, index === 0),
+    nobility: city?.nobility ?? { index: 0, name: '平民' },
   }));
   const mainGovernment = cities[0]?.level ?? 0;
   const branch = {
@@ -522,7 +710,15 @@ async function handleGetState(
     limit: branchCityLimit(mainGovernment),
     minGovernment: BRANCH_MIN_GOVERNMENT,
   };
-  respondOk(ctx.registry, conn, op, seq, { city, cities, branch });
+  // v82（AISLG-205）：设为主城的冷却 / 来袭 / 逐城不可设原因，供前端置灰
+  const capitalSwap = await loadCapitalSwapView(ctx.pool, accountId);
+  // v89（AISLG-221）：账号级礼金余额与每季发放额度（前端 / Agent 不写死 1000）
+  const gift = await loadGift(ctx.pool, accountId);
+  // v90（AISLG-222）：道具背包数量（与 GET_ITEMS 的 items 同口径）
+  const items = await loadItems(ctx.pool, accountId);
+  // v91（AISLG-220）：逐城迁城不可迁原因、出限截止时刻与两种令的持有数
+  const moveCity = await loadMoveCityView(ctx.pool, accountId, items);
+  respondOk(ctx.registry, conn, op, seq, { city, cities, branch, capitalSwap, gift, giftSeasonGrant: SEASON_GIFT, items, moveCity });
 }
 
 async function handleGetEvents(
@@ -547,8 +743,8 @@ async function handleGetEvents(
   respondOk(ctx.registry, conn, op, seq, { events: rows.map(toEventView) });
 }
 
-/** 连接关闭时调用：Agent 离线写事件并推送最新 Agent 在线状态；玩家的最后一条
- *  玩家连接断开时记录离线时刻（离线日报的统计起点，v23 AISLG-54） */
+/** 连接关闭时调用：Agent 离线写事件并推送最新 Agent 在线状态，并刷新一次活跃时刻（AISLG-236）；
+ *  玩家的最后一条玩家连接断开时记录离线时刻（离线日报的统计起点，v23 AISLG-54） */
 export async function handleConnectionClosed(ctx: HandlerContext, conn: ConnInfo): Promise<void> {
   onWxConnectionClosed(ctx, conn);
   const accountId = ctx.registry.peekAccountId(conn);
@@ -577,6 +773,13 @@ export async function handleConnectionClosed(ctx: HandlerContext, conn: ConnInfo
     await recordAgentPresence(ctx, accountId, EventType.AGENT_DISCONNECTED);
   } catch (err) {
     console.error('write agent_disconnected failed:', err);
+  }
+  // AISLG-236：Agent 断线算活跃。只刷 last_active_at；last_online_at 仍只由玩家连接全部断开时写
+  //（离线日报的起点不能被 Agent 断线带动，所以不复用 markPlayerOffline）
+  try {
+    await touchActive(ctx.pool, [accountId]);
+  } catch (err) {
+    console.error('touch active on agent disconnect failed:', err);
   }
   if (wasOnline !== isOnline) {
     pushAgentStatus(ctx, accountId, isOnline);

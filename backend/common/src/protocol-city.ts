@@ -12,7 +12,10 @@ import type {
   Resources,
 } from './protocol';
 import type { MarchView, TerritoryView } from './protocol-world';
+import type { DefenseStockView } from './protocol-defense';
+import type { AssistOutView, AssistView } from './protocol-assist';
 import type { TechLevels } from './tech';
+import type { TroopPoolView } from './protocol-army';
 
 /** BUILD（op 21）请求载荷：kind 缺失或不是已知建筑类型时返回 INVALID_PARAMS */
 export interface BuildRequestData {
@@ -39,7 +42,7 @@ export interface BuildStatePushData {
   build: BuildView;
 }
 
-/** CANCEL_BUILD（op 24）请求载荷：取消排队中的建造条目并全额返还其成本（已确认规则） */
+/** CANCEL_BUILD（op 24）请求载荷：取消建造条目（排队中 / 建造中，v71）并返还其成本（已确认规则） */
 export interface CancelBuildRequestData {
   buildId: string;
 }
@@ -74,13 +77,54 @@ export interface DiscardCityResponseData {
   cooldownUntil: string;
 }
 
+/** SET_CAPITAL（op 141，v82，AISLG-205）请求载荷：cityId 必填（要设为主城的分城），confirm 必须显式为 true */
+export interface SetCapitalRequestData {
+  cityId: string;
+  confirm: boolean;
+}
+
+/** SET_CAPITAL 响应载荷：新主城、原主城（已变为分城）、本账号的下次可换时刻与新主城的分城上限 */
+export interface SetCapitalResponseData {
+  capitalId: string;
+  formerCapitalId: string;
+  /** ISO 8601；冷却期内再次设为主城返回 CAPITAL_SWAP_COOLDOWN */
+  cooldownUntil: string;
+  /** 换完后的分城上限 = floor(新主城官府等级 ÷ 2) */
+  branchLimit: number;
+}
+
+/** 设为主城被拒的错误码子集（GET_STATE 的 capitalSwap.blocked 按城给出，前端据此置灰） */
+export type CapitalSwapBlockCode = 'FAMOUS_CITY_NOT_CAPITAL' | 'CAPITAL_SWAP_DURABILITY_LOW' | 'BRANCH_LIMIT_EXCEEDED';
+
+/** GET_STATE 响应的 capitalSwap（v82，AISLG-205）：设为主城的账号级状态与逐城不可设原因 */
+export interface CapitalSwapView {
+  /** ISO 8601；冷却未结束时为冷却截止时刻，否则 null */
+  cooldownUntil: string | null;
+  /** 有他人玩家的出征正奔向本账号任一城或野地 */
+  underAttack: boolean;
+  /** 逐分城给出不可设为主城的原因（未列出的分城可设）；键为 cityId */
+  blocked: Record<string, CapitalSwapBlockCode>;
+}
+
 /** PUSH_CITY_STATE（op 2002）推送载荷：城池级状态变化 */
 export interface CityStatePushData {
-  /** city_renamed=城池改名；account_reset=账号数据被重置（v8 起无拆除类 reason）；city_discarded=分城被放弃（v57） */
-  reason: 'city_renamed' | 'account_reset' | 'city_discarded';
+  /** city_renamed=城池改名；account_reset=账号数据被重置（v8 起无拆除类 reason）；city_discarded=分城被放弃（v57）；
+   *  assist_changed=协防部队入驻 / 召回 / 遣返 / 自动遣返（v74，AISLG-194；收到后重新 GET_STATE / GET_TILE）；
+   *  capital_changed=设为主城（v82，AISLG-205；cityId 为新主城，formerCapitalId 为原主城；收到后重新 GET_STATE）；
+   *  troops_disbanded=城内驻军被遣散（v84，AISLG-209；cityId 为遣散的城，收到后重新 GET_STATE）；
+   *  troop_pools_changed=伤兵 / 俘虏 / 逃兵池子发生变化（v85，AISLG-212；战斗结算入账、治疗 / 招降 / 劝回、放弃 / 释放、断粮兵变与过期清理后）；
+   *  stratagem=城池中了计谋（v86，AISLG-211；烧粮 / 十面埋伏 / 趁火打劫 / 欺敌覆盖；收到后重新 GET_STATE）；
+   *  city_moved=城池迁移（v91，AISLG-220；cityId 为迁走的城，from / to 为新旧坐标，收到后重新 GET_STATE）；
+   *  fog_reward=遗迹 / 名城首探奖励到账（v93，AISLG-227；cityId 为主城，收到后重新 GET_STATE） */
+  reason: 'city_renamed' | 'account_reset' | 'city_discarded' | 'assist_changed' | 'capital_changed' | 'troops_disbanded' | 'troop_pools_changed' | 'stratagem' | 'city_moved' | 'fog_reward';
   cityId: string;
   /** reason=city_renamed 时的新名称 */
   name?: string;
+  /** reason=capital_changed 时的原主城 id（已变为分城） */
+  formerCapitalId?: string;
+  /** reason=city_moved 时的新旧坐标（v91） */
+  from?: { x: number; y: number };
+  to?: { x: number; y: number };
 }
 
 /** RESET_ACCOUNT（op 26）请求载荷：重置为不可逆操作，confirm 必须显式为 true */
@@ -144,6 +188,24 @@ export const EventType = {
   CITY_RENAMED: 'city_renamed',
   /** v57（AISLG-153）：分城被放弃，地块转回 NPC 城池（detail = { x, y, cooldownUntil }） */
   CITY_DISCARDED: 'city_discarded',
+  /** v82（AISLG-205）：分城与主城对调身份（detail = { capitalId, formerCapitalId, cooldownUntil }） */
+  CAPITAL_CHANGED: 'capital_changed',
+  /** v84（AISLG-209）：遣散城内驻军（detail = { cityId, troops, refunded }；返还征兵成本的 50%） */
+  TROOPS_DISBANDED: 'troops_disbanded',
+  /** v86（AISLG-211）：施计（施计方的事件流；detail = { stratagem, heroId, heroName, target, success, effect, tokenKind, tokensLeft }） */
+  STRATAGEM_CAST: 'stratagem_cast',
+  /** v86（AISLG-211）：被施计（目标方的事件流，与 PUSH_STRATAGEM 同构；欺敌类与金蝉脱壳不写） */
+  STRATAGEM_RECEIVED: 'stratagem_received',
+  /** v89（AISLG-221）：礼金扣除（detail = { reason, amount, balance }；扣除失败不写事件） */
+  GIFT_SPENT: 'gift_spent',
+  /** v90（AISLG-222）：道具发放（detail = { itemId, requested, granted, reason }；超出堆叠上限的部分作废） */
+  ITEM_GRANTED: 'item_granted',
+  /** v90（AISLG-222）：道具消耗（detail = { itemId, amount, left, reason }；数量不足不写） */
+  ITEM_USED: 'item_used',
+  /** v90（AISLG-222）：礼金购买道具（detail = { itemId, count, price, cost, owned, gift }） */
+  ITEM_BOUGHT: 'item_bought',
+  /** v91（AISLG-220）：城池迁移（detail = { cityId, mode, from, to, distance, item, oldTile }） */
+  CITY_MOVED: 'city_moved',
   /** v9：账号数据被一键重置（游戏数据回到开号初始状态） */
   ACCOUNT_RESET: 'account_reset',
   /** v52：账号昵称被修改（AISLG-142，detail = { from, to }；昵称即账号 username） */
@@ -160,9 +222,17 @@ export const EventType = {
   MARCH_STARTED: 'march_started',
   /** v12：行军到达并结算（含战斗胜负、掠夺与占领结果，见 detail.outcome） */
   MARCH_COMPLETED: 'march_completed',
+  /** v92（AISLG-224）：探索简报（去程新探索了区块才生成；detail = 新区块计数、按类计数与最多 10 个坐标，见 fog-record.ts） */
+  EXPLORATION_REPORT: 'exploration_report',
+  /** v93（AISLG-227）：遗迹领取结果（detail.outcome = claimed / taken / limit；claimed 时带 tier / kind / reward / items） */
+  RELIC_CLAIMED: 'relic_claimed',
+  /** v93（AISLG-227）：名城首探奖励（detail = { name, reward, items }） */
+  FAMOUS_FIRST_EXPLORED: 'famous_first_explored',
+  /** v93（AISLG-227）：名将处所首探奖励（detail = { name, hero, reward, unlocked }） */
+  HERO_SITE_FIRST_EXPLORED: 'hero_site_first_explored',
   /** v12：野地被占领（detail.terrain / level / 加成） */
   WILDERNESS_OCCUPIED: 'wilderness_occupied',
-  /** v12：野地占领失效（detail.cause = npc_attack / recall / conquest） */
+  /** v12：野地占领失效（detail.cause = npc_attack / recall / conquest；v98 起新增 inactive = 账号长期未上线被收回） */
   WILDERNESS_LOST: 'wilderness_lost',
   /** v12：NPC 城池被占领为分城（NPC 城池有限存量，被占后不补充） */
   NPC_CITY_OCCUPIED: 'npc_city_occupied',
@@ -192,6 +262,14 @@ export const EventType = {
   HERO_LEVEL_UP: 'hero_level_up',
   HERO_GRANTED: 'hero_granted',
   GUARD_CHANGED: 'guard_changed',
+  /** v94（AISLG-228）：名将离开主人（忠诚度 0 下野，或被俘超 24 小时未赎回）；detail = { heroName, cause = loyalty / captive_expired, ... } */
+  HERO_LEFT: 'hero_left',
+  /** v94（AISLG-228）：名将被俘（主人与胜方各一条；detail = { heroId, heroName, captorUsername / ownerUsername, capturedUntil, ransomGold }） */
+  HERO_CAPTURED: 'hero_captured',
+  /** v94（AISLG-228）：名将被赎回（主人与胜方各一条；detail = { heroId, heroName, ransomGold, taxShare, destroyed }） */
+  HERO_RANSOMED: 'hero_ransomed',
+  /** v94（AISLG-228）：忠诚度降到 30 及以下（每次跌破只提醒一次；detail = { heroId, heroName, loyalty }） */
+  HERO_LOYALTY_LOW: 'hero_loyalty_low',
   /** v29：黄巾之乱结算奖励（AISLG-76，detail = { rank, killed, tier, reward, reason }） */
   YT_REWARD: 'yt_reward',
   /** v38：玩家部队来袭预警（AISLG-122，detail = { x, y, target, 敌情（烽火台分档）, attacker, arriveAt, marchId }） */
@@ -200,12 +278,58 @@ export const EventType = {
   PVP_RAID: 'pvp_raid',
   /** v38：主动免战开启（AISLG-122，detail = { until, nextAvailableAt }） */
   TRUCE_STARTED: 'truce_started',
+  /** v71（AISLG-190）：主动免战提前解除（detail = { until（解除前的截止）, cancelledAt }；本周次数不返还） */
+  TRUCE_CANCELLED: 'truce_cancelled',
   /** v38：新手保护提前结束（AISLG-122，detail = { cause = government / aggression, ... }） */
   NEWBIE_PROTECTION_ENDED: 'newbie_protection_ended',
   /** v40：分城易主（AISLG-124；原主人 outcome=lost / 新主人 outcome=gained，detail 含城池、对方、坐标） */
   CITY_CONQUERED: 'city_conquered',
-  /** v61（AISLG-165）：名下野地储量采空（detail = { x, y, terrain, level, at }；驻军仍在时只按恢复速度采集） */
+  /** v61（AISLG-165）：名下野地储量采空（detail = { x, y, terrain, level, at }；驻军仍在时改为按恢复速度采集） */
   WILDERNESS_DEPLETED: 'wilderness_depleted',
+  /** v100（AISLG-240）：势力围攻分城预警（detail = { siegeId, faction, cityId, cityName, x, y, power, durability, 敌情（烽火台分档）, arriveAt }） */
+  FACTION_SIEGE_WARNING: 'faction_siege_warning',
+  /** v100（AISLG-240）：势力围攻结算（detail = { siegeId, faction, cityId, cityName, x, y, outcome = repelled / hit / swallowed, durability, damage?, durabilityAfter?, protectedUntil?, reportId }） */
+  FACTION_SIEGE: 'faction_siege',
+  /** v100（AISLG-240）：城被势力吞下（detail = { cityId, cityName, x, y, faction, mainCityId, wildernessLost, reportId }；原主人收到，分城名额自动腾出） */
+  FACTION_CITY_LOST: 'faction_city_lost',
+  /** v101（AISLG-241）：打老巢的一场战斗（detail = { faction, campNo, campsTotal, campsRemaining, killedPower, reward, reportId, destroyed, outcome = won / lost }） */
+  FACTION_LAIR_BATTLE: 'faction_lair_battle',
+  /** v101（AISLG-241）：灭亡奖励到账（detail = { faction, rank, power, tier, reward }） */
+  FACTION_LAIR_REWARD: 'faction_lair_reward',
+  /** v101（AISLG-241）：这家势力被攻破（最后一击的玩家收到，detail = { faction, factionName, leader, heroName, convertedCities, rewardedPlayers }） */
+  FACTION_LAIR_DESTROYED: 'faction_lair_destroyed',
+  /** v73（AISLG-193）：开始打造城防器械（detail = { kind, count, cost, dueAt }） */
+  DEFENSE_CRAFT_STARTED: 'defense_craft_started',
+  /** v73：打造进入排队（detail = { kind, count, cost }） */
+  DEFENSE_CRAFT_QUEUED: 'defense_craft_queued',
+  /** v73：打造完成入库（detail = { kind, count, stock, cap }） */
+  DEFENSE_CRAFT_COMPLETED: 'defense_craft_completed',
+  /** v73：打造被取消（detail = { kind, count, refund }） */
+  DEFENSE_CRAFT_CANCELLED: 'defense_craft_cancelled',
+  /** v74（AISLG-194）：协防部队入驻盟友城（detail = { assistId, hostCityId, hostCityName, hostUsername, troops }） */
+  ASSIST_ARRIVED: 'assist_arrived',
+  /** v74：协防部队离开盟友城返程（detail = { assistId, hostCityId, cause, troops, returning }；cause = recall / expel / ally_left / city_discarded / wiped；wiped 时 troops 为空、returning 为 null，没有返程行军） */
+  ASSIST_RETURNED: 'assist_returned',
+  /** v75（AISLG-198）：报名剧本战场（detail = { eventId, camp }） */
+  BATTLEFIELD_SIGNED_UP: 'battlefield_signed_up',
+  /** v75：带部队入场（detail = { eventId, camp, troops, population }） */
+  BATTLEFIELD_ENTERED: 'battlefield_entered',
+  /** v75：战场结算奖励入账（detail = { eventId, camp, outcome, merit, rank, reward }） */
+  BATTLEFIELD_REWARD: 'battlefield_reward',
+  /** v75：战场商店兑换（detail = { eventId, item, cost, reward }） */
+  BATTLEFIELD_SHOP: 'battlefield_shop',
+  /** v80（AISLG-199）：赤壁据点技能（detail = { eventId, skill: fire|chain, strongholdId, cost, ... }） */
+  BATTLEFIELD_SKILL: 'battlefield_skill',
+  /** v78（AISLG-196）：交易所挂单 / 成交 / 撤单 / 过期（detail 见各接口） */
+  MARKET_ORDER_CREATED: 'market_order_created',
+  MARKET_ORDER_FILLED: 'market_order_filled',
+  MARKET_ORDER_CANCELLED: 'market_order_cancelled',
+  MARKET_ORDER_EXPIRED: 'market_order_expired',
+  MARKET_TRADE: 'market_trade',
+  /** v97（AISLG-232）：野地设施（望楼）建成 / 升级完成（detail = { x, y, kind: 'watchtower', level }） */
+  FACILITY_COMPLETED: 'facility_completed',
+  /** v97（AISLG-232）：野地设施毁掉（detail = { x, y, kind, level, cause }；cause = conquest 野地被抢 / city_lost 所属城易主或被放弃 / recall 主动放弃 / reset 重置账号） */
+  FACILITY_LOST: 'facility_lost',
   AGENT_CONNECTED: 'agent_connected',
   AGENT_DISCONNECTED: 'agent_disconnected',
 } as const;
@@ -239,13 +363,20 @@ export interface CityView {
   name: string;
   /** 城池数字等级（v7；提升条件与作用待设计，当前恒为 1） */
   level: number;
+  /** 城池称号（v76，AISLG-197）：按官府等级 1–4 城池 / 5–9 县城 / 10–14 郡城 / 15–19 州城 / 20+ 都城（分城最高州城） */
+  title: string;
+  /** 账号爵位（v76，AISLG-197）：{ index（0 = 平民）, name } */
+  nobility: { index: number; name: string };
   resources: Resources;
-  /** 按建筑类型统计的已建数量（v3 新增；v5 单实例规则下为 0 或 1） */
-  buildings: BuildingCounts;
-  /** 各建筑类型的当前等级（v5 新增；0 = 未建造，产量按等级 × 每级速率计算） */
-  levels: BuildingCounts;
-  /** 各建筑「下一步动作」成本（v6 新增）：build=建造（未建时），upgrade=升级（已建未满级时），null=不可用 */
-  costs: Record<BuildingKind, KindActionCosts>;
+  /** 按建筑类型统计的已建数量（v3 新增；v5 单实例规则下为 0 或 1）。
+   *  v87（AISLG-217）：分城不含 tavern / academy 两个键（酒馆与书院只在主城建造） */
+  buildings: Partial<BuildingCounts>;
+  /** 各建筑类型的当前等级（v5 新增；0 = 未建造，产量按等级 × 每级速率计算）。
+   *  v87（AISLG-217）：分城不含 tavern / academy 两个键 */
+  levels: Partial<BuildingCounts>;
+  /** 各建筑「下一步动作」成本（v6 新增）：build=建造（未建时），upgrade=升级（已建未满级时），null=不可用。
+   *  v87（AISLG-217）：分城不含 tavern / academy 两个键 */
+  costs: Partial<Record<BuildingKind, KindActionCosts>>;
   /** 各建筑的等级上限（v63 新增）：普通为 20；占有对应名城时其主题建筑为 25（见 CityView.famousEffect 与 famousName） */
   levelMax: Record<BuildingKind, number>;
   /** 兼容字段：已建成的农场数量（= buildings.farm；v2 及以前的客户端使用） */
@@ -258,8 +389,17 @@ export interface CityView {
   storage: StorageCaps;
   /** 城内驻军，按兵种统计（v11 新增；征兵完成时入城） */
   army: ArmyCounts;
+  /** 伤兵营（v85，AISLG-212）：战斗中己方损失 20% 进的池子，可花征兵资源 50% 治好回城内驻军（RESTORE_TROOPS pool=wounded）；72 小时不治死亡 */
+  wounded: TroopPoolView;
+  /** 俘虏营（v85，AISLG-212）：战胜后从败方损失抓的 10%（仅基础七兵种），招降花 60% 且扣人口（pool=captive）或免费释放（RELEASE_TROOPS）；72 小时后自动释放 */
+  captives: TroopPoolView;
+  /** 逃兵营（v85，AISLG-212）：断粮兵变每小时减少的 10% 驻军进池，断粮结束后花 50% 劝回（pool=deserter）；24 小时后消失；断粮中不能劝回（CITY_STARVING） */
+  deserters: TroopPoolView;
   /** 全军小时耗粮（v14 新增）：城内驻军 1 倍 + 行军/野地驻军 2 倍；production.food 为毛产量，净粮 = production.food − 本值；粮食扣到 0 为止（断粮仅停止增长） */
   armyFoodUsePerHour: number;
+  /** 是否有敌情（v84，AISLG-209）：本城或其名下野地正有行军在途指向，或有未结的 NPC 来袭。
+   *  为 true 时 DISBAND_TROOPS 返回 CITY_IN_BATTLE（界面据此置灰遣散按钮） */
+  inBattle: boolean;
   /** 全局时间缩放（v20 新增，AISLG-38）：当前部署 time_scale——文档时长基准 ÷ 本值 = 实际耗时
    *  （钳 1 秒），速率基准 × 本值；客户端本地折算时长（如掠夺冷却剩余）时用本值，勿按文档数值硬算 */
   timeScale: number;
@@ -281,6 +421,8 @@ export interface CityView {
   famousName: string | null;
   /** 该城的独占产量加成百分数（v24 AISLG-56：名城分城 +20%，已计入 production）；普通城为 0 */
   productionBonusPercent: number;
+  /** 洛阳之主联盟的全员产量加成（v79，AISLG-200；0 或 5，已计入 production） */
+  luoyangBonusPercent: number;
   /** 名城独有效果（v62，AISLG-166）：只有占领者享受，效果跟着城走；普通城为 null。守城 / 箭塔 / 仓库 / 行军 / 野地产出的口径见 FamousEffectView */
   famousEffect: FamousEffectView | null;
   /** 城守（v36，AISLG-115）：该城任命的武将（ASSIGN_HERO 任命 / 撤任）；未任为 null。
@@ -316,10 +458,21 @@ export interface CityView {
   marches: MarchView[];
   /** 本城占领的野地（v12 新增；含占领加成与驻军采集速率，production 已计入两者） */
   territory: TerritoryView[];
+  /** 城防器械（v73，AISLG-193）：库存、上限（城墙等级 × 60）与打造队列 */
+  defenses: DefenseStockView;
+  /** 协防（v74，AISLG-194）：驻扎在本城的盟友部队（城主视图；列出谁在协防、带了多少兵） */
+  assistIn: AssistView[];
+  /** 本城派出、正在盟友城里驻扎的部队（派出方视图，可召回）；占用校场出征名额 */
+  assistOut: AssistOutView[];
+  /** 本城可接收的协防部队上限（当前 5 支；洛阳 10 支留待洛阳争夺需求） */
+  assistCap: number;
   /** 建造队列（v4 新增）：第 1 项为在建（无在建时为空数组），其余为排队，按入队顺序 */
   queue: BuildView[];
   /** 兼容字段：当前在建建筑（= queue[0]，仅当其 status 为 building；无在建为 null） */
   building: BuildView | null;
+  /** 生效中的计谋效果（v86，AISLG-211）：deception 为本城欺敌（倍数只对城主自己可见，别人只能经侦察拿到换算后的情报）；
+   *  ambushedUntil 十面埋伏锁城截止（出兵类操作被拒）；lootFire 仓库防掠保护降低 */
+  stratagems: import('./protocol-stratagem').CityStratagemView;
 }
 
 export interface EventView {

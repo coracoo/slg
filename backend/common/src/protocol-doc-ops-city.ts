@@ -22,12 +22,12 @@ import {
 export const REQUEST_CANCEL_BUILD: RequestOpDoc = {
   kind: 'request',
   name: 'CANCEL_BUILD',
-  title: '取消排队中的建造条目',
+  title: '取消建造条目（排队中 / 建造中）',
   preAuth: false,
   summary:
-    '取消建造队列中 status=queued 的条目：该条目退出队列（status 变为 cancelled，保留为历史，不再出现在 city.queue），发起时扣减的成本按条目上的成本快照全额返还（2026-09-27 确认规则）。进行中（building）条目能否取消待定，当前返回 BUILD_NOT_CANCELLABLE。',
+    '取消建造队列中 status=queued（排队中）或 status=building（建造中）的条目：该条目退出队列（status 变为 cancelled，保留为历史，不再出现在 city.queue），发起时扣减的成本按条目上的成本快照全额返还（2026-09-27 确认规则，全额返还）。建造中取消时建筑等级不变（升级中取消则保持当前等级），该城排队的下一条立即开工（同一事务激活，推送 build_started）。连续升级（toLevel）进行中取消：已完成的级保留等级、不退，只返还未完成级的成本。已完成 / 已取消的条目返回 BUILD_NOT_CANCELLABLE。',
   requestFields: [
-    { name: 'buildId', type: 'string', desc: '必填。要取消的建造条目 UUID（GET_STATE 的 city.queue 中排队条目的 id）；缺失返回 INVALID_PARAMS。' },
+    { name: 'buildId', type: 'string', desc: '必填。要取消的建造条目 UUID（GET_STATE 的 city.queue 中 queued / building 条目的 id）；缺失返回 INVALID_PARAMS。' },
   ],
   dataFields: [
     { name: 'build', type: 'object', desc: '建造视图，结构与 BUILD 响应相同；status 为 cancelled。' },
@@ -40,20 +40,20 @@ export const REQUEST_CANCEL_BUILD: RequestOpDoc = {
       responses: [{ op: Op.CANCEL_BUILD, seq: 1, ok: true, data: { build: CANCELLED_BUILD_VIEW } }],
     },
     {
-      caption: '取消在建条目被拒（附当前状态）',
+      caption: '取消已完成的条目被拒（附当前城池状态）',
       request: { op: Op.CANCEL_BUILD, seq: 2, data: { buildId: '7c9e6679-7425-40de-944b-e07fc1f90ae7' } },
       responses: [
         {
           op: Op.CANCEL_BUILD,
           seq: 2,
           ok: false,
-          error: { code: 'BUILD_NOT_CANCELLABLE', message: '只能取消排队中的建造任务（在建任务能否取消待设计）' },
+          error: { code: 'BUILD_NOT_CANCELLABLE', message: '建造任务不存在、不属于本账号或已完成 / 已取消，无法取消' },
         },
       ],
     },
   ],
   agentNote:
-    '先 GET_STATE 拿 city.queue 中排队条目的 id 再取消。取消后该类型可以立即重新发起 BUILD。同账号其他在线连接会收到 PUSH_BUILD_STATE（build_cancelled）推送。',
+    '先 GET_STATE 拿 city.queue 中条目的 id 再取消（排队中与建造中都可取消）。取消后该类型可以立即重新发起 BUILD；建造中取消的成本全额回来，别忘了它排队的下一条已自动开工。同账号其他在线连接会收到 PUSH_BUILD_STATE（build_cancelled，以及下一条的 build_started）推送。',
 };
 
 export const REQUEST_RENAME_CITY: RequestOpDoc = {
@@ -130,6 +130,67 @@ export const REQUEST_DISCARD_CITY: RequestOpDoc = {
     '放弃前先 GET_STATE：确认目标 cities[] 中 isMain 为 false，并确认没有在途行军。放弃成功后 GET_STATE 的 cities / branch（count 减一）即时反映；同账号其他在线连接收到 PUSH_CITY_STATE（reason=city_discarded）推送，事件流新增 city_discarded。腾出的名额可以去占其他 NPC 城（但不能占回刚放弃的这一座，直到冷却结束）。',
 };
 
+export const REQUEST_SET_CAPITAL: RequestOpDoc = {
+  kind: 'request',
+  name: 'SET_CAPITAL',
+  title: '设为主城',
+  preAuth: false,
+  summary:
+    '把一座分城与当前主城对调身份（v82，AISLG-205）：被选中的分城成为主城，原主城变为分城。两座城的建筑、资源、驻军、武将、队列、坐标与名字原样保留，只换身份。主城的全部特殊待遇（永不被占领、官府等级决定分城上限、竞技场 / 将星塔金币、任务、剧本战场报名、酒馆候选、联盟与排行榜显示的主城）随身份走。换完后原主城立刻变为可被占领的分城（城防值从 100 满值开始计，没有额外免战），新主城没有城防值（永不被占领，仍可被掠夺）。发起前须满足：目标是本账号的普通分城（非名城）、不是当前主城；本账号距上次设为主城已满 24 小时（冷却按全局时间缩放换算，新号第一次不受限制）；本账号任一城或任一块野地没有他人玩家的出征正奔向（掠夺 / 占领）；目标城城防值已满 100；换完后分城数不超过新主城的分城上限 = floor(新主城官府等级 ÷ 2)。没有资源消耗。必须显式携带 confirm=true 防误触。',
+  requestFields: [
+    { name: 'cityId', type: 'string', desc: '必填。要设为主城的分城 UUID（GET_STATE 的 cities[].id，且 isMain 为 false）。缺失或不属于本账号返回 INVALID_PARAMS；指向当前主城也返回 INVALID_PARAMS（已是主城）。' },
+    { name: 'confirm', type: 'boolean', desc: '必填，必须为 true；缺失或不为 true 返回 INVALID_PARAMS。' },
+  ],
+  dataFields: [
+    { name: 'capitalId', type: 'string', desc: '新主城（即请求的 cityId）。' },
+    { name: 'formerCapitalId', type: 'string', desc: '原主城（已变为分城）。' },
+    { name: 'cooldownUntil', type: 'string', desc: 'ISO 8601：下次可再次设为主城的时刻；之前返回 CAPITAL_SWAP_COOLDOWN。' },
+    { name: 'branchLimit', type: 'number', desc: '换完后的分城上限 = floor(新主城官府等级 ÷ 2)；换完后分城数（总城数 − 1，不变）不超过它。' },
+  ],
+  errors: [
+    'INVALID_PARAMS',
+    'FAMOUS_CITY_NOT_CAPITAL',
+    'CAPITAL_SWAP_COOLDOWN',
+    'CAPITAL_SWAP_UNDER_ATTACK',
+    'CAPITAL_SWAP_DURABILITY_LOW',
+    'BRANCH_LIMIT_EXCEEDED',
+  ],
+  examples: [
+    {
+      caption: '设为主城成功（原主城 CITY_ID 变为分城，新主城 0b7e5c1a-… 官府 6 级，分城上限 3）',
+      request: { op: Op.SET_CAPITAL, seq: 1, data: { cityId: '0b7e5c1a-3d2f-4e8a-9c61-2f4a8d9e1b07', confirm: true } },
+      responses: [
+        {
+          op: Op.SET_CAPITAL,
+          seq: 1,
+          ok: true,
+          data: {
+            capitalId: '0b7e5c1a-3d2f-4e8a-9c61-2f4a8d9e1b07',
+            formerCapitalId: CITY_ID,
+            cooldownUntil: '2026-10-29T08:00:00.000Z',
+            branchLimit: 3,
+          },
+        },
+      ],
+    },
+    {
+      caption: '冷却未结束（距上次设为主城不满 24 小时，retryAfterSeconds 为剩余秒数）',
+      request: { op: Op.SET_CAPITAL, seq: 2, data: { cityId: '0b7e5c1a-3d2f-4e8a-9c61-2f4a8d9e1b07', confirm: true } },
+      responses: [
+        {
+          op: Op.SET_CAPITAL,
+          seq: 2,
+          ok: false,
+          error: { code: 'CAPITAL_SWAP_COOLDOWN', message: '设为主城后 24 小时内不能再次更换（冷却未结束，见 retryAfterSeconds）' },
+          data: { retryAfterSeconds: 36000 },
+        },
+      ],
+    },
+  ],
+  agentNote:
+    '发起前先 GET_STATE：读 capitalSwap（cooldownUntil 未空表示冷却中；underAttack 为真表示正在被来袭；blocked[cityId] 给出该分城不可设的原因：FAMOUS_CITY_NOT_CAPITAL / CAPITAL_SWAP_DURABILITY_LOW / BRANCH_LIMIT_EXCEEDED），再对照 branch 与目标城的 level（新上限 = level ÷ 2）。成功后 GET_STATE 的 cities[] 中 isMain 对调、主城排第一。同账号其他在线连接收到 PUSH_CITY_STATE（reason=capital_changed，cityId 为新主城，formerCapitalId 为原主城）推送，事件流新增 capital_changed。设为主城是对调而非拆分，不占也不退任何资源；但它会改变「主城」相关的一切判定，向玩家说明时要讲清原主城从此可以被占领。',
+};
+
 /** 重置完成后的城池视图示例（即开号初始状态；数值引用 rules.ts / shared 常量） */
 const RESET_CITY = exampleCity();
 
@@ -177,11 +238,12 @@ export const PUSH_CITY_STATE: PushOpDoc = {
   name: 'PUSH_CITY_STATE',
   title: '推送：城池级状态变化',
   summary:
-    '城池级状态变化时推送给该账号所有在线连接（发起连接除外）：city_renamed=城池改名（RENAME_CITY）、account_reset=账号数据被 RESET_ACCOUNT 重置（v9，重置后全部游戏数据回到开号初始状态）、city_discarded=分城被放弃（DISCARD_CITY，v57；推送只带 cityId，收到后用 GET_STATE 刷新城池列表）。建造队列相关变化走 PUSH_BUILD_STATE。推送只携带变化摘要，完整现状用 GET_STATE 查询。',
+    '城池级状态变化时推送给该账号所有在线连接（发起连接除外）：city_renamed=城池改名（RENAME_CITY）、account_reset=账号数据被 RESET_ACCOUNT 重置（v9，重置后全部游戏数据回到开号初始状态）、city_discarded=分城被放弃（DISCARD_CITY，v57；推送只带 cityId，收到后用 GET_STATE 刷新城池列表）、capital_changed=设为主城（SET_CAPITAL，v82，AISLG-205；cityId 为新主城，formerCapitalId 为原主城，收到后用 GET_STATE 刷新）、troops_disbanded=城内驻军被遣散（DISBAND_TROOPS，v84，AISLG-209；只带 cityId，收到后用 GET_STATE 刷新驻军与资源）。city_moved=城池迁移（MOVE_CITY，v91，AISLG-220；带 cityId 与 from / to 新旧坐标，收到后用 GET_STATE 刷新，新旧两格另有 PUSH_TILE_STATE reason = city_moved）。建造队列相关变化走 PUSH_BUILD_STATE。推送只携带变化摘要，完整现状用 GET_STATE 查询。',
   dataFields: [
-    { name: 'reason', type: "'city_renamed' | 'account_reset' | 'city_discarded'", desc: '触发本次推送的状态变化。' },
-    { name: 'cityId', type: 'string', desc: '城池 UUID。' },
+    { name: 'reason', type: "'city_renamed' | 'account_reset' | 'city_discarded' | 'capital_changed' | 'troops_disbanded'", desc: '触发本次推送的状态变化。' },
+    { name: 'cityId', type: 'string', desc: '城池 UUID（reason=capital_changed 时为新主城）。' },
     { name: 'name', type: 'string', desc: 'reason=city_renamed 时的新城池名。' },
+    { name: 'formerCapitalId', type: 'string', desc: 'v82：reason=capital_changed 时的原主城 UUID（已变为分城）。' },
   ],
   examples: [
     {

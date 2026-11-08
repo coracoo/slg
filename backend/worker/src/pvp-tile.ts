@@ -19,6 +19,10 @@ import pg from 'pg';
 import { EventType, type InitiatorRole, type TroopKind } from '../../common/src/protocol';
 import { insertEvent } from '../../common/src/events';
 import { armyPower, resolveBattle } from '../../common/src/battle';
+import { splitBattleCasualties } from '../../common/src/battle-casualties';
+import { recordPoolTroops } from '../../common/src/troop-pools-db';
+import { combatTechBonus } from '../../common/src/tech';
+import { loadTechLevels } from '../../common/src/tech-db';
 import { territoryLimit } from '../../common/src/plunder';
 import { TILE_CAPTURE_PROTECTION_MS, activeAt, inNewbieProtection } from '../../common/src/protection';
 import { scaledMs } from '../../common/src/time-scale';
@@ -39,7 +43,8 @@ import {
   type TileNotify,
   abortForAlly,
 } from './tick-shared';
-import { areAllies } from '../../common/src/alliance-db';
+import { cannotAttack } from '../../common/src/alliance-db';
+import { captureAfterPvpBattle } from './pvp-capture';
 
 /** 事务内统一时间源 */
 async function dbNow(client: pg.PoolClient): Promise<Date> {
@@ -114,7 +119,7 @@ export async function resolvePvpOccupyArrival(
     return;
   }
   // v67（AISLG-182）：出发后目标才成为盟友（同一联盟）：不开战，原路返回
-  if (await areAllies(client, march.account_id, owner.account_id)) {
+  if (await cannotAttack(client, march.account_id, owner.account_id)) {
     await abortForAlly(client, march, troops, settled, notifies);
     return;
   }
@@ -154,19 +159,40 @@ export async function resolvePvpOccupyArrival(
     wallDefensePercent: 0,
     siege: false,
     attackerHero: hero?.engine ?? null,
+    // v72（AISLG-192）：双方各自的世界地图科技乘数；NPC / 野地守军没有科技
+    attackerTech: combatTechBonus(await loadTechLevels(client, march.account_id)),
+    defenderTech: combatTechBonus(await loadTechLevels(client, owner.account_id)),
   });
   const attackerNaming = await loadAttackerNaming(client, march.from_city_id);
   const attackerName = attackerNaming ? `${attackerNaming.username} · ${attackerNaming.cityName}` : '出征部队';
   const defenderName = `${owner.username} 的驻军（${tile.level} 级野地）`;
+  // v85（AISLG-212）：双方都是玩家——攻方伤兵 / 俘虏进出发城；守方（野地驻军）的伤兵 /
+  // 俘虏进占领这块野地的那座城；全歼攻方时守方从攻方损失抓 10%（平局不抓）
+  const tileCasualties = splitBattleCasualties(result, false, false);
+  const ownerCityId = tile.owner_city_id as string;
+  await recordPoolTroops(client, march.from_city_id, 'wounded', tileCasualties.attacker.wounded);
+  await recordPoolTroops(client, ownerCityId, 'wounded', tileCasualties.defender.wounded);
+  if (tileCasualties.winner === 'attacker') {
+    await recordPoolTroops(client, march.from_city_id, 'captive', tileCasualties.captives);
+  } else if (tileCasualties.winner === 'defender') {
+    await recordPoolTroops(client, ownerCityId, 'captive', tileCasualties.captives);
+  }
   const attackerReportId = await saveBattleReport(
     client, march.account_id, 'attacker', result.attackerWon, 'pvp_wilderness',
     tile.x, tile.y, result, attackerName, defenderName, 0, notifies, hero?.report ?? null, null,
+    null, null, tileCasualties,
   );
   const defenderReportId = await saveBattleReport(
     client, owner.account_id, 'defender', !result.attackerWon, 'pvp_wilderness',
     tile.x, tile.y, result, attackerName, defenderName, 0, notifies, hero?.report ?? null, null,
+    null, null, tileCasualties,
   );
   const heroSettle = await settleMarchHero(client, march, result, notifies);
+  // v94（AISLG-228）：玩家打玩家的被俘判定（野地战只有攻方随队名将可能被俘）
+  await captureAfterPvpBattle(client, {
+    march, attackerWon: result.attackerWon, defenderAccountId: owner.account_id,
+    cityId: null, guardHeroId: null, notifies,
+  });
 
   if (!result.attackerWon) {
     // 攻方战败：守方继续占领（驻军按幸存回写），攻方残部返程

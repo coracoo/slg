@@ -9,9 +9,20 @@ import { STAR_TOWER_SCHEMA_SQL } from './star-tower-schema';
 import { HERO_SCHEMA_SQL } from './hero-schema';
 import { ANNOUNCEMENT_SCHEMA_SQL } from './announcement-schema';
 import { ALLIANCE_SCHEMA_SQL } from './alliance-schema';
+import { BATTLEFIELD_SCHEMA_SQL } from './battlefield-schema';
+import { NOBILITY_SCHEMA_SQL } from './nobility-schema';
+import { MARKET_SCHEMA_SQL } from './market-schema';
+import { STRATAGEM_SCHEMA_SQL } from './stratagem-schema';
+import { ITEMS_SCHEMA_SQL } from './items-schema';
+import { MOVE_CITY_SCHEMA_SQL } from './move-city-schema';
 import { SEASON_SCHEMA_SQL } from './season-schema';
 import { seedFirstSeason } from './season-seed';
 import { attachPoolDiagnostics, logConnError } from './db-diag';
+import { migrateMainOnlyBuildings } from './main-only-db';
+import { migrateGiftColumn } from './gift-schema';
+import { FOG_SCHEMA_SQL } from './fog-schema';
+import { FACILITY_SCHEMA_SQL } from './facility-schema';
+import { FACTION_SCHEMA_SQL } from './faction-schema';
 
 /** Worker 完成建造后通知 API 的 PostgreSQL 通道名 */
 export const NOTIFY_CHANNEL = 'slg_build_completed';
@@ -624,10 +635,56 @@ CREATE TABLE IF NOT EXISTS tech_research (
 );
 CREATE INDEX IF NOT EXISTS idx_tech_research_account ON tech_research (account_id, status);
 CREATE INDEX IF NOT EXISTS idx_tech_research_due ON tech_research (due_at) WHERE status = 'researching';
+
+-- v73（AISLG-193 城防器械）：城墙里囤的四种一次性守城器械（陷阱 / 拒马 / 滚木 / 擂石）。
+-- city_defenses = 库存（城 × 器械；缺行 = 0，四种共用上限 城墙等级 × 60）；
+-- defense_crafts = 打造队列（与征兵同模型：1 条在造 + 2 条排队；cost 为发起时成本快照，
+-- 取消时全额返还；unit_seconds 为单件基准时长快照，在造期间的 due_at 按批次总时长计算）
+CREATE TABLE IF NOT EXISTS city_defenses (
+  city_id uuid NOT NULL REFERENCES cities(id) ON DELETE CASCADE,
+  kind text NOT NULL,
+  count integer NOT NULL DEFAULT 0,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (city_id, kind)
+);
+CREATE TABLE IF NOT EXISTS defense_crafts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  account_id uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  city_id uuid NOT NULL REFERENCES cities(id) ON DELETE CASCADE,
+  kind text NOT NULL,
+  count integer NOT NULL,
+  status text NOT NULL,
+  initiator text NOT NULL,
+  cost jsonb NOT NULL DEFAULT '{}'::jsonb,
+  unit_seconds integer NOT NULL,
+  started_at timestamptz NOT NULL DEFAULT now(),
+  due_at timestamptz,
+  completed_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS idx_defense_crafts_city ON defense_crafts (city_id, status);
+CREATE INDEX IF NOT EXISTS idx_defense_crafts_due ON defense_crafts (due_at) WHERE status = 'crafting';
+
+-- v74（AISLG-194 盟友协防）：city_assist = 驻扎在盟友城里的协防部队（城 × 派出账号唯一：
+-- 同一账号对同一座城最多 1 支）。troops 为 jsonb 快照，守城战后按同兵种伤亡比例拆分后回写；
+-- 全灭 / 召回 / 遣返 / 退盟 / 易主时删除行。耗粮由派出方的出发城承担（2 倍），占派出城校场名额。
+CREATE TABLE IF NOT EXISTS city_assist (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  city_id uuid NOT NULL REFERENCES cities(id) ON DELETE CASCADE,
+  account_id uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  from_city_id uuid NOT NULL REFERENCES cities(id) ON DELETE CASCADE,
+  troops jsonb NOT NULL,
+  initiator text NOT NULL,
+  arrive_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (city_id, account_id)
+);
+CREATE INDEX IF NOT EXISTS idx_city_assist_city ON city_assist (city_id);
+CREATE INDEX IF NOT EXISTS idx_city_assist_from ON city_assist (from_city_id);
+CREATE INDEX IF NOT EXISTS idx_city_assist_account ON city_assist (account_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tech_research_one_active ON tech_research (account_id) WHERE status = 'researching';
 
 -- v36（AISLG-114/115/116）：武将。account_heroes = 账号级武将（普通将从酒馆招募、名将从 PvE 获得）；
--- tavern_candidates = 每城酒馆的候选武将（读取时按 refreshed_at 惰性刷新，每 4 小时基准一批）；
+-- tavern_candidates = 酒馆候选武将（读取时按 refreshed_at 惰性刷新，每 4 小时基准一批）；
+-- v87（AISLG-217）：酒馆只在主城建造，候选账号只有一份——city_id 固定为主城 id（上线迁移与换主城均已收敛）。
 -- famous_heroes = 名将全服归属（name 即名将主键；解雇武将级联删除归属行 → 名将回到可获得状态）。
 -- cities.guard_hero_id = 城守；marches.hero_id = 随队武将（返程行军沿用，回城后自然释放）
 CREATE TABLE IF NOT EXISTS account_heroes (
@@ -731,6 +788,28 @@ CREATE TABLE IF NOT EXISTS city_discards (
 -- v57：分城的来源 NPC 等级（占领时的地块等级，1..3）。放弃后按它回归同等级 NPC 城；
 -- 历史分城（v57 前占领、此列为 NULL）放弃后按 1 级回归，名城恒为 3 级（登记在 famous_cities）。
 ALTER TABLE cities ADD COLUMN IF NOT EXISTS origin_level integer;
+
+-- v82（AISLG-205 设为主城）：设为主城后的冷却，每账号一条。until 为绝对时刻（已按时间缩放），
+-- 判定时带 until > now()；过期行不清理。无记录 = 从未设为主城，第一次不受冷却。
+CREATE TABLE IF NOT EXISTS capital_swaps (
+  account_id uuid PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+  until timestamptz NOT NULL
+);
+
+-- v85（AISLG-212）：城池部队池——伤兵 / 俘虏 / 逃兵。每次入账一行（一批），
+-- 过期时刻 = 入账时数据库 now() + 时长 ÷ 全局时间缩放（写入时缩放已折算死）；
+-- 治后 / 招降 / 劝回按最早一批优先消耗（FIFO）。城池删除（放弃 / 重置）随 CASCADE 清空；
+-- 城池易主（被占 / 换主）由结算事务显式 DELETE（clearCityTroopPools）
+CREATE TABLE IF NOT EXISTS city_troop_pools (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  city_id uuid NOT NULL REFERENCES cities(id) ON DELETE CASCADE,
+  pool text NOT NULL,
+  troops jsonb NOT NULL DEFAULT '{}'::jsonb,
+  expires_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_city_troop_pools_city ON city_troop_pools (city_id, pool, expires_at);
+CREATE INDEX IF NOT EXISTS idx_city_troop_pools_expire ON city_troop_pools (expires_at);
 `;
 
 /**
@@ -738,15 +817,43 @@ ALTER TABLE cities ADD COLUMN IF NOT EXISTS origin_level integer;
  * 另一个进程（如已在跑的 Worker）正持有表行锁时，ALTER TABLE 的 ACCESS EXCLUSIVE 锁可能与其互等
  * 而被 PostgreSQL 判为死锁（40P01，本进程为牺牲者）——DDL 整体是幂等的，回滚后短暂退避重试即可。
  */
+
+/**
+ * 一次性数据迁移放在单事务里跑（v87 AISLG-217 起）：取消条目与返还必须原子，中途失败整体回滚，
+ * 下次启动重试即可（迁移本身幂等）。
+ */
+async function migrateDataOnce(client: pg.PoolClient): Promise<void> {
+  await client.query('BEGIN');
+  try {
+    // v87（AISLG-217）：酒馆 / 书院只在主城——存量数据取最高等级合并到主城、分城两项删除、
+    // 分城在建 / 排队的两项取消并全额返还（幂等，跑过一次后无操作）
+    await migrateMainOnlyBuildings(client);
+    // v89（AISLG-221）：礼金列（accounts.gift）；列不存在时才建并给当前赛季账号补发 1000（同一事务，幂等）
+    await migrateGiftColumn(client);
+    // v92（AISLG-224）：迷雾上线前已结束的行军不再重放探索——一次性把 fog_recorded_at 补齐（settings 标记防重复）
+    const fogBackfill = await client.query(`SELECT 1 FROM settings WHERE key = 'fog_backfill_v92'`);
+    if (!fogBackfill.rowCount) {
+      await client.query(`UPDATE marches SET fog_recorded_at = now() WHERE resolved_at IS NOT NULL AND fog_recorded_at IS NULL`);
+      await client.query(`INSERT INTO settings (key, value) VALUES ('fog_backfill_v92', '{"done": true}'::jsonb)`);
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  }
+}
+
 export async function ensureSchema(pool: pg.Pool): Promise<void> {
   const client = await pool.connect();
   try {
     await client.query(`SELECT pg_advisory_lock(${SCHEMA_LOCK_ID})`);
     for (let attempt = 1; ; attempt += 1) {
       try {
-        await client.query(SCHEMA_SQL + ALLIANCE_SCHEMA_SQL + CHAT_SCHEMA_SQL + ARENA_SCHEMA_SQL + HERO_SCHEMA_SQL + STAR_TOWER_SCHEMA_SQL + ANNOUNCEMENT_SCHEMA_SQL + SEASON_SCHEMA_SQL);
+        await client.query(SCHEMA_SQL + ALLIANCE_SCHEMA_SQL + CHAT_SCHEMA_SQL + ARENA_SCHEMA_SQL + HERO_SCHEMA_SQL + STAR_TOWER_SCHEMA_SQL + ANNOUNCEMENT_SCHEMA_SQL + SEASON_SCHEMA_SQL + BATTLEFIELD_SCHEMA_SQL + NOBILITY_SCHEMA_SQL + MARKET_SCHEMA_SQL + STRATAGEM_SCHEMA_SQL + ITEMS_SCHEMA_SQL + MOVE_CITY_SCHEMA_SQL + FOG_SCHEMA_SQL + FACILITY_SCHEMA_SQL + FACTION_SCHEMA_SQL);
         // 赛季（AISLG-134）：seasons 为空时播种第 1 季（幂等，咨询锁内执行）
         await seedFirstSeason(client);
+        // 数据迁移（幂等，咨询锁内、独立事务）
+        await migrateDataOnce(client);
         return;
       } catch (err) {
         // 对方可能正在跑十几秒的建图事务（世界锁内），退避总长要盖过它：500ms × (1+…+7) ≈ 14s

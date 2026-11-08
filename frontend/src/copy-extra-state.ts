@@ -61,11 +61,20 @@ export const EXTRA_STATE = {
   event: {
     cityRenamed: (from: string, to: string) => `城池改名：${from} → ${to}`,
     cityDiscarded: (pos: string) => `放弃分城（${pos}），地块已回到 NPC 城池，名额已腾出`,
+    capitalChanged: '设为主城：主城与分城对调身份，24 小时内不能再次更换',
+    /** v84（AISLG-209）：遣散城内驻军 */
+    troopsDisbanded: (troops: string, refund: string) => `遣散城内驻军 ${troops}，返还 ${refund}`,
     accountReset: '账号数据已重置，回到开号初始状态',
     accountRenamed: (from: string, to: string) => `昵称修改：${from} → ${to}`,
     marchTaskPlunder: '（掠夺）',
     marchTaskOccupy: '（占领）',
     marchReturn: (pos: string, clock: string) => `驻军自 ${pos} 启程返城，预计 ${clock} 到达`,
+    relicClaimed: (kind: string, pos: string) => `发掘了${kind} ${pos}，奖励已入主城`,
+    relicTaken: (pos: string) => `${pos} 的遗迹已被发掘`,
+    relicLimit: (pos: string) => `今日已领满 2 处遗迹，${pos} 的遗迹留在原地`,
+    famousFirst: (name: string) => `首探名城 ${name}，奖励已入主城`,
+    heroSiteFirst: (site: string, hero: string, unlocked: boolean) =>
+      unlocked ? `首探处所「${site}」（${hero}），可直接结交` : `首探处所「${site}」（${hero}），名将已出山，奖励已入主城`,
     marchOut: (task: string, pos: string, troops: string, clock: string) =>
       `部队出征${task} → ${pos}（${troops}），预计 ${clock} 到达`,
     marchArrived: (pos: string) => `行军到达 ${pos}`,
@@ -107,12 +116,20 @@ export const EXTRA_STATE = {
     wildRecall: (pos: string) => `撤回驻军，放弃野地 ${pos}`,
     wildConquest: (pos: string, by: string) => `野地 ${pos} 被${by ? `玩家 ${by} ` : ''}抢占，占领失效`,
     wildLost: (pos: string) => `野地 ${pos} 失守，占领失效`,
+    wildInactive: (pos: string) => `长期未上线，野地 ${pos} 被收回（已变无主）`,
+    /** 望楼（AISLG-232，v97）：建成 / 升级完成、随野地毁掉 */
+    facilityCompleted: (pos: string, level: number) => `望楼建成：${pos} 升到 ${level} 级`,
+    facilityLost: (pos: string, level: number) => `望楼毁了：${pos}（${level > 0 ? `${level} 级` : '在建'}），不退款`,
     npcCityOccupied: (pos: string, name: string, loot: string) =>
       `占领 NPC 城池 ${pos} 为分城${name ? `「${name}」` : ''}${loot ? `，接收库存${loot}` : ''}`,
-    npcRaidRepelled: (pos: string, losses: string) => `NPC 袭击 ${pos} 被击退${losses ? `，损失 ${losses}` : ''}`,
-    npcRaidWiped: (pos: string) => `NPC 袭击 ${pos}，驻军全灭、占领失效`,
-    npcWarning: (target: string, arriveAt: string, mins: string, armyMin: string, armyMax: string) =>
-      `斥候发现一支 NPC 部队正向 ${target} 进发，预计 ${arriveAt} 到达${mins}，兵力约 ${armyMin}–${armyMax}`,
+    /** v100（AISLG-240）：势力范围内的袭击显示势力名（who 为空时是普通 NPC 袭击） */
+    npcRaidRepelled: (pos: string, losses: string, who = '') =>
+      `${who ? `${who}的袭击` : 'NPC 袭击'} ${pos} 被击退${losses ? `，损失 ${losses}` : ''}`,
+    npcRaidWiped: (pos: string, who = '') => `${who ? `${who}的袭击` : 'NPC 袭击'} ${pos}，驻军全灭、占领失效`,
+    npcWarning: (target: string, arriveAt: string, mins: string, armyMin: string, armyMax: string, who = '') =>
+      who
+        ? `斥候发现${who}的部队正向 ${target} 进发，预计 ${arriveAt} 到达${mins}，兵力约 ${armyMin}–${armyMax}`
+        : `斥候发现一支 NPC 部队正向 ${target} 进发，预计 ${arriveAt} 到达${mins}，兵力约 ${armyMin}–${armyMax}`,
     minutesLeft: (n: number) => `，约 ${n} 分钟后`,
     playerWarning: (who: string, where: string, arriveAt: string, mins: string, armyMin: string, armyMax: string) =>
       `烽火台示警：${who} 正向${where}进发，预计 ${arriveAt} 到达${mins}，兵力约 ${armyMin}–${armyMax}`,
@@ -154,6 +171,9 @@ export const EXTRA_STATE = {
     goldMineFirst: (actor: string, pos: string) => `${actor} 首个占领了金矿 ${pos}`,
     cityBroken: (actor: string) => `${actor} 的主城被 NPC 攻破`,
     winStreak: (actor: string, streak: string) => `${actor} 的军队一小时内连胜 ${streak} 场`,
+    famousFirst: (actor: string, name: string) => `${actor} 首探了名城 ${name}`,
+    heroSiteFirst: (actor: string, site: string, hero: string) => `${actor} 首探了 ${hero} 的处所「${site}」`,
+    legendaryRelic: (actor: string, kind: string) => `${actor} 发掘了传说遗迹：${kind}`,
     cityConquered: (actor: string, from: string, cityName: string, pos: string) =>
       `${actor} 攻占了${from ? ` ${from} 的` : '他人的'}分城「${cityName}」${pos}`,
     arenaChampion: (actor: string, previous: string) => `${actor} 在竞技场登上第 1 名，取代了 ${previous}`,

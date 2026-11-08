@@ -14,7 +14,7 @@ Worker 到期结算、跨进程状态通知、按需查询。
 | 事项 | 确认规则 | 实现位置 |
 | --- | --- | --- |
 | 建筑拆除 | 每种建筑同城限一座，不提供拆除。 | `DEMOLISH` 协议与 `building_demolished` 事件已在 v8 移除（v7 未对外发布）。 |
-| 取消建造 | 取消时全额返还已扣资源；是否可取消正在施工的任务待定。 | `CANCEL_BUILD` 仅排队条目，按 `builds.cost` 快照全额返还。 |
+| 取消建造 | 取消时全额返还已扣资源；排队与建造中的条目都可取消（v71）。 | `CANCEL_BUILD` 对 `queued` / `building` 条目，按 `builds.cost` 快照全额返还（连升进行中只退未完成级）。 |
 | 资源储量与仓库 | 粮、木、石、铁各自的上限为 `10000 + 对应资源基础小时产量 × 100`，不加入储存科技；仓库按等级提供防掠夺保护（v16：总量 4000 × 等级、四资源固定均分各 1000 × 等级，可掠量 = max(0, 存量 − 保护额)），玩家城掠夺消费方随玩家对抗阶段接入。 | `production.ts` 的 `storageCaps`；保护规则 `plunder.ts` 的 `warehouseProtectionPerResource`。 |
 | 超限 | 五种资源达到各自上限后停止对应生产；黄金上限固定为 100 万，已有超限存量不直接扣减。 | `accrueProduction` 钳制（含金币）。 |
 | 人口 | 上限 = `50 + 100 × 民房等级 × (等级 + 1)`（无民房即基线 50）；增速 = `10 × 民房等级 × (等级 + 1)`/小时，无民房为 0（v19）。 | `rules.ts` 的 `popCap` 与 `populationGrowthPerHour`。 |
@@ -28,7 +28,7 @@ Worker 到期结算、跨进程状态通知、按需查询。
 | --- | --- |
 | `common/src/` | 协议号与消息定义（protocol）、建筑规则（rules）、资源生产与懒结算（production）、世界与野地规则（world）、战斗占位结算（battle）、征兵规则（troops）、PostgreSQL 连接与建表（db）、事件存取（events）、Agent API 文档清单与渲染（protocol-doc*）。API 与 Worker 共用，不得各自另实现一套。 |
 | `api/src/` | Fastify WebSocket 接入、登录注册与会话令牌（auth）、协议分发（handlers）、世界协议（handlers-world / views-world）、连接登记（connections）、完成通知（notify）。 |
-| `worker/src/` | 独立进程：领取到期建造 / 征兵 / 行军，推进状态、写完成事件、pg_notify 通知 API；世界到期任务与 NPC 袭击在 `worker/src/world-tick.ts`。 |
+| `worker/src/` | 独立进程：领取到期建造 / 征兵 / 行军，推进状态、写完成事件、pg_notify 通知 API；世界到期任务与 NPC 袭击在 `worker/src/world-tick.ts`。tick 开头先用一条合并探针（`due-probe.ts`）检查 8 类到期队列，只有有活才进各自的处理函数；交易所挂单 / 洛阳窗口 / 战场日程 / 换季检查按 5–10 秒节流（AISLG-208）。 |
 | `scripts/smoke.ts` | 端到端冒烟，逐条验证第一期验收路径。 |
 | `scripts/smoke-world.ts` | 世界玩法冒烟（v12）：出征占领、NPC 袭击、召回、NPC 城池战败与重置清理。 |
 | `scripts/gen-agent-api.ts` | Agent API 文档一键生成与漂移检查（见「协议」一节）。 |
@@ -285,13 +285,23 @@ awk -v s='<开始>' -v e='<结束>' '$1 >= s && $1 < e' <日志文件> | grep '\
   role 的协议级限制，拦住诚实声明的 Agent，不构成可验证的安全边界，见「身份边界」）。事务锁序与 Worker / 取消一致（builds → cities → city_buildings），
   重置后写入一条 `account_reset` 审计事件并推送 `PUSH_CITY_STATE`（account_reset）。
 - **征兵（v11）**：`RECRUIT` 按兵种征募（军营等级解锁、发起时扣资源与人口）、
-  `CANCEL_RECRUIT` 取消排队条目并按快照全额返还（征募中能否取消待定）。征兵队列独立
+  `CANCEL_RECRUIT` 取消排队或征募中的条目并按快照全额返还（v71 起征募中也可取消）。征兵队列独立
   于建造队列（1 征募中 + 2 排队，占位）；Worker 到期把兵力累加进 `city_army` 并做队首
   激活（时长按条目的单兵时长快照 × 数量重算）；完成走独立水位线轮询推送
   `PUSH_RECRUIT_STATE`，激活单条直推（锁序 recruits → cities，与建造一致）。
   军队耗粮已随 v14 接入：单兵小时耗粮（`troops.ts` 的 foodUse，占位）计入粮的净产量
   结算（城内驻军 ×1、行军与野地驻军 ×2，断粮钳 0 不记负债，读取时现查现算），出征与
   战斗见下文「世界与行军」。
+- **遣散（v84，AISLG-209）**：`DISBAND_TROOPS`（op 142，玩家与 Agent 通用，可选 `cityId`）把该城
+  **城内驻军**按兵种解散，立即生效，返还征兵成本的 50%（`troops.ts` 的 `DISBAND_REFUND_PERCENT`；
+  每种资源 = floor(Σ 单兵成本 × 数量 × 50%)，多兵种先累加再取整，**不返还人口**），返还直接入账该城、
+  不钳储量（与 `CANCEL_RECRUIT` 同口径）。只认 `city_army`：在外部队（行军 / 返程 / 运输 / 侦察）、
+  野地驻军与协防部队都不动。城里有行军指向本城或其名下野地、或有未结的 NPC 来袭时返回
+  `CITY_IN_BATTLE`（与放弃分城共用 `common/src/city-battle.ts` 的判定）；某兵种超过城内数量返回
+  `INSUFFICIENT_TROOPS`；`troops` 为空 / 未知兵种 / 非正整数返回 `INVALID_PARAMS`，出错都不改数据。
+  遣散后按新编成校正断粮计时（不再断粮时清空 `mutiny_next_at` / `starve_warned_at`）；事件
+  `troops_disbanded`（detail = { cityId, troops, refunded }），推送 `PUSH_CITY_STATE`
+  （reason=troops_disbanded）；`CityView` 新增 `inBattle`（客户端据此置灰遣散按钮）。
 - **守城加成（v11）**：`WALL_DEFENSE_PER_LEVEL`（每级 +5，占位）随 `city.defenseBonus`
   下发；消费方是 v13 守城战斗结算（`battle.ts` 的 wallDefensePercent，按等级整体减伤）。
 - **世界与行军（v12 起；v13 战斗结构接入）**：世界为 1000×1000 方格（首次启动幂等生成，
@@ -344,7 +354,7 @@ awk -v s='<开始>' -v e='<结束>' '$1 >= s && $1 < e' <日志文件> | grep '\
   march_completed 事件）并返程；GET_TILE 对 NPC 城池的驻防 / 库存详情需侦察（快照语义，
   未侦察为 null）。**行军撤回 / 调兵（v13）**：`RECALL_MARCH` 把在途行军翻转为返程
   （arrive_at = now + 已走时长）；MARCH 目标为本账号分城时为调兵（不战斗，到达并入该分
-  城地块驻军）。`RECALL_GARRISON` 撤回即放弃占领，部队返程回城。占领野地给城池加持续
+  城地块驻军）。`RECALL_GARRISON` 不带 `troops` 时全撤、即放弃占领，部队返程回城；带 `troops`（v83）时按兵种部分撤回，保留占领，地块至少留 1 兵。占领野地给城池加持续
   产量（等级 × 地形速率）+ 驻军采集（等级 × 兵力 × 0.1/h），都走 `production.ts` 的
   extra 参数。
   **锁序（全栈统一 cities → world_tiles）**：API 出征/召回与 Worker 行军结算、NPC 袭击
@@ -360,10 +370,11 @@ awk -v s='<开始>' -v e='<结束>' '$1 >= s && $1 < e' <日志文件> | grep '\
   `agent_plans` 表（展示信息，非游戏状态，不写事件流），`GET_AGENT_INFO` 的 `plan` 字段带出，
   变更经 `PUSH_AGENT_PLAN` 推送账号其他在线连接；`RESET_ACCOUNT` 一并清空。计划是未验证的
   自报信息，只用于托管监控展示，不参与任何游戏逻辑（与 role 同属信任边界）。
-- **取消排队（v7 起，返还规则 2026-09-27 确认）**：`CANCEL_BUILD` 只对 `status='queued'`
-  条目生效（在建条目能否取消待定）。实现上先用条件翻转 `UPDATE builds ... WHERE status='queued'`
-  守卫（锁序 builds → cities，与 Worker 一致，避免死锁），成功后在同一事务内按条目的成本快照
-  （`builds.cost`）全额返还（旧数据无快照按零返还）。取消条目保留为历史（status='cancelled'），
+- **取消排队（v7 起，返还规则 2026-09-27 确认；v71 起在建条目也可取消）**：`CANCEL_BUILD` 对
+  `status IN ('queued','building')` 的条目生效。实现上先用条件翻转 `UPDATE builds ... WHERE status IN ('queued','building')`
+  守卫（锁序 builds → cities，与 Worker 一致，避免死锁；Worker 完成按 `status='building'` 守卫，先翻转者生效），
+  成功后在同一事务内按条目的成本快照（`builds.cost`）全额返还（旧数据无快照按零返还；连升进行中只退
+  当前级起到目标级的成本），并激活该城排队的下一条（`common/src/queue-activate.ts`，与 Worker 共用）。取消条目保留为历史（status='cancelled'），
   不再出现在队列。
 - **建造队列（协议 v4，v5 起建造与升级共用）**：BUILD / UPGRADE 排队制——无在建立即开工（API 写 `due_at`），有在建且未满入队
   （`status='queued'`，`due_at=NULL`），队满返回 `QUEUE_FULL`。Worker 在完成事务内做队首激活：

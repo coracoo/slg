@@ -15,6 +15,7 @@ import {
   populationGrowthPerHour,
 } from './rules';
 import { emptyBuildingLevels, productionPerHour, storageCaps } from './production';
+import { emptyTechLevels } from './tech';
 import { atBaseTimeScale } from './time-scale';
 import type { ArmyCounts, CityView } from './protocol';
 import { EMPTY_ARMY } from './protocol-doc-army-consts';
@@ -124,6 +125,8 @@ export function exampleCity(overrides: Partial<CityView> = {}): CityView {
     id: CITY_ID,
     name: '主城',
     level: 1,
+    title: '城池',
+    nobility: { index: 0, name: '平民' },
     resources: { ...INITIAL_RESOURCES },
     buildings: { ...INITIAL_BUILDINGS_VIEW },
     levels: { ...INITIAL_LEVELS },
@@ -135,6 +138,13 @@ export function exampleCity(overrides: Partial<CityView> = {}): CityView {
     storage: INITIAL_STORAGE,
     army: { ...EMPTY_ARMY } as ArmyCounts,
     armyFoodUsePerHour: 0,
+    // v85（AISLG-212）：伤兵 / 俘虏 / 逃兵三池（示例为空池；有存量时 troops 为各兵种合计，
+    // earliestExpireAt 为最早一批的过期时刻，池子为空为 null）
+    wounded: { troops: { ...EMPTY_ARMY } as ArmyCounts, earliestExpireAt: null },
+    captives: { troops: { ...EMPTY_ARMY } as ArmyCounts, earliestExpireAt: null },
+    deserters: { troops: { ...EMPTY_ARMY } as ArmyCounts, earliestExpireAt: null },
+    inBattle: false,
+    stratagems: { deception: null, ambushedUntil: null, lootFireUntil: null, lootFirePercent: 0 },
     timeScale: 1,
     truceUntil: null,
     newbieUntil: null,
@@ -143,14 +153,19 @@ export function exampleCity(overrides: Partial<CityView> = {}): CityView {
     durability: null,
     famousName: null,
     productionBonusPercent: 0,
+    luoyangBonusPercent: 0,
     famousEffect: null,
     starveAt: null,
     mutinyNextAt: null,
     guard: null,
     deploy: { count: 0, limit: 1 },
     tower: null,
-    techs: { farming: 0, carrying: 0, marching: 0, storage: 0, scouting: 0, defense: 0 },
+    techs: emptyTechLevels(),
     recruitQueue: [],
+    defenses: { cap: 0, stock: { trap: 0, chevaux: 0, rolling_log: 0, boulder: 0 }, total: 0, queue: [] },
+    assistIn: [],
+    assistOut: [],
+    assistCap: 5,
     defenseBonus: 0,
     marches: [],
     territory: [],

@@ -7,15 +7,29 @@
 import type { EventView, Resources } from './protocol';
 import { TROOP_KINDS } from './protocol';
 import { getCopy } from '../i18n/bundle';
+import { getLang } from '../i18n/lang';
 import { tName, tHeroSource } from '../i18n/names';
 import { formatClock } from './format';
 import { heroEventText, heroExpSuffix } from './heroEventText';
+import { stratagemEventText } from './stratagemText';
+import { giftEventText } from './giftText';
+import { itemEventText } from './itemText';
+import { moveCityEventText } from './moveCityText';
+import { fogBroadcastText, fogEventText } from './fogText';
 
 function buildingName(kind: unknown): string {
   const { BUILDING_LABEL, EXTRA_STATE } = getCopy();
   return typeof kind === 'string' && kind in BUILDING_LABEL
     ? BUILDING_LABEL[kind as keyof typeof BUILDING_LABEL].name
     : EXTRA_STATE.mapping.unknownBuilding;
+}
+
+/** 势力旗号的展示名（v100，AISLG-240）：中文界面用 name、英文界面用 nameEn */
+function factionBannerName(faction: unknown): string {
+  const view = faction as { name?: unknown; nameEn?: unknown } | null | undefined;
+  const name = typeof view?.name === 'string' ? view.name : '';
+  const nameEn = typeof view?.nameEn === 'string' ? view.nameEn : '';
+  return getLang() === 'en' ? nameEn || name : name || nameEn;
 }
 
 /** 兵种的展示名（事件流用；未知兵种给占位文案） */
@@ -48,6 +62,14 @@ function resourcesSuffix(resources: Partial<Resources> | undefined): string {
 }
 
 /** 科技中文名（v27 研究事件）；未知值原样显示 */
+/** 城防器械名（未知种类回落服务端原文以外的通用词，避免出现 undefined） */
+function defenseName(kind: unknown): string {
+  const { DEFENSE_COPY } = getCopy();
+  return typeof kind === 'string' && kind in DEFENSE_COPY.names
+    ? DEFENSE_COPY.names[kind as keyof typeof DEFENSE_COPY.names]
+    : String(kind ?? '');
+}
+
 function techLabel(tech: unknown): string {
   const { TECH_COPY } = getCopy();
   return (TECH_COPY.names as Record<string, string>)[String(tech)] ?? String(tech ?? '?');
@@ -139,11 +161,11 @@ function scoutCompletedText(detail: Record<string, unknown>): string {
 }
 
 export function eventText(view: EventView): string {
-  return heroEventText(view) ?? baseEventText(view) + heroExpSuffix(view);
+  return heroEventText(view) ?? stratagemEventText(view) ?? giftEventText(view) ?? itemEventText(view) ?? moveCityEventText(view) ?? fogEventText(view) ?? baseEventText(view) + heroExpSuffix(view);
 }
 
 function baseEventText(view: EventView): string {
-  const { COPY, CITY_COPY, MOVING_COPY, YT_COPY, STARVE_COPY, TECH_COPY, RESOURCE_LABEL, EXTRA_STATE } = getCopy();
+  const { COPY, CITY_COPY, MOVING_COPY, YT_COPY, STARVE_COPY, TECH_COPY, RESOURCE_LABEL, EXTRA_STATE, DEFENSE_COPY, EXTRA_MAP } = getCopy();
   switch (view.type) {
     case 'build_started':
       return view.detail.fromQueue === true
@@ -165,6 +187,12 @@ function baseEventText(view: EventView): string {
       return EXTRA_STATE.recruit.completed(troopName(view.detail.troop), countOf(view.detail));
     case 'recruit_cancelled':
       return EXTRA_STATE.recruit.cancelled(troopName(view.detail.troop), countOf(view.detail), refundSuffix(view.detail));
+    case 'troops_disbanded':
+      // v84（AISLG-209）：遣散城内驻军（detail = { cityId, troops, refunded }）
+      return EXTRA_STATE.event.troopsDisbanded(
+        troopsSuffix(view.detail.troops as Record<string, unknown> | undefined) || '—',
+        cargoText(view.detail.refunded as Partial<Resources> | undefined) || '—',
+      );
     case 'yt_reward':
       return YT_COPY.event.reward(
         String(view.detail.tier ?? ''), Number(view.detail.rank ?? 0), Number(view.detail.killed ?? 0),
@@ -186,12 +214,36 @@ function baseEventText(view: EventView): string {
       return TECH_COPY.event.completed(techLabel(view.detail.tech), Number(view.detail.level ?? 0));
     case 'research_cancelled':
       return TECH_COPY.event.cancelled(techLabel(view.detail.tech), Number(view.detail.level ?? 0), cargoText(view.detail.refund as Partial<Resources> | undefined));
+    case 'defense_craft_started':
+      return DEFENSE_COPY.event.started(defenseName(view.detail.kind), countOf(view.detail), formatClock(String(view.detail.dueAt ?? '')));
+    case 'defense_craft_queued':
+      return DEFENSE_COPY.event.queued(defenseName(view.detail.kind), countOf(view.detail));
+    case 'defense_craft_completed':
+      return DEFENSE_COPY.event.completed(defenseName(view.detail.kind), countOf(view.detail), Number(view.detail.total ?? 0));
+    case 'defense_craft_cancelled':
+      return DEFENSE_COPY.event.cancelled(defenseName(view.detail.kind), countOf(view.detail), cargoText(view.detail.refund as Partial<Resources> | undefined));
+    case 'assist_arrived':
+      return DEFENSE_COPY.event.assistArrived(
+        String(view.detail.hostUsername ?? ''),
+        tName(String(view.detail.hostCityName ?? '')),
+        troopsSuffix(view.detail.troops as Record<string, unknown> | undefined),
+      );
+    case 'assist_returned': {
+      const cause = typeof view.detail.cause === 'string' ? (DEFENSE_COPY.event.assistCause[view.detail.cause] ?? view.detail.cause) : '';
+      return DEFENSE_COPY.event.assistReturned(
+        String(view.detail.hostUsername ?? EXTRA_STATE.mapping.cityFallback),
+        tName(String(view.detail.hostCityName ?? EXTRA_STATE.mapping.cityFallback)),
+        cause,
+      );
+    }
     case 'city_renamed':
       return EXTRA_STATE.event.cityRenamed(String(view.detail.from ?? ''), String(view.detail.to ?? ''));
     case 'account_reset':
       return EXTRA_STATE.event.accountReset;
     case 'city_discarded':
       return EXTRA_STATE.event.cityDiscarded(`${String(view.detail.x ?? '')},${String(view.detail.y ?? '')}`);
+    case 'capital_changed':
+      return EXTRA_STATE.event.capitalChanged;
     case 'account_renamed':
       return EXTRA_STATE.event.accountRenamed(String(view.detail.from ?? ''), String(view.detail.to ?? ''));
     case 'march_started': {
@@ -303,8 +355,17 @@ function baseEventText(view: EventView): string {
         const by = (view.detail.attacker as { username?: string } | undefined)?.username;
         return EXTRA_STATE.event.wildConquest(posLost, by ?? '');
       }
+      // v98（AISLG-238）：本人和 Agent 都 7 天没上线，系统收回野地（原因写明「长期未上线」）
+      if (view.detail.cause === 'inactive') {
+        return EXTRA_STATE.event.wildInactive(posLost);
+      }
       return EXTRA_STATE.event.wildLost(posLost);
     }
+    // 望楼（v97，AISLG-232）：建成 / 升级完成、随野地毁掉
+    case 'facility_completed':
+      return EXTRA_STATE.event.facilityCompleted(posOf(view.detail), Number(view.detail.level ?? 0));
+    case 'facility_lost':
+      return EXTRA_STATE.event.facilityLost(posOf(view.detail), Number(view.detail.level ?? 0));
     case 'npc_city_occupied': {
       // v24：占领 NPC 城变分城时接收其剩余库存（stock）；旧版 legacy 路径为掠得（loot）；
       // 城名是后端固定名城名（FAMOUS_CITY_NAMES），英文界面按码表翻译
@@ -314,9 +375,11 @@ function baseEventText(view: EventView): string {
     }
     case 'npc_raid': {
       const losses = troopsSuffix(view.detail.losses as Record<string, unknown> | undefined);
+      // v100（AISLG-240）：势力范围内的袭击显示势力名（如「南蛮袭击」）
+      const who = view.detail.faction ? factionBannerName(view.detail.faction) : '';
       return view.detail.outcome === 'repelled'
-        ? EXTRA_STATE.event.npcRaidRepelled(posOf(view.detail), losses)
-        : EXTRA_STATE.event.npcRaidWiped(posOf(view.detail));
+        ? EXTRA_STATE.event.npcRaidRepelled(posOf(view.detail), losses, who)
+        : EXTRA_STATE.event.npcRaidWiped(posOf(view.detail), who);
     }
     case 'npc_attack_warning': {
       // v23 AISLG-57：预警 = 位置 + 预计到达时刻 + 大致兵力范围
@@ -327,7 +390,9 @@ function baseEventText(view: EventView): string {
       const mins = Number.isFinite(minutesLeft) ? EXTRA_STATE.event.minutesLeft(minutesLeft) : '';
       const armyMin = String(typeof view.detail.armyMin === 'number' ? view.detail.armyMin : '?');
       const armyMax = String(typeof view.detail.armyMax === 'number' ? view.detail.armyMax : '?');
-      return EXTRA_STATE.event.npcWarning(target, arriveAt, mins, armyMin, armyMax);
+      // v100（AISLG-240）：势力范围内的袭击把「NPC」换成势力名（如「南蛮来袭」）
+      const faction = view.detail.faction ? factionBannerName(view.detail.faction) : '';
+      return EXTRA_STATE.event.npcWarning(target, arriveAt, mins, armyMin, armyMax, faction);
     }
     case 'player_attack_warning': {
       // v38 AISLG-122 / v39 AISLG-123：玩家部队来袭预警 = 进攻方 + 目标（城 / 你的野地）+ 预计到达 + 兵力范围
@@ -380,6 +445,62 @@ function baseEventText(view: EventView): string {
       const until = view.detail.protectedUntil ? EXTRA_STATE.event.protectionUntil(formatClock(String(view.detail.protectedUntil))) : '';
       return EXTRA_STATE.event.conquestGained(from ?? '', cityName, pos, until);
     }
+    case 'faction_siege_warning': {
+      // v100（AISLG-240）：势力围攻预警——势力名 + 目标 + 当前城防值
+      const name = factionBannerName(view.detail.faction);
+      const where = EXTRA_STATE.event.playerTargetCity(posOf(view.detail));
+      const arriveAt = typeof view.detail.arriveAt === 'string' ? formatClock(view.detail.arriveAt) : '?';
+      const minutesLeft = Math.max(0, Math.ceil((Date.parse(String(view.detail.arriveAt ?? '')) - Date.now()) / 60_000));
+      const mins = Number.isFinite(minutesLeft) ? EXTRA_STATE.event.minutesLeft(minutesLeft) : '';
+      const armyMin = String(typeof view.detail.armyMin === 'number' ? view.detail.armyMin : '?');
+      const armyMax = String(typeof view.detail.armyMax === 'number' ? view.detail.armyMax : '?');
+      const durability = String(typeof view.detail.durability === 'number' ? view.detail.durability : '?');
+      return EXTRA_MAP.faction.siege.warning(name, where, arriveAt, mins, armyMin, armyMax, durability);
+    }
+    case 'faction_siege': {
+      // v100：围攻结算（repelled 守住 / hit 扣城防 / swallowed 城被吞）
+      const name = factionBannerName(view.detail.faction);
+      const pos = posOf(view.detail);
+      const durability = String(typeof view.detail.durability === 'number' ? view.detail.durability : '?');
+      if (view.detail.outcome === 'repelled') {
+        return EXTRA_MAP.faction.siege.repelled(name, pos, durability);
+      }
+      if (view.detail.outcome === 'swallowed') {
+        return EXTRA_MAP.faction.siege.swallowed(name, pos);
+      }
+      const after = String(typeof view.detail.durabilityAfter === 'number' ? view.detail.durabilityAfter : '?');
+      const damage = String(typeof view.detail.damage === 'number' ? view.detail.damage : '?');
+      const truce = view.detail.protectedUntil ? EXTRA_MAP.faction.siege.truceUntil(formatClock(String(view.detail.protectedUntil))) : '';
+      return EXTRA_MAP.faction.siege.hit(name, pos, durability, after, damage, truce);
+    }
+    case 'faction_city_lost': {
+      // v100：城被势力吞下（原主人视角）
+      const name = factionBannerName(view.detail.faction);
+      const cityName = tName(String(view.detail.cityName ?? EXTRA_STATE.event.branchFallback));
+      return EXTRA_MAP.faction.siege.cityLost(name, cityName, posOf(view.detail));
+    }
+    case 'faction_lair_battle': {
+      // v101（AISLG-241）：打老巢的一场战斗（自己的事件）——势力名 + 第几营 + 歼灭战力 + 奖励
+      const name = factionBannerName(view.detail.faction);
+      const campNo = Number(view.detail.campNo ?? 0);
+      const killed = Number(view.detail.killedPower ?? 0);
+      const gold = Number((view.detail.reward as { gold?: number } | null)?.gold ?? 0);
+      const outcome = view.detail.outcome === 'won' ? 'won' : 'lost';
+      return EXTRA_MAP.faction.lairBattle.battle(name, campNo, killed, gold, outcome);
+    }
+    case 'faction_lair_reward': {
+      // v101：这家势力灭亡时按贡献名次发的奖励
+      const name = factionBannerName(view.detail.faction);
+      const rank = Number(view.detail.rank ?? 0);
+      const gold = Number((view.detail.reward as { gold?: number } | null)?.gold ?? 0);
+      const each = Number((view.detail.reward as { wood?: number } | null)?.wood ?? 0);
+      return EXTRA_MAP.faction.lairBattle.reward(name, rank, gold, each);
+    }
+    case 'faction_lair_destroyed': {
+      // v101：这家势力本季被攻破（最后一击的玩家收到）
+      const name = factionBannerName(view.detail.faction);
+      return EXTRA_MAP.faction.lairBattle.destroyedByYou(name, String(view.detail.heroName ?? ''));
+    }
     case 'truce_started': {
       const until = typeof view.detail.until === 'string' ? formatClock(view.detail.until) : '?';
       return EXTRA_STATE.event.truceStarted(until);
@@ -409,7 +530,7 @@ export function serverBroadcastText(view: {
   type: string;
   detail: Record<string, unknown>;
 }): string {
-  const { YT_COPY, HERO_COPY, EXTRA_STATE, ANNOUNCEMENT_COPY } = getCopy();
+  const { YT_COPY, HERO_COPY, EXTRA_STATE, ANNOUNCEMENT_COPY, CITY_COPY, ALLIANCE_COPY, EXTRA_MAP } = getCopy();
   const actor =
     typeof view.detail.username === 'string'
       ? view.detail.cityName
@@ -426,6 +547,10 @@ export function serverBroadcastText(view: {
       return EXTRA_STATE.broadcast.cityBroken(actor);
     case 'win_streak':
       return EXTRA_STATE.broadcast.winStreak(actor, String(view.detail.streak ?? '5'));
+    case 'famous_first_explored':
+    case 'hero_site_first_explored':
+    case 'legendary_relic_claimed':
+      return fogBroadcastText(view) ?? '';
     case 'yt_started':
       return YT_COPY.broadcast.started(Number(view.detail.totalCamps ?? 0));
     case 'yt_grown':
@@ -437,17 +562,55 @@ export function serverBroadcastText(view: {
     case 'hero_granted':
       // 名将名与来源标签是后端固定词，英文界面按码表翻译
       return HERO_COPY.broadcast.granted(String(view.detail.username ?? EXTRA_STATE.mapping.unknownPlayer), tName(String(view.detail.heroName ?? '')), tHeroSource(String(view.detail.source ?? '')));
+    case 'hero_left':
+      // v94（AISLG-228）：名将下野（不带坐标）
+      return HERO_COPY.broadcast.left(tName(String(view.detail.heroName ?? '')), String(view.detail.username ?? EXTRA_STATE.mapping.unknownPlayer));
+    case 'hero_captured':
+      // v94（AISLG-228）：玩家俘虏了玩家的名将
+      return HERO_COPY.broadcast.captured(
+        String(view.detail.captorUsername ?? EXTRA_STATE.mapping.unknownPlayer),
+        String(view.detail.ownerUsername ?? EXTRA_STATE.mapping.unknownPlayer),
+        tName(String(view.detail.heroName ?? '')),
+      );
     case 'city_conquered':
       return EXTRA_STATE.broadcast.cityConquered(actor, String(view.detail.from ?? ''), tName(String(view.detail.cityName ?? '?')), pos);
     case 'arena_champion':
       // v53 AISLG-145：登上第 1 名（previous 为被取代的原第 1 名，可能是守擂者）
       return EXTRA_STATE.broadcast.arenaChampion(actor, String(view.detail.previous ?? EXTRA_STATE.mapping.unknownPlayer));
+    case 'faction_expanded':
+      // v99（AISLG-239）：五方势力的范围半径扩大（每周最多一次）
+      return EXTRA_MAP.faction.broadcastExpanded(Number(view.detail.radius ?? 0));
+    case 'faction_city_swallowed':
+      // v100（AISLG-240）：某人的分城被势力吞下（必达播报）
+      return EXTRA_MAP.faction.siege.broadcastSwallowed(
+        String(view.detail.username ?? EXTRA_STATE.mapping.unknownPlayer),
+        tName(String(view.detail.cityName ?? '?')),
+        factionBannerName({ name: view.detail.factionName, nameEn: view.detail.factionName }),
+        pos,
+      );
+    case 'faction_lair_destroyed':
+      // v101（AISLG-241）：某家势力被攻破（必达播报，带最后一击的玩家名）
+      return EXTRA_MAP.faction.broadcastDestroyed(
+        String(view.detail.username ?? EXTRA_STATE.mapping.unknownPlayer),
+        factionBannerName(view.detail.faction),
+        getLang() === 'en'
+          ? String(view.detail.leaderEn ?? view.detail.leader ?? '')
+          : String(view.detail.leader ?? view.detail.leaderEn ?? ''),
+      );
     case 'announcement':
       // v60 AISLG-162：运维发布公告时的一句标题（标题取中文原文）
       return ANNOUNCEMENT_COPY.broadcast.text(String(view.detail.title ?? ''));
     case 'star_tower_cleared':
       // v55 AISLG-146：将星塔 Boss 层首通（floor 为刚通过的层）
       return EXTRA_STATE.broadcast.starTowerCleared(actor, Number(view.detail.floor ?? 0));
+    case 'alliance_diplomacy':
+      return ALLIANCE_COPY.diplomacy.broadcast(
+        String(view.detail.kind ?? ''),
+        String(view.detail.actorAllianceName ?? ''),
+        String(view.detail.otherAllianceName ?? ''),
+      );
+    case 'nobility_promoted':
+      return CITY_COPY.nobility.promoted(actor, String(view.detail.name ?? ''));
     case 'yt_finished':
       return YT_COPY.broadcast.finished(String(view.detail.reason ?? ''), Number(view.detail.clearedCamps ?? 0), Number(view.detail.totalCamps ?? 0), Number(view.detail.scatteredCamps ?? 0));
     default:

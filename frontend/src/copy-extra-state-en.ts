@@ -46,10 +46,19 @@ export const EXTRA_STATE_EN = {
   event: {
     cityRenamed: (from: string, to: string) => `City renamed: ${from} → ${to}`,
     cityDiscarded: (pos: string) => `Abandoned Branch City at ${pos}; the tile is an NPC city again and the quota is free`,
+    capitalChanged: 'Set as capital: the capital and a branch city swapped roles; no further swap for 24 hours',
+    // v84 (AISLG-209): disbanded troops
+    troopsDisbanded: (troops: string, refund: string) => `Disbanded city troops ${troops}; refunded ${refund}`,
     accountReset: 'Account data has been reset to the initial state',
     accountRenamed: (from: string, to: string) => `Nickname changed: ${from} → ${to}`,
     marchTaskPlunder: ' (plunder)',
     marchTaskOccupy: ' (occupy)',
+    relicClaimed: (kind: string, pos: string) => `Unearthed ${kind} ${pos}; rewards sent to your main city`,
+    relicTaken: (pos: string) => `The relic at ${pos} has already been unearthed`,
+    relicLimit: (pos: string) => `Daily limit of 2 relics reached; the relic at ${pos} stays where it is`,
+    famousFirst: (name: string) => `First to explore famous city ${name}; rewards sent to your main city`,
+    heroSiteFirst: (site: string, hero: string, unlocked: boolean) =>
+      unlocked ? `First to explore ${site} (${hero}); you can befriend them directly` : `First to explore ${site} (${hero}); they have already joined the cause, rewards sent`,
     marchReturn: (pos: string, clock: string) => `Garrison set out from ${pos} for home, arriving about ${clock}`,
     marchOut: (task: string, pos: string, troops: string, clock: string) =>
       `Army marching out${task} → ${pos} (${troops}), arriving about ${clock}`,
@@ -90,12 +99,19 @@ export const EXTRA_STATE_EN = {
     wildRecall: (pos: string) => `Garrison recalled; wilderness ${pos} given up`,
     wildConquest: (pos: string, by: string) => `Wilderness ${pos} was seized${by ? ` by player ${by}` : ''}; the occupation is lost`,
     wildLost: (pos: string) => `Wilderness ${pos} fell; the occupation is lost`,
+    wildInactive: (pos: string) => `Reclaimed for long inactivity: wilderness ${pos} is now unowned`,
+    facilityCompleted: (pos: string, level: number) => `Watchtower ready: ${pos} is now level ${level}`,
+    facilityLost: (pos: string, level: number) => `Watchtower destroyed: ${pos} (${level > 0 ? `level ${level}` : 'under construction'}), no refund`,
     npcCityOccupied: (pos: string, name: string, loot: string) =>
       `Occupied the NPC city ${pos} as a branch city${name ? ` "${name}"` : ''}${loot ? `, stock taken over ${loot}` : ''}`,
-    npcRaidRepelled: (pos: string, losses: string) => `NPC raid on ${pos} was repelled${losses ? `, losses: ${losses}` : ''}`,
-    npcRaidWiped: (pos: string) => `NPC raid on ${pos}: the garrison was wiped out and the occupation lost`,
-    npcWarning: (target: string, arriveAt: string, mins: string, armyMin: string, armyMax: string) =>
-      `Scouts spotted an NPC force marching toward ${target}, arriving ${arriveAt}${mins}, army about ${armyMin}-${armyMax}`,
+    npcRaidRepelled: (pos: string, losses: string, who = '') =>
+      `${who ? `The ${who} raid on` : 'NPC raid on'} ${pos} was repelled${losses ? `, losses: ${losses}` : ''}`,
+    npcRaidWiped: (pos: string, who = '') =>
+      `${who ? `The ${who} raid on` : 'NPC raid on'} ${pos}: the garrison was wiped out and the occupation lost`,
+    npcWarning: (target: string, arriveAt: string, mins: string, armyMin: string, armyMax: string, who = '') =>
+      who
+        ? `Scouts spotted a ${who} force marching toward ${target}, arriving ${arriveAt}${mins}, army about ${armyMin}-${armyMax}`
+        : `Scouts spotted an NPC force marching toward ${target}, arriving ${arriveAt}${mins}, army about ${armyMin}-${armyMax}`,
     minutesLeft: (n: number) => `, about ${n} min later`,
     playerWarning: (who: string, where: string, arriveAt: string, mins: string, armyMin: string, armyMax: string) =>
       `Beacon alert: ${who} is marching toward ${where}, arriving ${arriveAt}${mins}, army about ${armyMin}-${armyMax}`,
@@ -134,6 +150,9 @@ export const EXTRA_STATE_EN = {
     npcCityEmptied: (actor: string, level: string, pos: string) => `${actor} emptied the NPC city Lv${level} ${pos}`,
     goldMineFirst: (actor: string, pos: string) => `${actor} was the first to occupy the gold mine ${pos}`,
     cityBroken: (actor: string) => `${actor}'s main city was broken by an NPC attack`,
+    famousFirst: (actor: string, name: string) => `${actor} was first to explore famous city ${name}`,
+    heroSiteFirst: (actor: string, site: string, hero: string) => `${actor} was first to explore ${hero}'s ${site}`,
+    legendaryRelic: (actor: string, kind: string) => `${actor} unearthed a legendary relic: ${kind}`,
     winStreak: (actor: string, streak: string) => `${actor}'s army won ${streak} battles in a row within an hour`,
     cityConquered: (actor: string, from: string, cityName: string, pos: string) =>
       `${actor} took over${from ? ` ${from}'s` : " another player's"} branch city "${cityName}" ${pos}`,

@@ -101,12 +101,41 @@ export function buildErrorText(
       return COPY.errors.build.buildingNotBuilt;
     case 'BUILDING_LEVEL_MAX':
       return COPY.errors.build.buildingLevelMax;
+    case 'BUILDING_MAIN_ONLY':
+      // v87（AISLG-217）：酒馆 / 书院只能在主城
+      return COPY.errors.build.buildingMainOnly;
     case 'BUILD_NOT_CANCELLABLE':
       return COPY.errors.build.buildNotCancellable;
     case 'INVALID_PARAMS':
       return COPY.errors.build.invalidParams;
     default:
       return message ?? COPY.errors.build.fallback;
+  }
+}
+
+/** 望楼建造 / 升级失败的人读提示（地块详情区里显示，v97 AISLG-232） */
+export function facilityErrorText(
+  code: ErrorCode | undefined,
+  message: string | undefined,
+  data?: Record<string, unknown>,
+): string {
+  const { COPY, EXTRA_MAP } = getCopy();
+  const W = EXTRA_MAP.watchtower.errors;
+  switch (code) {
+    case 'FACILITY_TILE_INVALID':
+      return W.tileInvalid;
+    case 'FACILITY_MAX_LEVEL':
+      return W.maxLevel;
+    case 'FACILITY_BUILDING':
+      return W.building;
+    case 'FACILITY_LIMIT':
+      return W.limit;
+    case 'INSUFFICIENT_RESOURCES':
+      return COPY.errors.build.insufficientResources + shortfallSuffix(data);
+    case 'INVALID_PARAMS':
+      return COPY.errors.build.invalidParams;
+    default:
+      return message ?? W.fallback;
   }
 }
 
@@ -160,6 +189,54 @@ export function recruitErrorText(
     default:
       return message ?? COPY.errors.recruit.fallback;
   }
+}
+
+/** 遣散失败的人读提示（遣散表单 / 确认弹窗内显示，v84 AISLG-209） */
+export function disbandErrorText(code: ErrorCode | undefined, message: string | undefined): string {
+  const { COPY } = getCopy();
+  switch (code) {
+    case 'INSUFFICIENT_TROOPS':
+      return COPY.errors.disband.insufficientTroops;
+    case 'CITY_IN_BATTLE':
+      return COPY.errors.disband.cityInBattle;
+    case 'INVALID_PARAMS':
+      return COPY.errors.disband.invalidParams;
+    default:
+      return message ?? COPY.errors.disband.fallback;
+  }
+}
+
+/** 治疗 / 招降 / 劝回失败的人读提示（v85，AISLG-212，伤兵营表单内显示） */
+export function poolErrorText(
+  code: ErrorCode | undefined,
+  message: string | undefined,
+  data?: Record<string, unknown>,
+): string {
+  const { COPY } = getCopy();
+  switch (code) {
+    case 'INSUFFICIENT_RESOURCES':
+      return COPY.errors.pools.insufficientResources + shortfallSuffix(data);
+    case 'INSUFFICIENT_POPULATION':
+      return COPY.errors.pools.insufficientPopulation + populationShortfallSuffix(data);
+    case 'CITY_STARVING':
+      return COPY.errors.pools.cityStarving;
+    case 'INVALID_PARAMS':
+      return COPY.errors.pools.invalidParams;
+    default:
+      return message ?? COPY.errors.pools.fallback;
+  }
+}
+
+/** 施计 / 兑换计谋令失败的人读提示（施计弹窗与战场商店内显示，v86 AISLG-211） */
+export function stratagemErrorText(code: ErrorCode | undefined, message: string | undefined, data?: Record<string, unknown>): string {
+  const { STRATAGEM_COPY } = getCopy();
+  const byCode = STRATAGEM_COPY.errors as Record<string, string>;
+  if (code && code in byCode) {
+    const retry = typeof data?.retryAfterSeconds === 'number' ? data.retryAfterSeconds : 0;
+    const base = byCode[code];
+    return retry > 0 ? `${base}（${formatDurationText(retry)}）` : base;
+  }
+  return message ?? STRATAGEM_COPY.errors.fallback;
 }
 
 /** 集市兑换失败的人读提示（兑换弹窗内显示，AISLG-67） */
@@ -221,6 +298,10 @@ export function marchErrorText(code: ErrorCode | undefined, message: string | un
       return COPY.errors.world.insufficientTroops;
     case 'TILE_NOT_OCCUPIED':
       return COPY.errors.world.tileNotOccupied;
+    case 'GARRISON_WOULD_EMPTY':
+      return COPY.errors.world.garrisonWouldEmpty;
+    case 'INSUFFICIENT_GARRISON':
+      return COPY.errors.world.insufficientGarrison;
     case 'INVALID_PARAMS':
       return COPY.errors.world.invalidParams;
     case 'PLUNDER_COOLDOWN':
@@ -336,6 +417,10 @@ export function allianceErrorText(
     }
     case 'ALLIANCE_ROLE_FULL':
       return errors.ALLIANCE_ROLE_FULL(ALLIANCE_MAX_VICES);
+    case 'DIPLOMACY_COOLDOWN': {
+      const retry = typeof data?.retryAfterSeconds === 'number' ? data.retryAfterSeconds : 0;
+      return retry > 0 ? `${errors.DIPLOMACY_COOLDOWN}（${formatDurationText(retry)}）` : errors.DIPLOMACY_COOLDOWN;
+    }
     case 'INSUFFICIENT_RESOURCES':
       return errors.INSUFFICIENT_RESOURCES(ALLIANCE_CREATE_COST_GOLD.toLocaleString());
     case 'ALLIANCE_NAME_INVALID':
