@@ -52,7 +52,7 @@ SLG 是可由玩家或 AI Agent 游玩的三国策略游戏。本分支合入 [a
 - PostgreSQL 使用 `postgres:16-alpine`，沿用原卷；不要直接切换现有数据库的主版本。
 - 网页端口 `8424`，可通过 `SLG_PORT` 修改；`SLG_BIND_IP` 默认 `0.0.0.0`，请按需限制网络访问。
 - npm 默认使用 `https://registry.npmmirror.com`，可通过 `NPM_REGISTRY` 覆盖。这不保证 GitHub 或容器镜像仓库在国内可达。
-- 默认构建源码固定为 [`ac52b1f4526dc3a2f93d2a3822d51a01d24e6460`](https://github.com/coracoo/slg/commit/ac52b1f4526dc3a2f93d2a3822d51a01d24e6460)，可通过 `SLG_SOURCE_REF` 指定已发布的完整 40 位提交 SHA；固定版本不代表已经通过测试。
+- 默认构建源码固定为 [`96efb4095249acb670e4657d5eec00a606ee07fa`](https://github.com/coracoo/slg/commit/96efb4095249acb670e4657d5eec00a606ee07fa)，可通过 `SLG_SOURCE_REF` 指定已发布的完整 40 位提交 SHA；固定版本不代表已经通过测试。
 
 HTTPS 请在外层可信反向代理配置，并启用 WebSocket 转发；使用 OAuth 时，将 `FRONTEND_URL` 和回调地址设为实际访问地址。
 
