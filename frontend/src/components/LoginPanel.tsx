@@ -6,6 +6,7 @@ import { validatePasswordSignup, type PasswordSignupValidationError } from '../a
 import { WechatLoginTab } from './wechat/WechatLoginTab';
 import { GoogleLoginSection } from './google/GoogleLoginSection';
 import { GithubLoginButton } from './github/GithubLoginButton';
+import { SiteFooter } from './SiteFooter';
 
 // 登录表单：仅未登录时由 App 渲染（登录后的账号信息与切换入口在顶栏）。
 // v44：微信扫码分页与 Google 按钮按服务端 /auth/config 的开关显示（没配置就不显示）。
@@ -228,6 +229,9 @@ export function LoginPanel({ booting, loginBusy, loginError, lastUsername, onLog
       >
         {COPY.login.repoLink} ↗
       </a>
+
+      {/* 页脚（AISLG-252）：隐私政策 / 服务条款 / 定价 / 客服邮箱，未登录首页最底部固定四项入口 */}
+      <SiteFooter />
     </section>
   );
 }

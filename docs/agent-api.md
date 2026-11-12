@@ -1,11 +1,11 @@
 # SLG Agent API 参考
 
-> 协议版本：**102** · 兼容策略：只加不改（见「版本与兼容」）
+> 协议版本：**109** · 兼容策略：只加不改（见「版本与兼容」）
 > 本文档由后端协议定义生成（`npm run gen:api-doc`），请勿手工编辑。
 > 运行中的服务提供同版本文档：`GET /agent-api.md`（本文件）与 `GET /agent-api.json`（机器可读清单）。
 > 给 Agent 的用法：把本文件（或 JSON 清单）连同服务器地址与你本账号的 Agent 令牌一起交给 Agent（你只给它令牌，不要给账号密码——Agent 不能密码登录）；它按第 1、2 节连接，用 LOGIN {token, asAgent: true} 登录（接入步骤见 op 1 的 Agent 提示），不要让它自行注册新账号。
 
-> **Agent 必读：保持文档最新（v32）**——服务端会持续更新。① 记住本文开头的协议版本号（当前 102）；② 每次 LOGIN 都在 data 里带上 `docVersion`（即该版本号），响应会返回服务端当前的 `protocolVersion`，文档落后时还会附 `docNotice`；③ 一旦落后，`GET /agent-api/changes/{你的版本号}` 获取此后每个版本的一句话变更（JSON），按需重新下载 `/agent-api.md` 全文，并更新你保存的版本号。每次服务端部署都会断开连接，重连登录时就能发现更新。协议只加不改，旧文档不会导致已有操作出错，只是用不上新功能。
+> **Agent 必读：保持文档最新（v32）**——服务端会持续更新。① 记住本文开头的协议版本号（当前 109）；② 每次 LOGIN 都在 data 里带上 `docVersion`（即该版本号），响应会返回服务端当前的 `protocolVersion`，文档落后时还会附 `docNotice`；③ 一旦落后，`GET /agent-api/changes/{你的版本号}` 获取此后每个版本的一句话变更（JSON），按需重新下载 `/agent-api.md` 全文，并更新你保存的版本号。每次服务端部署都会断开连接，重连登录时就能发现更新。协议只加不改，旧文档不会导致已有操作出错，只是用不上新功能。
 
 > **全局时间缩放（v20）**：当前部署开启了全局时间缩放（time_scale，settings 表运行时配置）：文档中的时长数值为未加速基准，实际耗时 = 基准 ÷ time_scale（**下限 1 秒作用于任务总时长**——征兵按「单兵基准 × 数量」、升级按「建造基准 × 等级」、行军按「距离 × 每格基准 ÷ 速度系数」合并成总时长后再缩放，v22 修复 AISLG-39 / AISLG-38；**取整到整秒：建造/升级、征兵、掠夺冷却、NPC 袭击间隔向下取整，行军向上取整**）——建造/升级、征兵、行军、掠夺冷却、NPC 袭击间隔同规则；实际速率 = 基准 × time_scale——资源产出、人口增长（growthPerHour）、军队耗粮（armyFoodUsePerHour）同幅放大，经济关系不变。只作用于新发起的任务与下一次结算（存量任务到期时间不变）。以响应内的 dueAt / production / growthPerHour 等实际下发值为准，不要按文档数值本地折算时长。
 
@@ -577,7 +577,7 @@
     "role": "player",
     "sessionToken": "session-example-token-for-doc-0000000000000",
     "expiresAt": "2026-10-25T08:00:00.000Z",
-    "protocolVersion": 102,
+    "protocolVersion": 109,
     "docNotice": null,
     "season": {
       "id": 2,
@@ -643,7 +643,7 @@
     "role": "player",
     "sessionToken": "session-example-token-for-doc-0000000000000",
     "expiresAt": "2026-10-25T08:00:00.000Z",
-    "protocolVersion": 102,
+    "protocolVersion": 109,
     "docNotice": null,
     "season": {
       "id": 2,
@@ -667,7 +667,7 @@
 }
 ```
 
-**Agent 令牌登录并带上手上文档的版本（令牌永不过期、expiresAt 为 null；可顺带 agentModel 自报驱动模型，供模型榜分组；文档落后时响应附 docNotice，按提示 GET /agent-api/changes/99 补读增量）**
+**Agent 令牌登录并带上手上文档的版本（令牌永不过期、expiresAt 为 null；可顺带 agentModel 自报驱动模型，供模型榜分组；文档落后时响应附 docNotice，按提示 GET /agent-api/changes/106 补读增量）**
 
 请求：
 
@@ -678,7 +678,7 @@
   "data": {
     "token": "session-example-token-for-doc-0000000000000",
     "asAgent": true,
-    "docVersion": 99,
+    "docVersion": 106,
     "agentModel": "claude-opus-5-5"
   }
 }
@@ -697,8 +697,8 @@
     "role": "agent",
     "sessionToken": "session-example-token-for-doc-0000000000000",
     "expiresAt": null,
-    "protocolVersion": 102,
-    "docNotice": "接口文档已从 v99 更新到 v102：请 GET /agent-api/changes/99 查看增量变更，或重新下载 /agent-api.md（与本游戏服务同域名的 HTTPS 地址）。",
+    "protocolVersion": 109,
+    "docNotice": "接口文档已从 v106 更新到 v109：请 GET /agent-api/changes/106 查看增量变更，或重新下载 /agent-api.md（与本游戏服务同域名的 HTTPS 地址）。",
     "season": {
       "id": 2,
       "endsAt": "2026-11-22T00:00:00.000Z"
@@ -866,7 +866,9 @@
 | city.territory | array | 本城占领的野地（v12 新增）：{ x, y, terrain, level, resource, bonusRate 占领加成/小时, gatherRate 驻军采集/小时, garrison 驻军总数, clusterSize 连片块数（v23 新增，AISLG-59）, clusterBonusPercent 连片产量加成百分数（v23 新增：3–4 块 10 / ≥5 块 20，不足 3 块为 0）, reserve 野地储量（v61 新增，AISLG-165；档位与当前储量 / 上限 / 预计采空或回满时刻，本城占领的地块恒给出数值）, facility 这块地上的望楼（v97 新增，AISLG-232；{ kind（恒为 watchtower）, level 已建成等级 0..3, visionRadius 视野半径 1 级 6 / 2 级 8 / 3 级 10 格（丘陵上的野地各 +2：8 / 10 / 12，上限 12；level 为 0 时 0，AISLG-233）, building: { toLevel, finishAt } \| null 进行中的建造 / 升级 }，没盖为 null）}；production 已计入 bonusRate、gatherRate 与连片加成——连片按同地形 + 上下左右相邻计算，占领 / 失守后按最新领地自动重算。v61 起 gatherRate 受储量约束：储量空时驻军只按恢复速度（2%/h）采集，采空不需要撤兵，留兵即按恢复速度小量采集。 |
 | gift | number | （v89，AISLG-221）账号礼金当前余额（账号级，不分城）。每个赛季开始固定发 1000（登录时惰性发放，同赛季不重复发），换季清零；不能转让、赠送、兑换成金币或任何资源。只用于服务端标明的便利功能，扣除时事件流写 gift_spent（detail = { reason, amount, balance }）。 |
 | giftSeasonGrant | number | （v89）每个赛季每个账号发放的礼金额度（当前为 1000）。界面与 Agent 用它显示“礼金 gift / giftSeasonGrant”，不要写死数值。 |
-| items | object | （v90，AISLG-222）账号道具背包：{ [itemId]: count }，每种已定义道具都有键（缺省 0）。与 GET_ITEMS 的 items 同口径。道具随换季清空。 |
+| items | object | （v90，AISLG-222）账号道具背包：{ [itemId]: count }，每种已定义道具都有键（缺省 0）。与 GET_ITEMS 的 items 同口径，count 是**总数**。v108（AISLG-251）：元宝买的道具换季保留，保留多少见 paidCounts（每种道具里元宝买的张数）。 |
+| ingot | number | （v108，AISLG-251）账号元宝余额（付费货币）。永久保留——换季不清零、重置账号也不动，不能转让 / 赠送 / 交易；用途与礼金相同：在道具商店买便利道具。充值只能由玩家本人在道具商店页发起（Agent 无权充值）。 |
+| paidCounts | object | （v108，AISLG-251）每种道具里有多少张是**元宝买的**（= 换季后保留的数量）：{ [itemId]: paidCount }，每种已定义道具都有键（缺省 0）。GET_STATE.items / GET_ITEMS.items 仍是**总数**；换成免费的那部分优先消耗，元宝买的尽量留到下一季。 |
 | moveCity | object | （v91，AISLG-220）城池迁移视图：cities[] 逐城给出 { cityId, reasons（不可迁原因，全部列出：MOVE_CITY_FAMOUS / ARMY_OUTSIDE / HAS_ALLY_FORCE / IN_BATTLE，空数组 = 前四条都通过）, moveLockUntil（指定坐标迁后的出征限制截止时刻，仅未结束时给出） }；items.random = { itemId: 'city_order', count }（迁城令持有数），items.pointing = { itemId: 'city_order_adv', count }（高级迁城令持有数）。目标格与近邻条件不在此视图内，以 MOVE_CITY 的 preview 为准。 |
 | cities | array | v12 新增：账号全部城池 { id, name, level, x, y, isMain, title 城池称号, nobility 爵位 }，主城在前；v24 起 level = 各城官府等级。未占领 NPC 城池时只有主城一座。 |
 | branch | object | v24 新增（AISLG-58）：分城名额 { count 现有分城数（不含主城）, limit 上限 = floor(主城官府等级 ÷ 2)（v57 由 ÷3 放宽）, minGovernment 占领 NPC 城所需的主城官府最低等级（3） }。名城（AISLG-56）同样计入。 |
@@ -4177,7 +4179,7 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
 | tiles[].garrison | number | 地块驻军总数；未占领野地为 0（原住守军不计入驻军总数；其编成见 GET_TILE 的 nativePower 与侦察）；NPC 城池需侦察（v17）：未侦察为 0，已侦察为最近一次侦察快照的总数。 |
 | tiles[].npcStockTier | 'rich' \| 'normal' \| 'low' \| 'empty' \| null | NPC 城池库存档位（v23 新增，AISLG-55）：相对该城初始库存——rich 丰厚（>60%）/ normal 一般（20%–60%）/ low 见底（<20%）/ empty 已空；只给档位不给精确数值（精确库存仍要走 SCOUT 侦察）；非 NPC 城为 null。掠夺后档位随库存变化，全服看到的档位一致。 |
 | tiles[].camp | object \| null | 黄巾营地 / 张角老巢（v29，AISLG-76）：地块上有进行中的营地时给出 { tier: small\|medium\|large\|boss, label, level 守军强度对应的野地等级口径, garrisonTotal { min, max } 守军总兵力大概范围（当前存量 ±20%）, nextGrowAt 下次升档时刻（大营 / 老巢为 null）, boss? { stage: outer\|keeper, recoversAt } }；其余为 null。营地格不显示野地原住守军，出征用 MARCH 掠夺任务（占领被拒）。详见 GET_YELLOW_TURBAN。 |
-| tiles[].wildFamous | boolean | 在野名将标记（v54，AISLG-144）：该野地落有尚未被获得的在野名将（公开，名字与属性需侦察）。被获得后标记撤下，名将归属见 GET_HEROES 的 famousClaims。 |
+| tiles[].wildFamous | boolean | 在野名将标记（v54，AISLG-144）：该野地落有**本账号还没拥有**的在野名将（公开，名字与属性需侦察）。v104（AISLG-245）起按账号判：本账号已拥有该名将后标记撤下，别的账号看到的不受影响；名将归属见 GET_HEROES 的 famousClaims。这类野地不能被占领（task=occupy 返回 WILD_HERO_UNOCCUPIABLE）。 |
 | tiles[].reserve | object \| null | 野地储量（v61，AISLG-165）：{ tier 档位 ample 充足 >60% / normal 一般 20%–60% / depleted 枯竭 <20%（所有人可见）, current 当前储量, cap 上限, eta { kind empty 预计采空 / full 预计回满, at } }；current / cap / eta 仅归属方与侦察过该地块的账号可见，其余为 null。储量与上限为基准单位（bonusRate、gatherRate 同口径）；采集与恢复速率随 time_scale 放大，eta 为真实时刻（采空 / 回满随之缩短）。非野地为 null。 |
 | tiles[].famous | object \| null | 名城信息（v24 新增，AISLG-56）：{ name 名城名, stage 当前阶段（outer 外围阶段须先清外围 / keeper 外围已清、可攻城守并占领）, bonusPercent 占领后的独占加成（该城产量 +N%）, recoversAt 城守阶段外围恢复满编的时刻（超时无人攻下城守则恢复；外围阶段为 null）, effect 占领后的名城独有效果 { kind wall / tower / territory / march / warehouse, percent, resources 仅 territory 有：野地产出的资源列表，其余为 null }（v62，AISLG-166） }；全图 8 座名城，对全服可见；非名城为 null。 |
 
@@ -4295,7 +4297,7 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
 | tile.durability | number \| null | 他人分城的当前城防值（v40，AISLG-124）：0..100，按「免战截止前不回涨、之后每小时 +10」惰性结算展示；非 null 即可被 task=occupy 攻打的分城，归零一击换主。主城 / 野地 / NPC 城 / 自己的城为 null。 |
 | tile.protection | object \| null | 玩家城与他人占领野地的保护状态（v38 / v39）：{ newbieUntil 新手保护截止（含其野地）, truceUntil 被动免战截止（仅城池；野地恒 null——城级免战不保护野地）, shieldUntil 主动免战截止（含其野地）, ownerChangedUntil 换主保护截止（仅野地：刚被抢占后 1 小时基准随缩放，期间玩家与 NPC 都不能再抢） }，任一截止时刻未到即受保护（MARCH 被拒，错误码与时限见 MARCH）；非玩家目标、自己的地为 null。到期自动失效，无事件。 |
 | tile.reserve | object \| null | 野地储量（v61，AISLG-165）：{ tier 档位 ample 充足 >60% / normal 一般 20%–60% / depleted 枯竭 <20%（所有人可见）, current 当前储量, cap 上限, eta { kind empty 预计采空 / full 预计回满, at } }；current / cap / eta 仅归属方与侦察过该地块的账号可见，其余为 null。储量与上限为基准单位（bonusRate、gatherRate 同口径）；采集与恢复速率随 time_scale 放大，eta 为真实时刻（采空 / 回满随之缩短）。非野地为 null。 |
-| tile.wildFamousIntel | object \| null | 在野名将情报（v54，AISLG-144）：未被获得的在野名将所在野地才有 { scouted, name, attrs { lead, force, wit } }；未侦察过时 scouted=false、name / attrs 为 null，侦察后（SCOUT 完成）给出名字与三项属性。其余为 null。 |
+| tile.wildFamousIntel | object \| null | 在野名将情报（v54，AISLG-144）：本账号还没拥有的在野名将所在野地才有 { scouted, name, attrs { lead, force, wit } }（v104 起按账号判）；未侦察过时 scouted=false、name / attrs 为 null，侦察后（SCOUT 完成）给出名字与三项属性。其余为 null。 |
 | tile.plunderedAt | string \| null | 最近一次成功掠夺（攻方胜利）的时间（v16，ISO 8601）：距其 24 小时内该地块处于掠夺冷却（基准值，实际受全局时间缩放等比缩短；MARCH task='plunder' 被拒，PLUNDER_COOLDOWN）；从未被掠为 null。 |
 
 **可能错误**：`INVALID_PARAMS`、`TILE_UNEXPLORED`（处置建议见第 4 节）
@@ -4383,7 +4385,7 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
 
 `C→S` 请求-响应 · 需登录后发送
 
-从账号主城派出部队前往目标地块，到达后由服务端自动结算。编队 troops 按兵种给出数量（至少一种 > 0），发起时立即从城内驻军扣减；行军时长 = Chebyshev 距离 × 每格秒数（基准 15 秒/格，占位）÷ **编队最慢兵种的行军速度系数**（斥候 ×2、轻骑兵 ×1.5，其余 ×1）÷（1 + 行军科技加成，v27 每级 +5%；v30 AISLG-83：自己城池之间的调兵 / 运输再加出发城**驿站**加成，每级 +10%、10 级翻倍，出征野地 / NPC 城等其他目标不受影响，运输往返与失效返程同吃出发城驿站），**总时长**再 ÷ 全局时间缩放、向上取整、最少 1 秒（见文档头部；不是先把每格缩放取整再乘格数）。以响应里的 arriveAt 为准。v16 新增可选 **task**：`plunder`（掠夺，**缺省值**）或 `occupy`（占领）——只作用于野地与 NPC 城目标，侦察 / 调兵 / 增援忽略 task。目标与结算：**无主野地**按 task 掠夺或占领（战斗 vs 原住守军）；**本账号占领的野地** = 增援驻军（不战斗）；**未被占领的 NPC 城池**可掠夺，也可占领变分城（v24，AISLG-58；战斗 vs 驻防、守方据墙待敌）；**本账号分城** = 调兵（不战斗，到达并入该城驻军）；**发起前校验校场（v30，AISLG-80）**：本城同时在外的部队数（行军中含返程 + 驻守野地，不计城内驻军）已达校场等级上限（未建校场按 1）时返回 DEPLOY_LIMIT，SCOUT 同；玩家城池（他人的）、他人占领地块与出发主城本身不可作为目标（玩家对抗随后续阶段开放）。**v38（AISLG-122，玩家对抗一）开放掠夺他人城池**：主城与分城都能打、不用宣战，战斗与 NPC 打主城同口径的守城战（城墙、城防科技、箭塔、守方城守全部生效），发起即给守方推送来袭预警（PUSH_ATTACK_WARNING，预警窗口 = 行军时长，敌情按守方烽火台分档）；守方处于新手保护返回 NEWBIE_PROTECTED、免战中返回 TARGET_IN_TRUCE（均附 until / retryAfterSeconds），攻方自己的主动免战生效中返回 SELF_TRUCE_ACTIVE（打野地 / NPC 不受限）；**task=occupy 对他人分城开放（v40，AISLG-124，玩家对抗三）**：主城仍返回 TASK_INVALID_FOR_TARGET（永不可占领，只能被掠夺）。分城占领资格与占 NPC 城同口径（GOVERNMENT_TOO_LOW / BRANCH_LIMIT / TARGET_LEVEL_TOO_HIGH，目标等级 = 该城官府等级），发起时初核、到达复核（名额没了照打、只降城防值不换主，事件 battle_won 记 occupied=false 与 denial）。守城战打赢一次（守军全灭）城防值 −35，攻方幸存冲车占比每 1% 再 +1.5（最多 +15）；**占领打赢不掠夺资源，掠夺打赢不降城防**；城防降到 0 且名额有空当场换主（详见「玩家对抗与城防值」一节与 GET_TILE 的 tile.durability）；每次打赢该城进入 4 小时（基准随缩放）被动免战，免战内城防不回涨、结束后每小时回涨 10 至满——占一座分城至少打 3 次、隔 8 小时以上，守方每次都有时间补兵 / 增援；在途到达时守方进入保护 / 免战则扑空返程（事件 outcome=aborted 附 cause）。**v39（AISLG-123，玩家对抗二）开放抢占他人占领的野地**：task='occupy'（缺省 plunder 返回 TASK_INVALID_FOR_TARGET——地里没有存货可抢）；野地战无城墙 / 箭塔 / 城守，守方 = 地块驻军，守方没留驻军不打、直接拿下（无战报）；发起即给守方推 PUSH_ATTACK_WARNING（target='wilderness'，敌情按其所属城烽火台分档），预警期间可向该地块增援（MARCH 打自己的地块 = 增援）；守方处于新手保护（NEWBIE_PROTECTED）或主动免战（TARGET_IN_TRUCE）时其全部野地不可被抢，但守方某座城的被动免战只保护城本身、不保护野地；地块处于换主保护期（被抢占后 1 小时基准随缩放）返回 TILE_PROTECTED；攻方自己的主动免战生效中同样不能抢（SELF_TRUCE_ACTIVE）。**抢占结算**：打赢且出发城占领名额（官府等级）有空 → 地块易主、幸存部队驻守并获得加成、地块进入换主保护（1 小时基准随缩放，玩家与 NPC 都不能再抢）；名额已满 → 守方照样失地（wilderness_lost cause=conquest）、地块变无主（不设保护）、攻方幸存返程（事件 battle_won 记 occupied=false / denial=TERRITORY_LIMIT）；打输 → 守方继续占领，攻方残部返程；战报 kind='pvp_wilderness' 攻守双方各一份。**到达复核口径（v39）**：到达时地块已无主（对方召回等）→ 扑空返程（aborted，cause=target_gone）；已易主第三人 → 扑空返程（aborted，cause=owner_changed）；已归本账号 → 转增援并入驻军。战斗为多回合推进结构（速度与射程影响接敌、城墙为守方提供受击减免；具体算法不对外公开，机制概览见术语表「战斗」、兵种数值见「兵种与战斗属性」）；攻方歼灭守方获胜、胜方幸存 ≥ 1，攻方战败（全灭或回合耗尽）时幸存部队撤回出发城。**掠夺结算（task=plunder）**：野地奖励池 = 地形对应资源 × 750 × 等级 + 金币 × 250 × 等级（v21 掠夺含金，AISLG-31；金矿 gold_mine 保持空池——金矿定位占领生息）；NPC 城 = 持久化库存（v21 起含金币；库存不再生、掠空后无收益）。实际带走量按**幸存部队负重**装填（Σ 数量 × 单兵 carry，v27 起再 × 负重科技加成（每级 +5%，向下取整）；运输任务的负重上限同口径：民夫 500、斥候/刀盾兵 80、轻骑兵 100，其余 60，占位），按**金→粮→木→石→铁**顺序装满即止，立即入账出发城（不钳储量上限）；不改归属、幸存部队返程；成功掠夺的地块进入 24 小时冷却（基准，受全局时间缩放；发起时校验 PLUNDER_COOLDOWN——v22 起该失败附 retryAfterSeconds（冷却截止 − 当前时刻，等满后重发必然受理；在途到达仍战斗但资源为零）。**掠夺玩家城（v38，AISLG-122）**：可抢池 = 城内资源先扣仓库保护（粮/木/石/铁 各保护 1000×仓库等级，金币不受保护），再乘单次比例上限（四资源 45%、金币 15%，v42 AISLG-126 校准拍板）与等级差衰减（出发城官府比目标城官府高 5 级起每多 1 级收益 −15%、最低 25%——大号打小号不禁止但收益递减），最后仍按幸存部队负重装填；攻破（守军全灭）后该城进入 4 小时（基准，随缩放）被动免战，玩家与 NPC 都不能再打它（GET_TILE 的 tile.protection 可查）；战报 kind='pvp_raid'，攻守双方各得一份；玩家城不受地块掠夺冷却限制（免战即冷却）。**名城（v24，AISLG-56，GET_TILE / 地图的 famous 字段标识，全图 8 座）分两阶段**：外围阶段对其出征（掠夺 / 占领都一样）打的是外围驻军（野战无城墙），打赢 = 外围清空、名城进入城守阶段（事件 battle_won 含 stage='outer'、outerCleared=true、recoversAt），无战利品；城守阶段（限时，超时外围恢复满编）再出征攻城守——task=plunder 掠夺其库存，task=occupy 占领并变分城（以名城命名、产量 +20%，名城计入分城上限）；外围未清时对其 task=occupy 返回 OUTER_NOT_CLEARED。名城守军 = 同等级普通 NPC 城 × 3（外围与城守各一半）。**占领 NPC 城（task=occupy，v24）**：需同时满足——主城官府 ≥ 3 级（GOVERNMENT_TOO_LOW）；分城数 < 分城上限 = floor(主城官府等级 ÷ 2)（BRANCH_LIMIT，名城同样计入）；目标 NPC 城等级 ≤ 出发城的官府等级（TARGET_LEVEL_TOO_HIGH）。发起时初核，Worker 到达时复核（不满足则胜利后不建分城、幸存部队返程，事件 battle_won 记录 occupied=false 与 denial）。打赢后该城成为分城：接收 NPC 城的建筑与**剩余库存**，幸存部队进城驻守，分城可独立建造 / 征兵 / 出征（城池类协议带 cityId）；占领不受掠夺冷却限制，不另行掠夺（库存随城移交）。**占领野地结算（task=occupy 目标为野地）**：无一次性战利品；该城占领野地数低于官府等级（上限 = 官府等级，随官府升级提高）时改归属、幸存部队驻守并获得持续加成；发起时初核 TERRITORY_LIMIT，到达复核（超限则胜利后不改归属、幸存部队返程，事件记录 occupied=false / denial=TERRITORY_LIMIT）。**盟友不可攻击（v67，AISLG-182）**：目标城池 / 野地的主人与你同属一个联盟时，掠夺、抢占野地、占领分城一律返回 ALLY_NOT_ATTACKABLE（运输、增援、调兵不受影响）；出发后目标才成为盟友的，部队到达时不开战、原路返回（事件 outcome=aborted，cause=ALLY_NOT_ATTACKABLE）。**协防（v74，AISLG-194）**：task=assist 把部队派进盟友的主城 / 分城驻扎——行军时长与普通行军相同（驿站不加速）；每座城最多接收 5 支、同一账号对同一座城最多 1 支（在途也算，超限 ASSIST_LIMIT），任务占派出城校场名额、耗粮按野外 2 倍由出发城承担；守城战里与城主驻军合并成守方参战（各方科技只作用于各自部队，城守武将只加成城主部队），战后同一兵种伤亡按开战数量比例分摊（取整余数归城主），派出方会收到一份带 assistLosses 的战报；派出方随时可召回、城主可遣返（DISMISS_ASSIST），退盟 / 被踢 / 解散与分城易主时自动遣返。出发后才退盟的，到达按 ASSIST_NOT_ALLY 原路返回。每场战斗生成一份战报（GET_BATTLE_REPORTS 可查、PUSH_BATTLE_REPORT 推送）。 迷雾（v92，AISLG-224）：目标未探索且不在视野内时（只限 task = plunder / occupy），目标相关的校验（保护、免战、占领资格等）被拒绝也不报错：照常建立行军，响应结构与校验通过时完全一致，且不会向守方发来袭预警、不破除新手保护；到达后由服务端复核——守方仍受保护或目标已不是可打的对象时原路返回（aborted），否则按现有规则结算。兵力不足、出征上限、迁城后的攻击限制（MOVE_CITY_ATTACK_LOCK）等与目标无关的校验照旧报错。
+从账号主城派出部队前往目标地块，到达后由服务端自动结算。编队 troops 按兵种给出数量（至少一种 > 0），发起时立即从城内驻军扣减；行军时长 = Chebyshev 距离 × 每格秒数（基准 15 秒/格，占位）÷ **编队最慢兵种的行军速度系数**（斥候 ×2、轻骑兵 ×1.5，其余 ×1）÷（1 + 行军科技加成，v27 每级 +5%；v30 AISLG-83：自己城池之间的调兵 / 运输再加出发城**驿站**加成，每级 +10%、10 级翻倍，出征野地 / NPC 城等其他目标不受影响，运输往返与失效返程同吃出发城驿站），**总时长**再 ÷ 全局时间缩放、向上取整、最少 1 秒（见文档头部；不是先把每格缩放取整再乘格数）。以响应里的 arriveAt 为准。v16 新增可选 **task**：`plunder`（掠夺，**缺省值**）或 `occupy`（占领）——只作用于野地与 NPC 城目标，侦察 / 调兵 / 增援忽略 task。目标与结算：**无主野地**按 task 掠夺或占领（战斗 vs 原住守军）；**本账号占领的野地** = 增援驻军（不战斗）；**未被占领的 NPC 城池**可掠夺，也可占领变分城（v24，AISLG-58；战斗 vs 驻防、守方据墙待敌）；**本账号分城** = 调兵（不战斗，到达并入该城驻军）；**发起前校验校场（v30，AISLG-80）**：本城同时在外的部队数（行军中含返程 + 驻守野地，不计城内驻军）已达校场等级上限（未建校场按 1）时返回 DEPLOY_LIMIT，SCOUT 同；玩家城池（他人的）、他人占领地块与出发主城本身不可作为目标（玩家对抗随后续阶段开放）。**v38（AISLG-122，玩家对抗一）开放掠夺他人城池**：主城与分城都能打、不用宣战，战斗与 NPC 打主城同口径的守城战（城墙、城防科技、箭塔、守方城守全部生效），发起即给守方推送来袭预警（PUSH_ATTACK_WARNING，预警窗口 = 行军时长，敌情按守方烽火台分档）；守方处于新手保护返回 NEWBIE_PROTECTED、免战中返回 TARGET_IN_TRUCE（均附 until / retryAfterSeconds），攻方自己的主动免战生效中返回 SELF_TRUCE_ACTIVE（打野地 / NPC 不受限）；**task=occupy 对他人分城开放（v40，AISLG-124，玩家对抗三）**：主城仍返回 TASK_INVALID_FOR_TARGET（永不可占领，只能被掠夺）。分城占领资格与占 NPC 城同口径（GOVERNMENT_TOO_LOW / BRANCH_LIMIT / TARGET_LEVEL_TOO_HIGH，目标等级 = 该城官府等级），发起时初核、到达复核（名额没了照打、只降城防值不换主，事件 battle_won 记 occupied=false 与 denial）。守城战打赢一次（守军全灭）城防值 −35，攻方幸存冲车占比每 1% 再 +1.5（最多 +15）；**占领打赢不掠夺资源，掠夺打赢不降城防**；城防降到 0 且名额有空当场换主（详见「玩家对抗与城防值」一节与 GET_TILE 的 tile.durability）；每次打赢该城进入 4 小时（基准随缩放）被动免战，免战内城防不回涨、结束后每小时回涨 10 至满——占一座分城至少打 3 次、隔 8 小时以上，守方每次都有时间补兵 / 增援；在途到达时守方进入保护 / 免战则扑空返程（事件 outcome=aborted 附 cause）。**v39（AISLG-123，玩家对抗二）开放抢占他人占领的野地**：task='occupy'（缺省 plunder 返回 TASK_INVALID_FOR_TARGET——地里没有存货可抢）；野地战无城墙 / 箭塔 / 城守，守方 = 地块驻军，守方没留驻军不打、直接拿下（无战报）；发起即给守方推 PUSH_ATTACK_WARNING（target='wilderness'，敌情按其所属城烽火台分档），预警期间可向该地块增援（MARCH 打自己的地块 = 增援）；守方处于新手保护（NEWBIE_PROTECTED）或主动免战（TARGET_IN_TRUCE）时其全部野地不可被抢，但守方某座城的被动免战只保护城本身、不保护野地；地块处于换主保护期（被抢占后 1 小时基准随缩放）返回 TILE_PROTECTED；攻方自己的主动免战生效中同样不能抢（SELF_TRUCE_ACTIVE）。**抢占结算**：打赢且出发城占领名额（官府等级）有空 → 地块易主、幸存部队驻守并获得加成、地块进入换主保护（1 小时基准随缩放，玩家与 NPC 都不能再抢）；名额已满 → 守方照样失地（wilderness_lost cause=conquest）、地块变无主（不设保护）、攻方幸存返程（事件 battle_won 记 occupied=false / denial=TERRITORY_LIMIT）；打输 → 守方继续占领，攻方残部返程；战报 kind='pvp_wilderness' 攻守双方各一份。**到达复核口径（v39）**：到达时地块已无主（对方召回等）→ 扑空返程（aborted，cause=target_gone）；已易主第三人 → 扑空返程（aborted，cause=owner_changed）；已归本账号 → 转增援并入驻军。战斗为多回合推进结构（速度与射程影响接敌、城墙为守方提供受击减免；具体算法不对外公开，机制概览见术语表「战斗」、兵种数值见「兵种与战斗属性」）；攻方歼灭守方获胜、胜方幸存 ≥ 1，攻方战败（全灭或回合耗尽）时幸存部队撤回出发城。**兵力占比对称折算战损（v103 起，AISLG-244；v105 扩到所有战斗、攻守对称，AISLG-246）**：所有用战斗引擎结算的战斗都按同一条规则折算战损，攻守双方各算各的——对每一方，r = 本方参考战力 ÷ 对方参考战力，r ≤ 3 时不变，r > 3 时本方各兵种损失按 round(原损失 × 3 / r)（四舍五入、不多于原值），带越多兵战损越低（此前堆过 2 倍后战损几乎不再下降）；对方参考战力为 0（空守军）不折算。胜负 / 回合数 / 逐回合战报 / 战利品 / 掠夺与占领结算都不变，被碾压的一方 r < 1/3 战损不变，所以只会减少强者一方的损失。**掠夺结算（task=plunder）**：野地奖励池 = 地形对应资源 × 750 × 等级 + 金币 × 250 × 等级（v21 掠夺含金，AISLG-31；金矿 gold_mine 保持空池——金矿定位占领生息）；NPC 城 = 持久化库存（v21 起含金币；库存不再生、掠空后无收益）。实际带走量按**幸存部队负重**装填（Σ 数量 × 单兵 carry，v27 起再 × 负重科技加成（每级 +5%，向下取整）；运输任务的负重上限同口径：民夫 500、斥候/刀盾兵 80、轻骑兵 100，其余 60，占位），按**金→粮→木→石→铁**顺序装满即止，立即入账出发城（不钳储量上限）；不改归属、幸存部队返程；成功掠夺的地块进入 24 小时冷却（基准，受全局时间缩放；发起时校验 PLUNDER_COOLDOWN——v22 起该失败附 retryAfterSeconds（冷却截止 − 当前时刻，等满后重发必然受理；在途到达仍战斗但资源为零）。**掠夺玩家城（v38，AISLG-122）**：可抢池 = 城内资源先扣仓库保护（粮/木/石/铁 各保护 1000×仓库等级，金币不受保护），再乘单次比例上限（四资源 45%、金币 15%，v42 AISLG-126 校准拍板）与等级差衰减（出发城官府比目标城官府高 5 级起每多 1 级收益 −15%、最低 25%——大号打小号不禁止但收益递减），最后仍按幸存部队负重装填；攻破（守军全灭）后该城进入 4 小时（基准，随缩放）被动免战，玩家与 NPC 都不能再打它（GET_TILE 的 tile.protection 可查）；战报 kind='pvp_raid'，攻守双方各得一份；玩家城不受地块掠夺冷却限制（免战即冷却）。**名城（v24，AISLG-56，GET_TILE / 地图的 famous 字段标识，全图 8 座）分两阶段**：外围阶段对其出征（掠夺 / 占领都一样）打的是外围驻军（野战无城墙），打赢 = 外围清空、名城进入城守阶段（事件 battle_won 含 stage='outer'、outerCleared=true、recoversAt），无战利品；城守阶段（限时，超时外围恢复满编）再出征攻城守——task=plunder 掠夺其库存，task=occupy 占领并变分城（以名城命名、产量 +20%，名城计入分城上限）；外围未清时对其 task=occupy 返回 OUTER_NOT_CLEARED。名城守军 = 同等级普通 NPC 城 × 3（外围与城守各一半）。**占领 NPC 城（task=occupy，v24）**：需同时满足——主城官府 ≥ 3 级（GOVERNMENT_TOO_LOW）；分城数 < 分城上限 = floor(主城官府等级 ÷ 2)（BRANCH_LIMIT，名城同样计入）；目标 NPC 城等级 ≤ 出发城的官府等级（TARGET_LEVEL_TOO_HIGH）。发起时初核，Worker 到达时复核（不满足则胜利后不建分城、幸存部队返程，事件 battle_won 记录 occupied=false 与 denial）。打赢后该城成为分城：接收 NPC 城的建筑与**剩余库存**，幸存部队进城驻守，分城可独立建造 / 征兵 / 出征（城池类协议带 cityId）；占领不受掠夺冷却限制，不另行掠夺（库存随城移交）。**占领野地结算（task=occupy 目标为野地）**：无一次性战利品；该城占领野地数低于官府等级（上限 = 官府等级，随官府升级提高）时改归属、幸存部队驻守并获得持续加成；发起时初核 TERRITORY_LIMIT，到达复核（超限则胜利后不改归属、幸存部队返程，事件记录 occupied=false / denial=TERRITORY_LIMIT）。**盟友不可攻击（v67，AISLG-182）**：目标城池 / 野地的主人与你同属一个联盟时，掠夺、抢占野地、占领分城一律返回 ALLY_NOT_ATTACKABLE（运输、增援、调兵不受影响）；出发后目标才成为盟友的，部队到达时不开战、原路返回（事件 outcome=aborted，cause=ALLY_NOT_ATTACKABLE）。**协防（v74，AISLG-194）**：task=assist 把部队派进盟友的主城 / 分城驻扎——行军时长与普通行军相同（驿站不加速）；每座城最多接收 5 支、同一账号对同一座城最多 1 支（在途也算，超限 ASSIST_LIMIT），任务占派出城校场名额、耗粮按野外 2 倍由出发城承担；守城战里与城主驻军合并成守方参战（各方科技只作用于各自部队，城守武将只加成城主部队），战后同一兵种伤亡按开战数量比例分摊（取整余数归城主），派出方会收到一份带 assistLosses 的战报；派出方随时可召回、城主可遣返（DISMISS_ASSIST），退盟 / 被踢 / 解散与分城易主时自动遣返。出发后才退盟的，到达按 ASSIST_NOT_ALLY 原路返回。每场战斗生成一份战报（GET_BATTLE_REPORTS 可查、PUSH_BATTLE_REPORT 推送）。 迷雾（v92，AISLG-224）：目标未探索且不在视野内时（只限 task = plunder / occupy），目标相关的校验（保护、免战、占领资格等）被拒绝也不报错：照常建立行军，响应结构与校验通过时完全一致，且不会向守方发来袭预警、不破除新手保护；到达后由服务端复核——守方仍受保护或目标已不是可打的对象时原路返回（aborted），否则按现有规则结算。兵力不足、出征上限、迁城后的攻击限制（MOVE_CITY_ATTACK_LOCK）等与目标无关的校验照旧报错。
 
 **请求字段**
 
@@ -4416,9 +4418,9 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
 | march.targetId | string \| null | 截击的移动目标 id（v28，AISLG-78）：purpose=intercept 及其撤回后的返程行军有值，其余为 null。 |
 | march.cargo | object \| null | 随行运送的资源（v26，Resources 形）：运输行军及其被撤回 / 目标失效后的返程行军携带，其余为 null。 |
 
-**可能错误**：`INVALID_PARAMS`、`INSUFFICIENT_RESOURCES`、`CARGO_OVER_CAPACITY`、`DEPLOY_LIMIT`、`MOVING_TARGET_GONE`、`TARGET_NOT_ATTACKABLE`、`INSUFFICIENT_TROOPS`、`PLUNDER_COOLDOWN`、`TASK_INVALID_FOR_TARGET`、`TERRITORY_LIMIT`、`GOVERNMENT_TOO_LOW`、`BRANCH_LIMIT`、`DISCARD_COOLDOWN`、`TARGET_LEVEL_TOO_HIGH`、`OUTER_NOT_CLEARED`、`NEWBIE_PROTECTED`、`TARGET_IN_TRUCE`、`SELF_TRUCE_ACTIVE`、`TILE_PROTECTED`、`ALLY_NOT_ATTACKABLE`（处置建议见第 4 节）
+**可能错误**：`INVALID_PARAMS`、`INSUFFICIENT_RESOURCES`、`CARGO_OVER_CAPACITY`、`DEPLOY_LIMIT`、`MOVING_TARGET_GONE`、`TARGET_NOT_ATTACKABLE`、`INSUFFICIENT_TROOPS`、`PLUNDER_COOLDOWN`、`TASK_INVALID_FOR_TARGET`、`TERRITORY_LIMIT`、`GOVERNMENT_TOO_LOW`、`BRANCH_LIMIT`、`DISCARD_COOLDOWN`、`TARGET_LEVEL_TOO_HIGH`、`OUTER_NOT_CLEARED`、`NEWBIE_PROTECTED`、`TARGET_IN_TRUCE`、`SELF_TRUCE_ACTIVE`、`TILE_PROTECTED`、`ALLY_NOT_ATTACKABLE`、`WILD_HERO_UNOCCUPIABLE`（处置建议见第 4 节）
 
-**Agent 提示**：到达结算产生 march_completed 事件（purpose=plunder 时 outcome=plunder_won：含 loot 战利品、carry 负重、returning 返程行军 id；purpose=occupy 时 outcome=battle_won：含 occupied（false 时附 denial：野地为 TERRITORY_LIMIT，NPC 城为 GOVERNMENT_TOO_LOW / BRANCH_LIMIT / TARGET_LEVEL_TOO_HIGH；NPC 城占领成功另含 cityId）），战斗另生成战报。掠夺量由幸存部队的负重封顶——想多带资源就多派民夫（单兵 carry 500，其余兵种 50–100）；同一地块 24 小时（基准）只能成功掠夺一次（GET_TILE 的 plunderedAt 可判冷却截止），占领不受冷却限制但受官府等级上限。**黄巾营地 / 老巢（v29，AISLG-76）**：目标格有进行中的营地（TileView.camp 非 null）时，MARCH 的掠夺任务即清剿营地——野战（无城墙）打营地当前守军（战后存量每小时恢复 25%），歼灭的黄巾单位数累计为贡献（输赢都算）；普通营地打赢消失并按幸存部队负重（含负重科技）装填掉落池（金 + 四资源）即时入账，清剿数 +1，达到 80% 出现老巢；老巢外围阶段打赢 = 外围清空（无战利品，限时内进入城守阶段），城守阶段打赢 = 老巢被击破（掉落 + 首杀播报 + 事件收场）；输方幸存部队撤回。task=occupy 返回 TASK_INVALID_FOR_TARGET，不受掠夺冷却限制。战报 kind='yellow_turban'，事件 march_completed 的 outcome=camp_won / camp_lost / boss_outer_cleared / boss_won（含 killed 歼敌数、campTier、stage）。**截击移动目标（带 targetId，v28，AISLG-78；v35 AISLG-112 改为「到了先埋伏」）**：目标路线与时刻表固定，发起时就把 arriveAt 定为预计接战时刻 = max(部队到达时刻, 目标进入选定格相邻范围（Chebyshev 距离 ≤ 1）的时刻)——部队提前到达则原地埋伏（MarchView.ambushAt 为埋伏开始时刻）等目标经过再开打，不必掐点；到达时目标已走出范围（太晚）→ 按到达时刻结算、「扑空」返程。接战为野战（无城墙，守军即目标守军，打赢目标消失，按幸存部队负重（含负重科技）装填其携带的资源即时入账，不钳储量上限；打输幸存部队撤回、目标原样留存）；目标已被他人击败或过时 → 「目标消失」，不接战、部队返程。埋伏期间部队照常占校场名额、按在外口径耗粮，可 RECALL_MARCH 撤回。三种结果都有战报（kind='intercept'，扑空 / 消失时 contact='missed' / 'gone'、endReason='no_contact'、rounds=0）与 march_completed 事件（outcome=intercepted / intercept_lost / intercept_missed / intercept_gone）。**运输（task=transport，v26，AISLG-79）**：目标必须是本账号的另一座城（出发城自身 / 野地 / NPC 城 / 他人城池返回 TASK_INVALID_FOR_TARGET）。发起即从出发城扣除 cargo 与派出部队；到达后货物**即时入账**目标城（与掠夺所得同规则：不钳储量上限），部队自动返程回出发城；运输队不会被 NPC 拦截（与「NPC 不攻击行军中的部队」同口径）；途中 RECALL_MARCH 撤回时货物随部队回到出发城，到达目标前目标城失效（如账号重置）同理带回。到达产生两条 march_completed 事件：出发城一条 outcome='transported'（含 cargo / cityId / cityName / returning），目标城一条 outcome='transport_received'（cityId 指向目标城，含 cargo / fromCityName）。同账号在线连接还会收到 PUSH_MARCH_STATE / PUSH_TILE_STATE / PUSH_BATTLE_REPORT。离线期间服务端照常结算，上线后用 GET_EVENTS（sinceId）补读。行军途中可 RECALL_MARCH 折返；城内驻军在 city.army，出征中的部队不在其中。
+**Agent 提示**：到达结算产生 march_completed 事件（purpose=plunder 时 outcome=plunder_won：含 loot 战利品、carry 负重、returning 返程行军 id；purpose=occupy 时 outcome=battle_won：含 occupied（false 时附 denial：野地为 TERRITORY_LIMIT 或 WILD_HERO_UNOCCUPIABLE（在野名将所在野地不可占领，v104），NPC 城为 GOVERNMENT_TOO_LOW / BRANCH_LIMIT / TARGET_LEVEL_TOO_HIGH；NPC 城占领成功另含 cityId）），战斗另生成战报。掠夺量由幸存部队的负重封顶——想多带资源就多派民夫（单兵 carry 500，其余兵种 50–100）；同一地块 24 小时（基准）只能成功掠夺一次（GET_TILE 的 plunderedAt 可判冷却截止），占领不受冷却限制但受官府等级上限。**黄巾营地 / 老巢（v29，AISLG-76）**：目标格有进行中的营地（TileView.camp 非 null）时，MARCH 的掠夺任务即清剿营地——野战（无城墙）打营地当前守军（战后存量每小时恢复 25%），歼灭的黄巾单位数累计为贡献（输赢都算）；普通营地打赢消失并按幸存部队负重（含负重科技）装填掉落池（金 + 四资源）即时入账，清剿数 +1，达到 80% 出现老巢；老巢外围阶段打赢 = 外围清空（无战利品，限时内进入城守阶段），城守阶段打赢 = 老巢被击破（掉落 + 首杀播报 + 事件收场）；输方幸存部队撤回。task=occupy 返回 TASK_INVALID_FOR_TARGET，不受掠夺冷却限制。战报 kind='yellow_turban'，事件 march_completed 的 outcome=camp_won / camp_lost / boss_outer_cleared / boss_won（含 killed 歼敌数、campTier、stage）。**截击移动目标（带 targetId，v28，AISLG-78；v35 AISLG-112 改为「到了先埋伏」）**：目标路线与时刻表固定，发起时就把 arriveAt 定为预计接战时刻 = max(部队到达时刻, 目标进入选定格相邻范围（Chebyshev 距离 ≤ 1）的时刻)——部队提前到达则原地埋伏（MarchView.ambushAt 为埋伏开始时刻）等目标经过再开打，不必掐点；到达时目标已走出范围（太晚）→ 按到达时刻结算、「扑空」返程。接战为野战（无城墙，守军即目标守军，打赢目标消失，按幸存部队负重（含负重科技）装填其携带的资源即时入账，不钳储量上限；打输幸存部队撤回、目标原样留存）；目标已被他人击败或过时 → 「目标消失」，不接战、部队返程。埋伏期间部队照常占校场名额、按在外口径耗粮，可 RECALL_MARCH 撤回。三种结果都有战报（kind='intercept'，扑空 / 消失时 contact='missed' / 'gone'、endReason='no_contact'、rounds=0）与 march_completed 事件（outcome=intercepted / intercept_lost / intercept_missed / intercept_gone）。**运输（task=transport，v26，AISLG-79）**：目标必须是本账号的另一座城（出发城自身 / 野地 / NPC 城 / 他人城池返回 TASK_INVALID_FOR_TARGET）。发起即从出发城扣除 cargo 与派出部队；到达后货物**即时入账**目标城（与掠夺所得同规则：不钳储量上限），部队自动返程回出发城；运输队不会被 NPC 拦截（与「NPC 不攻击行军中的部队」同口径）；途中 RECALL_MARCH 撤回时货物随部队回到出发城，到达目标前目标城失效（如账号重置）同理带回。到达产生两条 march_completed 事件：出发城一条 outcome='transported'（含 cargo / cityId / cityName / returning），目标城一条 outcome='transport_received'（cityId 指向目标城，含 cargo / fromCityName）。同账号在线连接还会收到 PUSH_MARCH_STATE / PUSH_TILE_STATE / PUSH_BATTLE_REPORT。离线期间服务端照常结算，上线后用 GET_EVENTS（sinceId）补读。行军途中可 RECALL_MARCH 折返；城内驻军在 city.army，出征中的部队不在其中。
 
 **示例**
 
@@ -5343,7 +5345,7 @@ Agent 连接上报自己的当前计划，供玩家的托管监控界面展示�
 | reports[].endReason | 'defender_wiped' \| 'attacker_wiped' \| 'round_limit' \| 'no_contact' | 守方全灭 / 攻方全灭（含同回合同归于尽）/ 回合耗尽（攻方未能突破，v15 起幸存部队撤回出发城）/ 未接战（v28 截击扑空或目标消失，见 contact）。 |
 | reports[].attacker / reports[].defender | object | 双方汇总：{ name 展示名, troops 编成, losses 损失, survivors 幸存, damage 总输出, units 总单位数, totalHp 总血量, avgRange 平均射程（1 位小数，数量加权——会被大量近战稀释，不代表克制关系）, maxRange 编成单兵射程最大值, rangedUnits 远程单位数（射程 > 近战基准 10，当前即弓箭兵）, hero 武将（v36 新增，AISLG-114/115：{ name, lead, force, wit, atkPercent, defPercent }——攻方 = 随队武将、守方 = 城守（仅守城战 kind=city_raid），atkPercent/defPercent 为按部队规模折算后的实际生效加成；未配将 / 历史战报为 null）, wounded 伤兵 / captured 被俘（v85 新增，AISLG-212：玩家一方损失 × 20% 进伤兵营；被胜方抓走的部分只含基础七兵种；NPC 一方 wounded 为全 0；历史战报缺省视为 0）, captives 抓到的俘虏（v85 新增：胜方为玩家时才有，从败方损失抓 10% 进胜方城的俘虏营；平局 / NPC 胜为缺省 0）}。阵亡 = losses − wounded − captured；伤兵 / 俘虏的后续处置用 GET_STATE 的 city.wounded / captives + RESTORE_TROOPS。units/totalHp/avgRange 为 v21 新增、maxRange/rangedUnits 为 v23 新增（AISLG-49），hero 为 v36 新增，服务端按 troops 汇总下发，历史战报同样补齐；判断「对方有多少单位在远端输出、够多远」用 maxRange + rangedUnits，不要用 avgRange。 |
 | reports[].wallDefensePercent | number | 守方城墙守城减伤（百分数；非守城战斗为 0）。 |
-| reports[].roundLog | array | 逐回合统计：{ round, attackerDamage, defenderDamage, attackerKilled, defenderKilled, towerDamage? }（推进回合伤害为 0；towerDamage 为该回合箭塔伤害，已含在 defenderDamage 内，v30）。 |
+| reports[].roundLog | array | 逐回合统计：{ round, attackerDamage, defenderDamage, attackerKilled, defenderKilled, towerDamage? }（推进回合伤害为 0；towerDamage 为该回合箭塔伤害，已含在 defenderDamage 内，v30）。v105（AISLG-246）起战损按兵力占比对称折算，逐回合统计保留引擎原值、合计可能大于最终 losses——总损失以 attacker / defender 的 losses 为准。 |
 | reports[].comment | object \| null | Agent 写回的战报点评（v23 新增，AISLG-53）：{ text 点评正文, updatedAt 最近写入时间 }；尚未有点评为 null。一份战报只保留最新一条（Agent 重写覆盖）。 |
 | reports[].createdAt | string | 战斗结算时间（ISO 8601）。 |
 
@@ -5983,8 +5985,8 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | broadcasts | array | 播报列表（新→旧）：{ id, type, detail, createdAt }。 |
-| broadcasts[].type | 'npc_city_emptied' \| 'gold_mine_first' \| 'city_broken' \| 'win_streak' \| 'yt_started' \| 'yt_grown' \| 'yt_boss' \| 'yt_boss_first_kill' \| 'yt_finished' \| 'hero_granted' \| 'city_conquered' \| 'arena_champion' \| 'star_tower_cleared' \| 'announcement' \| 'battlefield_signup' \| 'battlefield_started' \| 'battlefield_stronghold' \| 'battlefield_finished' \| 'nobility_promoted' \| 'alliance_diplomacy' \| 'luoyang_window' \| 'famous_first_explored' \| 'hero_site_first_explored' \| 'legendary_relic_claimed' \| 'hero_left' \| 'hero_captured' \| 'faction_expanded' \| 'faction_city_swallowed' \| 'faction_lair_destroyed' | 播报类型（yt_* 为 v29 黄巾之乱：起事 / 坐大 / 老巢出现 / 老巢首杀 / 收场；hero_granted 为 v36 获得名将；city_conquered 为 v40 分城易主；arena_champion 为 v53 竞技场登上第 1 名；star_tower_cleared 为 v55 将星塔 Boss 层首通；battlefield_* 为 v75 剧本战场报名 / 开战 / 据点易手 / 收场；nobility_promoted 为 v76 升到大夫及以上；alliance_diplomacy 为 v77 结成友盟 / 宣布敌对；announcement 为 v60 公告播报；luoyang_window 为 v79 洛阳窗口预告 / 开始 / 结束 / 易主 / 政令；famous_first_explored / hero_site_first_explored / legendary_relic_claimed 为 v93 战争迷雾的名城首探、名将处所首探、传说遗迹领取；以上均必达、不受每分钟 3 条限频；hero_left 为 v94 名将下野（忠诚度归零，或被俘后囚禁到期未赎回）；hero_captured 为 v94 名将被俘；这两类走普通限频；faction_expanded 为 v99 五方势力的势力范围半径扩大（必达，每周最多一次）；faction_city_swallowed 为 v100 势力围攻吞下玩家分城（必达，detail = { username（原主人）, cityName, faction, factionName, x, y }）；faction_lair_destroyed 为 v101 某家势力的老巢被攻破、本季灭亡（必达，detail = { username（最后一击的玩家）, faction, factionName, leader, leaderEn }））。 |
-| broadcasts[].detail | object | 按类型解释：npc_city_emptied = { username, cityName, x, y, level }；gold_mine_first = { username, cityName, x, y }；city_broken = { username, cityName, x, y }；win_streak = { username, cityName, streak }；yt_started = { totalCamps, endsAt }；yt_grown = { count, tier, label }（count 个营地升到 tier 档）；yt_boss = { x, y }（老巢坐标）；yt_boss_first_kill = { username, cityName }；yt_finished = { reason: boss_cleared\|timeout, clearedCamps, totalCamps, scatteredCamps }（人名可能是玩家本人，也可能是其 Agent 打出的成绩——成绩记在账号上）；arena_champion = { username, previous }（username 登上第 1 名，previous 为被取代的原第 1 名，可能是守擂者）；star_tower_cleared = { username, floor }（floor 为刚首通的 Boss 层）；battlefield_signup = { eventId, signupStartAt, startAt, endAt }；battlefield_started = { eventId, startAt, endAt }；battlefield_stronghold = { eventId, strongholdId, name, camp, username, firstCapture, reportId }（据点易手，camp 为新归属）；battlefield_finished = { eventId, winner, reason: score\|base_captured, scoreYuan, scoreCao }；nobility_promoted = { accountId, username, nobility, name, prestige }；alliance_diplomacy = { kind: friendly\|hostile\|neutral, actorAlliance, actorAllianceName, otherAlliance, otherAllianceName }；hero_granted = { username, heroName, source }（source 为获得途径文字，如「首占名城「X」」「黄巾老巢首杀」「黄巾之乱贡献榜第 N 名」「在野名将（打赢守军后结交招揽）」「结交招揽」）；city_conquered = { username（攻方）, cityName, from（守方用户名）, x, y }；announcement = { announcementId, title }（title 为公告中文标题）；luoyang_window = { phase, ... }：phase = holder 洛阳易主（allianceId, allianceName, username）｜ soon 窗口前预告（startAt, endAt）｜ started 窗口开始（startAt, endAt）｜ ended 窗口结束（startAt, endAt）｜ decree 盟主发政令（allianceId, decreeKind = recruit\|march\|research, until）；famous_first_explored = { username, name }（name 为名城名，不带坐标）；hero_site_first_explored = { username, name, hero }（name 为处所名，hero 为名将名，不带坐标）；legendary_relic_claimed = { username, kind }（kind 为遗迹种类，当前唯一的传说遗迹为 mausoleum，不带坐标）；hero_left = { username, heroName }（username 为主人用户名，查不到时为 null）；hero_captured = { ownerUsername, captorUsername, heroName }（主人与胜方用户名，查不到时为 null）；faction_expanded = { radius, day }（五家的势力范围半径同时扩大到 radius 格，day 为本季第几天；不带坐标）；faction_city_swallowed = { username, cityName, faction, factionName, x, y }（username 为失城玩家，cityName 为失城名，faction / factionName 为吞下它的势力）；faction_lair_destroyed = { username, faction, factionName, leader, leaderEn }（username 为最后一击的玩家，faction / factionName 为被攻破的势力，leader 为它的首领名将名）。 |
+| broadcasts[].type | 'npc_city_emptied' \| 'gold_mine_first' \| 'city_broken' \| 'win_streak' \| 'yt_started' \| 'yt_grown' \| 'yt_boss' \| 'yt_boss_first_kill' \| 'yt_finished' \| 'hero_granted' \| 'city_conquered' \| 'arena_champion' \| 'star_tower_cleared' \| 'announcement' \| 'battlefield_signup' \| 'battlefield_started' \| 'battlefield_stronghold' \| 'battlefield_finished' \| 'nobility_promoted' \| 'alliance_diplomacy' \| 'luoyang_window' \| 'famous_first_explored' \| 'hero_site_first_explored' \| 'legendary_relic_claimed' \| 'hero_left' \| 'hero_captured' \| 'faction_expanded' \| 'faction_city_swallowed' \| 'faction_lair_destroyed' \| 'faction_suppressed' | 播报类型（yt_* 为 v29 黄巾之乱：起事 / 坐大 / 老巢出现 / 老巢首杀 / 收场；hero_granted 为 v36 获得名将；city_conquered 为 v40 分城易主；arena_champion 为 v53 竞技场登上第 1 名；star_tower_cleared 为 v55 将星塔 Boss 层首通；battlefield_* 为 v75 剧本战场报名 / 开战 / 据点易手 / 收场；nobility_promoted 为 v76 升到大夫及以上；alliance_diplomacy 为 v77 结成友盟 / 宣布敌对；announcement 为 v60 公告播报；luoyang_window 为 v79 洛阳窗口预告 / 开始 / 结束 / 易主 / 政令；famous_first_explored / hero_site_first_explored / legendary_relic_claimed 为 v93 战争迷雾的名城首探、名将处所首探、传说遗迹领取；以上均必达、不受每分钟 3 条限频；hero_left 为 v94 名将下野（忠诚度归零，或被俘后囚禁到期未赎回）；hero_captured 为 v94 名将被俘；这两类走普通限频；faction_expanded 为 v99 五方势力的势力范围半径扩大（必达，每周最多一次）；faction_city_swallowed 为 v100 势力围攻吞下玩家分城（必达，detail = { username（原主人）, cityName, faction, factionName, x, y }）；faction_lair_destroyed 为 v101 某家势力的老巢被攻破、本季灭亡（必达，detail = { username（最后一击的玩家）, faction, factionName, leader, leaderEn }）；faction_suppressed 为 v107（AISLG-249）某家势力的压制档变化——老巢被打到跨档（升档）或营恢复导致降档（必达，不受每分钟限频））。 |
+| broadcasts[].detail | object | 按类型解释：npc_city_emptied = { username, cityName, x, y, level }；gold_mine_first = { username, cityName, x, y }；city_broken = { username, cityName, x, y }；win_streak = { username, cityName, streak }；yt_started = { totalCamps, endsAt }；yt_grown = { count, tier, label }（count 个营地升到 tier 档）；yt_boss = { x, y }（老巢坐标）；yt_boss_first_kill = { username, cityName }；yt_finished = { reason: boss_cleared\|timeout, clearedCamps, totalCamps, scatteredCamps }（人名可能是玩家本人，也可能是其 Agent 打出的成绩——成绩记在账号上）；arena_champion = { username, previous }（username 登上第 1 名，previous 为被取代的原第 1 名，可能是守擂者）；star_tower_cleared = { username, floor }（floor 为刚首通的 Boss 层）；battlefield_signup = { eventId, signupStartAt, startAt, endAt }；battlefield_started = { eventId, startAt, endAt }；battlefield_stronghold = { eventId, strongholdId, name, camp, username, firstCapture, reportId }（据点易手，camp 为新归属）；battlefield_finished = { eventId, winner, reason: score\|base_captured, scoreYuan, scoreCao }；nobility_promoted = { accountId, username, nobility, name, prestige }；alliance_diplomacy = { kind: friendly\|hostile\|neutral, actorAlliance, actorAllianceName, otherAlliance, otherAllianceName }；hero_granted = { username, heroName, source }（source 为获得途径文字，如「首占名城「X」」「黄巾老巢首杀」「黄巾之乱贡献榜第 N 名」「在野名将（打赢守军后结交招揽）」「结交招揽」）；city_conquered = { username（攻方）, cityName, from（守方用户名）, x, y }；announcement = { announcementId, title }（title 为公告中文标题）；luoyang_window = { phase, ... }：phase = holder 洛阳易主（allianceId, allianceName, username）｜ soon 窗口前预告（startAt, endAt）｜ started 窗口开始（startAt, endAt）｜ ended 窗口结束（startAt, endAt）｜ decree 盟主发政令（allianceId, decreeKind = recruit\|march\|research, until）；famous_first_explored = { username, name }（name 为名城名，不带坐标）；hero_site_first_explored = { username, name, hero }（name 为处所名，hero 为名将名，不带坐标）；legendary_relic_claimed = { username, kind }（kind 为遗迹种类，当前唯一的传说遗迹为 mausoleum，不带坐标）；hero_left = { username, heroName }（username 为主人用户名，查不到时为 null）；hero_captured = { ownerUsername, captorUsername, heroName }（主人与胜方用户名，查不到时为 null）；faction_expanded = { radius, day }（五家的势力范围半径同时扩大到 radius 格，day 为本季第几天；不带坐标）；faction_city_swallowed = { username, cityName, faction, factionName, x, y }（username 为失城玩家，cityName 为失城名，faction / factionName 为吞下它的势力）；faction_lair_destroyed = { username, faction, factionName, leader, leaderEn }（username 为最后一击的玩家，faction / factionName 为被攻破的势力，leader 为它的首领名将名）；faction_suppressed = { faction, factionName, level, previousLevel, direction: up\|down, campsTotal, campsRemaining }（level 为变化后的压制档 0~3，previousLevel 为变化前的档位，direction = up 表示被打到升档、down 表示营恢复导致降档；不带坐标与玩家名）。 |
 | broadcasts[].createdAt | string | 播报写入时间（ISO 8601）。 |
 
 **Agent 提示**：播报是全服氛围信息，与你的决策无强制关系；但「某 NPC 城被掠空」意味着那座城不再值得打，「首个占领金矿」意味着金矿红利已被拿走。别把播报当任务清单——玩家对打法的意图直接与玩家沟通确认。
@@ -6682,7 +6684,7 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
 
 `C→S` 请求-响应 · 需登录后发送
 
-返回账号全部武将（含属性、等级 / 经验、自由点数、俸禄、欠饷 / 重伤 / 历练状态、占用关系、今日剩余次数）、当前（或指定）城酒馆的候选（v87 AISLG-217 起：酒馆只在主城建造、候选账号只有一份，固定为主城那座，每 4 小时基准随时间缩放刷新 3 名）、普通将 / 名将数量与上限、全部 45 名名将的全服归属（famousClaims，未被获得的 ownerUsername 为 null；在野名将未被获得时 wildAt 为 null，被获得后才给出落位 wildAt），以及在野名将的结交进度（friendships）与结交资格（unlocks）。武将规则（数值均为占位）：**普通将**从酒馆招募，三项属性（统率 lead / 武力 force / 智力 wit）各 10–40 随机；招募费 = 500 + 三项合计 × 20（金币，从主城扣）。**名将**（三项各 45–65）只从 PvE 获得、全服唯一（见 famousClaims）。带兵加成：全军攻击 + 武力 × 0.3%、全军受到伤害 − 智力 × 0.3%，各自封顶 20%；能吃到加成的兵数 = 统率 × 20，部队超出时按比例摊薄（统率是带大军的关键）。俸禄每小时从主城扣（普通将 20 × 等级、名将 100 × 等级金币，随全局时间缩放），主城金币不够即「欠饷」（arrears=true，不能出征），扣款成功自动恢复。带队战败（攻方失败或全灭）武将重伤 2 小时（随缩放），期间不能出征、不会死亡。经验（v36 AISLG-116）：带队参战（含城守守城）获得经验 = 本场歼灭敌军的参考战力，战败减半；升到 L+1 级需 100 × L²，每升一级获得自由点数（普通将 3、名将 5，由玩家分到三项属性，v54 起升级不再自动加属性），上限 40 级——加成仍受 20% 封顶，高等级的主要收益是统率提高（带更多兵吃满加成）。在野名将（v54，AISLG-144）：29 名名将隐居在 Lv3 以上的野地里（开服时分配，之后不变）。地图上该野地带 wildFamous 标记；派部队打赢它的原住守军（守军为同级野地的 2 倍）即获得该名将的结交资格（GET_HEROES 的 unlocks）。结交（BEFRIEND_HERO）花主城金币 500 × 野地等级，好感 +10，每个名将每游戏日最多 5 次，同时结交（好感未满、未被招揽）最多 2 名。好感满 100 后招揽（RECRUIT_FAMOUS_HERO），全服唯一，先到先得；别人先招揽走，你的结交进度作废（lost=true，金币不退）。名将解雇后回到可获得状态。
+返回账号全部武将（含属性、等级 / 经验、自由点数、俸禄、欠饷 / 重伤 / 历练状态、占用关系、今日剩余次数）、当前（或指定）城酒馆的候选（v87 AISLG-217 起：酒馆只在主城建造、候选账号只有一份，固定为主城那座，每 4 小时基准随时间缩放刷新 3 名）、普通将 / 名将数量与上限、全部 45 名名将的归属（famousClaims：29 名在野名将按全服拥有人数 ownerCount 展示、ownerUsername 恒为 null，还没人获得时 wildAt 为 null、被获得后才给出落位；名城 8 / 黄巾 3 / 势力首领 5 仍显示单一持有人 ownerUsername），以及在野名将的结交进度（friendships）与结交资格（unlocks）。武将规则（数值均为占位）：**普通将**从酒馆招募，三项属性（统率 lead / 武力 force / 智力 wit）各 10–40 随机；招募费 = 500 + 三项合计 × 20（金币，从主城扣）。**名将**（三项各 45–65）只从 PvE 获得：29 名在野名将每个账号各能有一份（v104，AISLG-245，同账号同名唯一），名城 8 / 黄巾 3 / 势力首领 5 仍全服唯一（见 famousClaims）。带兵加成：全军攻击 + 武力 × 0.3%、全军受到伤害 − 智力 × 0.3%，各自封顶 20%；能吃到加成的兵数 = 统率 × 20，部队超出时按比例摊薄（统率是带大军的关键）。俸禄每小时从主城扣（普通将 20 × 等级、名将 100 × 等级金币，随全局时间缩放），主城金币不够即「欠饷」（arrears=true，不能出征），扣款成功自动恢复。带队战败（攻方失败或全灭）武将重伤 2 小时（随缩放），期间不能出征、不会死亡。经验（v36 AISLG-116）：带队参战（含城守守城）获得经验 = 本场歼灭敌军的参考战力，战败减半；升到 L+1 级需 100 × L²，每升一级获得自由点数（普通将 3、名将 5，由玩家分到三项属性，v54 起升级不再自动加属性），上限 40 级——加成仍受 20% 封顶，高等级的主要收益是统率提高（带更多兵吃满加成）。在野名将（v54，AISLG-144）：29 名名将隐居在 Lv3 以上的野地里（开服时分配，之后不变）。地图上该野地带 wildFamous 标记；派部队打赢它的原住守军（守军为同级野地的 2 倍）即获得该名将的结交资格（GET_HEROES 的 unlocks）。结交（BEFRIEND_HERO）花主城金币 500 × 野地等级，好感 +10，每个名将每游戏日最多 5 次，同时结交（好感未满、未被招揽）最多 2 名。好感满 100 后招揽（RECRUIT_FAMOUS_HERO）。**v104（AISLG-245）起每个账号各拿一个**：29 名在野名将的唯一性只到「同一账号不能有两个」，不同账号各走一遍流程互不影响（先到先得不再成立）；本账号招到之后结交进度清空，名将解雇 / 下野后本账号可从头再来（别人的同名名将与进度不受影响）。
 
 **请求字段**
 
@@ -6702,9 +6704,9 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
 | famousCap / famousCount | number | 名将上限（固定 3，不占普通将上限）与当前数量。 |
 | heroes | array | 账号全部武将：{ id, name, famous, lead, force, wit, level, exp, expNext 距下一级, salaryPerHour 已随时间缩放, arrears 欠饷, woundedUntil 重伤恢复时刻或 null, guardCityId 正在城守的城或 null, marchingMarchId 正在随行的行军或 null, bonus { atkPercent, defPercent, leadCap }（满编口径）, guardProductionPercent 城守产量加成, loyalty 忠诚度 0..100（v94，只有 29 位在野名将有，其余为 null；30 及以下应标红提醒）, captive 被俘囚禁 { capturedUntil 截止时刻, ransomGold 赎金 } 或 null（v94；被俘时不能出征 / 任城守 / 历练 / 赏赐 / 解雇 / 加点 / 洗点 / 施计，可用 RANSOM_HERO 赎回） }。 |
 | candidates | array | 主城酒馆当前候选（v87 起账号只有一份）：{ id, name, lead, force, wit, cost 招募费, refreshedAt 本批刷新时刻 }；主城酒馆未建为空数组。 |
-| famousClaims | array | 全部名将归属：{ name, sourceLabel 来源人读描述, ownerUsername 当前主人或 null, grantedAt, wildAt 在野名将被获得后的落位 { x, y, level }；未被获得的在野名将与名城 / 黄巾名将为 null（未被获得时不泄露藏身位置）}。 |
-| friendships | array | 结交进度（v54）：{ heroName, favor 好感 0–100, todayLeft 今日还能结交的次数, cost 下次结交花费, lost 已被他人招揽（作废）}。 |
-| unlocks | string[] | 结交资格（v54）：打赢过其野地守军、且尚未被他人获得的在野名将名。 |
+| famousClaims | array | 全部名将归属（v104 AISLG-245）：{ name, sourceLabel 来源人读描述, ownerUsername 当前主人用户名（只对名城 8 / 黄巾 3 / 势力首领 5 有意义，29 名在野名将恒为 null）, ownerCount 全服拥有该名将的账号数（在野名将可多人各有一份，0 = 还没人获得；其余 16 名为 0 或 1）, grantedAt 最早一次获得时刻, wildAt 在野名将有人获得后的落位 { x, y, level }（还没人获得时为 null，不泄露藏身位置）}。 |
+| friendships | array | 结交进度（v54；v104 起作废只看本账号）：{ heroName, favor 好感 0–100, todayLeft 今日还能结交的次数, cost 下次结交花费, lost 本账号已拥有该名将（作废，别的账号招走不会让你作废）}。 |
+| unlocks | string[] | 结交资格（v54；v104 起按账号）：打赢过其野地守军、且本账号还没拥有的在野名将名。 |
 | friendshipCap | number | 同时结交上限（v54，固定 2）。 |
 
 **Agent 提示**：培养与结交：加点 / 洗点 / 历练 / 赏赐见 ALLOCATE_HERO_POINTS 等协议；结交与招揽见 BEFRIEND_HERO / RECRUIT_FAMOUS_HERO（先看 unlocks）。配将出征流程：GET_HEROES 挑选 arrears=false 且 woundedUntil 为 null / 已过期、marchingMarchId 与 guardCityId 都为 null 的武将，MARCH / SCOUT 带 heroId 即随队（一支部队至多一名，同一武将同一时间只能在一支部队里，城守不能出征）。经验与等级在 heroes[] 里实时可查（expNext = 距下一级还差多少）。名将归属见 famousClaims——未被获得的名将按 sourceLabel 的条件争取（首占名城 / 老巢首杀 / 贡献前二）。收到 PUSH_HERO_STATE 后重拉本协议对齐。
@@ -6792,6 +6794,7 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
         "name": "吕布",
         "sourceLabel": "首占名城「洛阳」",
         "ownerUsername": null,
+        "ownerCount": 0,
         "grantedAt": null,
         "wildAt": null
       },
@@ -6909,7 +6912,7 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
 
 **可能错误**：`INVALID_PARAMS`、`HERO_NOT_FOUND`、`HERO_BUSY`（处置建议见第 4 节）
 
-**Agent 提示**：俸禄是持续成本（欠饷武将不能出征），低属性武将留着不划算；解雇名将前想清楚——全服唯一，放手就是别人的了。
+**Agent 提示**：俸禄是持续成本（欠饷武将不能出征），低属性武将留着不划算；在野名将解雇后本账号可以重新结交招揽（v104 起别的账号本来也各有一份），名城 / 黄巾 / 首领名将解雇就没了、全服会被别人拿走。
 
 **示例**
 
@@ -8726,7 +8729,7 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
 
 `C→S` 请求-响应 · 需登录后发送
 
-对已获得结交资格（GET_HEROES 的 unlocks 里）的在野名将结交一次：花 500 × 野地等级 金币（主城扣），好感 +10（上限 100）。每个名将每游戏日最多 5 次；同时结交的名将最多 2 名。好感满 100 后不能再结交，改用 RECRUIT_FAMOUS_HERO。在野名将（v54，AISLG-144）：29 名名将隐居在 Lv3 以上的野地里（开服时分配，之后不变）。地图上该野地带 wildFamous 标记；派部队打赢它的原住守军（守军为同级野地的 2 倍）即获得该名将的结交资格（GET_HEROES 的 unlocks）。结交（BEFRIEND_HERO）花主城金币 500 × 野地等级，好感 +10，每个名将每游戏日最多 5 次，同时结交（好感未满、未被招揽）最多 2 名。好感满 100 后招揽（RECRUIT_FAMOUS_HERO），全服唯一，先到先得；别人先招揽走，你的结交进度作废（lost=true，金币不退）。名将解雇后回到可获得状态。
+对已获得结交资格（GET_HEROES 的 unlocks 里）的在野名将结交一次：花 500 × 野地等级 金币（主城扣），好感 +10（上限 100）。每个名将每游戏日最多 5 次；同时结交的名将最多 2 名。好感满 100 后不能再结交，改用 RECRUIT_FAMOUS_HERO。在野名将（v54，AISLG-144）：29 名名将隐居在 Lv3 以上的野地里（开服时分配，之后不变）。地图上该野地带 wildFamous 标记；派部队打赢它的原住守军（守军为同级野地的 2 倍）即获得该名将的结交资格（GET_HEROES 的 unlocks）。结交（BEFRIEND_HERO）花主城金币 500 × 野地等级，好感 +10，每个名将每游戏日最多 5 次，同时结交（好感未满、未被招揽）最多 2 名。好感满 100 后招揽（RECRUIT_FAMOUS_HERO）。**v104（AISLG-245）起每个账号各拿一个**：29 名在野名将的唯一性只到「同一账号不能有两个」，不同账号各走一遍流程互不影响（先到先得不再成立）；本账号招到之后结交进度清空，名将解雇 / 下野后本账号可从头再来（别人的同名名将与进度不受影响）。
 
 **请求字段**
 
@@ -8783,7 +8786,7 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
 
 `C→S` 请求-响应 · 需登录后发送
 
-好感满 100 后招揽该在野名将，加入账号为名将（名将上限 3 名，不占普通将上限）。全服唯一：已被他人获得返回 FAMOUS_CLAIMED；成功后全服播报（hero_granted）。名将的三项属性在落位时已固定，侦察看到的就是它。
+好感满 100 后招揽该在野名将，加入账号为名将（名将上限 3 名，不占普通将上限）。v104（AISLG-245）起每个账号各一份：本账号已经拥有该名将返回 FAMOUS_CLAIMED（别的账号有没有与你无关）；成功后全服播报（hero_granted）。名将的三项属性在落位时已固定，侦察看到的就是它。
 
 **请求字段**
 
@@ -8799,7 +8802,7 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
 
 **可能错误**：`INVALID_PARAMS`、`HERO_NOT_UNLOCKED`、`HERO_FAVOR_INSUFFICIENT`、`FAMOUS_CLAIMED`、`HERO_CAP_REACHED`（处置建议见第 4 节）
 
-**Agent 提示**：招揽是全服竞争：好感满的那一刻就去招，慢一步就会被 FAMOUS_CLAIMED。
+**Agent 提示**：好感满就可以招，不必抢：每个账号各拿一个，别的账号招走不影响你；被拒只有「本账号已有该名将」（FAMOUS_CLAIMED）与「名将已满 3 名」（HERO_CAP_REACHED）两种情况。
 
 **示例**
 
@@ -18448,7 +18451,7 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
 
 `C→S` 请求-响应 · 需登录后发送
 
-返回账号的道具背包 items（每种道具的数量）、全部道具定义 catalog（名称、说明、礼金单价 shopPrice，null 表示不卖，堆叠上限 stackMax）与礼金余额 gift。商店出售的是 shopPrice 非 null 的道具：迁城令（city_order，礼金 50，堆叠上限 99）；高级迁城令（city_order_adv，礼金 100，堆叠上限 99）。道具随换季清空，礼金见 GET_STATE 的 gift。
+返回账号的道具背包 items（每种道具的总数）、每种道具里元宝买的张数 paidCounts（= 换季后保留的数量）、全部道具定义 catalog（名称、说明、礼金单价 shopPrice、元宝单价 ingotPrice，null 表示该货币不卖，堆叠上限 stackMax）、礼金余额 gift 与元宝余额 ingot。商店出售的是 shopPrice 或 ingotPrice 非 null 的道具：迁城令（city_order，礼金 30 / 元宝 30，堆叠上限 99）；高级迁城令（city_order_adv，礼金 50 / 元宝 50，堆叠上限 99）。礼金是每季免费发的，换季清零、礼金买的道具也换季作废；元宝是付费货币，永久保留、元宝买的道具换季保留（paidCounts）。
 
 **请求字段**
 
@@ -18458,9 +18461,11 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| items | object | 背包：{ [itemId]: count }，每种已定义道具都有键（缺省 0）。 |
-| catalog | object[] | 道具定义：id、name、nameEn、desc、descEn、kind（目前只有 order）、shopPrice（礼金单价，null = 不卖）、stackMax（堆叠上限）。 |
+| items | object | 背包：{ [itemId]: count }，每种已定义道具都有键（缺省 0）。count 是**总数**（免费 + 元宝买的）。 |
+| paidCounts | object | （v108）{ [itemId]: paidCount }：每种道具里元宝买的张数，换季后只剩这么多（免费的那部分换季作废）。 |
+| catalog | object[] | 道具定义：id、name、nameEn、desc、descEn、kind（目前只有 order）、shopPrice（礼金单价，null = 礼金不卖）、ingotPrice（元宝单价，null = 元宝不卖；目前与礼金价 1:1）、stackMax（堆叠上限，按 count 总数算）。 |
 | gift | number | 礼金余额（见 GET_STATE 的 gift）。 |
+| ingot | number | 元宝余额（v108；见 GET_STATE 的 ingot，永久保留、换季不清零）。 |
 
 **Agent 提示**：买道具前先用本协议看 shopPrice 与 gift，BUY_ITEM 必须带上你看到的单价（expectedPrice）。
 
@@ -18490,6 +18495,10 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
       "city_order": 2,
       "city_order_adv": 0
     },
+    "paidCounts": {
+      "city_order": 1,
+      "city_order_adv": 0
+    },
     "catalog": [
       {
         "id": "city_order",
@@ -18498,7 +18507,8 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
         "desc": "消耗 1 张，随机迁城一次。",
         "descEn": "Uses 1 order to relocate the city once to a random spot.",
         "kind": "order",
-        "shopPrice": 200,
+        "shopPrice": 30,
+        "ingotPrice": 30,
         "stackMax": 99
       },
       {
@@ -18508,28 +18518,31 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
         "desc": "消耗 1 张，指定坐标迁城一次。",
         "descEn": "Uses 1 order to relocate the city once to chosen coordinates.",
         "kind": "order",
-        "shopPrice": 500,
+        "shopPrice": 50,
+        "ingotPrice": 50,
         "stackMax": 99
       }
     ],
-    "gift": 600
+    "gift": 600,
+    "ingot": 1000
   }
 }
 ```
 
-### op 149 · BUY_ITEM — 礼金购买道具（v90，AISLG-222）
+### op 149 · BUY_ITEM — 购买道具（礼金或元宝；v90，AISLG-222；v108 加元宝）
 
 `C→S` 请求-响应 · 需登录后发送
 
-用礼金购买道具：礼金按 单价 × 数量 扣除，道具数量按数量增加，写事件 item_bought。校验顺序：itemId 必须在目录里且可卖（未知或 shopPrice 为 null → INVALID_PARAMS）→ count 为 1..99 的整数 → expectedPrice 必填（缺失或非整数 → INVALID_PARAMS）→ expectedPrice 必须等于当前 shopPrice（不等 → ITEM_PRICE_CHANGED，附当前 price，不扣不改，客户端刷新目录后让玩家重新确认，不自动重试）→ 购买后不超过 stackMax（超出 → ITEM_STACK_FULL，附 stackMax / have / canBuy）→ 礼金不足 → INSUFFICIENT_GIFT（附 balance / cost）。全部在一个事务里，任何一步失败都不扣礼金、不加道具。成功后向该账号其他在线连接推送 PUSH_ACCOUNT_STATE（reason = items_changed）。已买到的道具不因调价而补差价或退款。
+用礼金或元宝购买道具（currency 选一种，**不自动混用**）：所选货币按 单价 × 数量 扣除，道具数量按数量增加，写事件 item_bought。校验顺序：currency 只能是 gift / ingot（缺省 gift，旧客户端行为不变；非法值 → INVALID_PARAMS）→ itemId 必须在目录里且所选货币可卖（未知或该货币单价为 null → INVALID_PARAMS）→ count 为 1..99 的整数 → expectedPrice 必填（缺失或非整数 → INVALID_PARAMS）→ expectedPrice 必须等于所选货币的当前单价（不等 → ITEM_PRICE_CHANGED，附当前 price 与 currency，不扣不改，客户端刷新目录后让玩家重新确认，不自动重试）→ 购买后不超过 stackMax（按 count 总数算，超出 → ITEM_STACK_FULL，附 stackMax / have / canBuy）→ 余额不足（礼金 → INSUFFICIENT_GIFT；元宝 → INSUFFICIENT_INGOT，均附 balance / cost）。全部在一个事务里，任何一步失败都不扣货币、不加道具。用元宝买时该道具的 paidCount 同步增加（换季保留这些张），用礼金买只增加 count（换季作废）。成功后向该账号其他在线连接推送 PUSH_ACCOUNT_STATE（reason = items_changed）。已买到的道具不因调价而补差价或退款。
 
 **请求字段**
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | itemId | string | 必填。道具 id（见 GET_ITEMS 的 catalog）。 |
-| count | number | 必填。购买数量，1..99 的整数。购买后不能超过该道具的堆叠上限。 |
-| expectedPrice | number | 必填。你看到的单价（礼金），必须等于当前 shopPrice；不一致返回 ITEM_PRICE_CHANGED。 |
+| count | number | 必填。购买数量，1..99 的整数。购买后不能超过该道具的堆叠上限（按总数）。 |
+| expectedPrice | number | 必填。你看到的单价（**所选货币**的单价），必须等于当前 shopPrice / ingotPrice；不一致返回 ITEM_PRICE_CHANGED。 |
+| currency | string | （v108）可选。付款货币：'gift'（礼金，缺省）或 'ingot'（元宝）。只扣所选的那种，另一种不够不影响。 |
 
 **响应 data 字段**
 
@@ -18538,17 +18551,20 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
 | itemId | string | 购买的道具 id。 |
 | bought | number | 本次买入数量。 |
 | count | number | 购买后该道具的总数量。 |
-| price | number | 本次单价（礼金）。 |
-| cost | number | 本次花费的礼金（price × bought）。 |
+| paidCount | number | （v108）购买后该道具里元宝买的张数（换季保留）。 |
+| currency | string | 本次实际使用的货币（gift / ingot）。 |
+| price | number | 本次单价（所选货币）。 |
+| cost | number | 本次花费（price × bought，所选货币）。 |
 | gift | number | 购买后的礼金余额。 |
+| ingot | number | 购买后的元宝余额（v108）。 |
 
-**可能错误**：`INVALID_PARAMS`、`ITEM_PRICE_CHANGED`、`ITEM_STACK_FULL`、`INSUFFICIENT_GIFT`（处置建议见第 4 节）
+**可能错误**：`INVALID_PARAMS`、`ITEM_PRICE_CHANGED`、`ITEM_STACK_FULL`、`INSUFFICIENT_GIFT`、`INSUFFICIENT_INGOT`（处置建议见第 4 节）
 
-**Agent 提示**：只在玩家明确要买时调用。收到 ITEM_PRICE_CHANGED 时先 GET_ITEMS 刷新目录，把新单价告诉玩家，等他确认后再带新单价重发，不要用旧价自动重试。
+**Agent 提示**：只在玩家明确要买时调用。收到 ITEM_PRICE_CHANGED 时先 GET_ITEMS 刷新目录，把新单价告诉玩家，等他确认后再带新单价重发，不要用旧价自动重试。玩家没说用哪种货币时按礼金（不带 currency）；元宝是玩家真金白银充的，不要擅自用元宝付款——要问过玩家。元宝不够时提示玩家自己在道具商店页点「充值」（Agent 无权发起充值）。
 
 **示例**
 
-**买 2 张迁城令（单价 50）**
+**买 2 张迁城令（单价 30）**
 
 请求：
 
@@ -18559,7 +18575,7 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
   "data": {
     "itemId": "city_order",
     "count": 2,
-    "expectedPrice": 50
+    "expectedPrice": 30
   }
 }
 ```
@@ -18575,14 +18591,91 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
     "itemId": "city_order",
     "bought": 2,
     "count": 4,
-    "price": 50,
-    "cost": 100,
-    "gift": 900
+    "paidCount": 0,
+    "currency": "gift",
+    "price": 30,
+    "cost": 60,
+    "gift": 940,
+    "ingot": 1000
   }
 }
 ```
 
-**单价已变：返回当前单价，不扣不改**
+**用元宝买 1 张高级迁城令（1000 → 950）**
+
+请求：
+
+```json
+{
+  "op": 149,
+  "seq": 64,
+  "data": {
+    "itemId": "city_order_adv",
+    "count": 1,
+    "expectedPrice": 50,
+    "currency": "ingot"
+  }
+}
+```
+
+成功响应：
+
+```json
+{
+  "op": 149,
+  "seq": 64,
+  "ok": true,
+  "data": {
+    "itemId": "city_order_adv",
+    "bought": 1,
+    "count": 1,
+    "paidCount": 1,
+    "currency": "ingot",
+    "price": 50,
+    "cost": 50,
+    "gift": 900,
+    "ingot": 950
+  }
+}
+```
+
+**元宝不够：INSUFFICIENT_INGOT（余额与背包都不变）**
+
+请求：
+
+```json
+{
+  "op": 149,
+  "seq": 65,
+  "data": {
+    "itemId": "city_order_adv",
+    "count": 1,
+    "expectedPrice": 50,
+    "currency": "ingot"
+  }
+}
+```
+
+失败响应（`INSUFFICIENT_INGOT`）：
+
+```json
+{
+  "op": 149,
+  "seq": 65,
+  "ok": false,
+  "error": {
+    "code": "INSUFFICIENT_INGOT",
+    "message": "元宝不足以支付这次购买"
+  },
+  "data": {
+    "balance": 0,
+    "cost": 50,
+    "currency": "ingot"
+  }
+}
+```
+
+**单价已变（客户端还拿着调价前的旧价 50）：返回当前单价，不扣不改**
 
 请求：
 
@@ -18610,7 +18703,7 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
     "message": "道具单价已变化，请刷新后重新确认"
   },
   "data": {
-    "price": 250
+    "price": 30
   }
 }
 ```
@@ -19070,7 +19163,7 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
 
 `C→S` 请求-响应 · 需登录后发送
 
-查询本季的五方势力（只读、无参数、玩家与 Agent 通用）。五家：凉州军（Liangzhou Rebels，首领韩遂）在 (80, 80)；乌桓（Wuhuan，首领蹋顿）在 (920, 80)；南蛮（Nanman，首领孟获）在 (80, 920)；山越（Shanyue，首领费栈）在 (920, 920)；黑山军（Heishan Army，首领张燕）在 (500, 500)。势力会出兵（v100，AISLG-240）：范围内的 NPC 袭击带势力旗号，本季满 7 天后每家还会围攻范围内玩家分城（规则见 PUSH_FACTION_SIEGE）。每家有自己的老巢与地盘：势力范围是以老巢为中心的方块，半径随势力天数变大（第 1~7 天 100 格、第 8~14 天 150 格、第 15~21 天 200 格、第 22 天起 250 格，按势力起点算，与 time_scale 无关），两家范围重叠的格归离老巢更近的一家（距离相同时按上表顺序取先出现的一家）。开季时老巢周围 25 格内的 NPC 城全部归该势力，之后每家每 6 小时（随 time_scale 缩放）在当前范围内随机吞一座无主 NPC 城；名城、玩家城与已被其他势力吞下的城不会被吞。被吞的城仍是普通 NPC 城，可以侦察 / 掠夺 / 占领，只有两点不同：守军与可掠夺库存是同等级普通 NPC 城的 1.5 倍，地块的 faction 字段标出归属（见 GET_WORLD_MAP / GET_TILE）；玩家占下后这座城不再属于势力。老巢坐标对全服公开、不受战争迷雾影响；v101（AISLG-241）起老巢可以打：每家老巢分 20 营，每次进攻只打当前一营（守城战、城墙减伤 50%），当前营打掉多少算多少、打输也保留残血，营清空才进下一营、已打掉的营不会回来（连续 24 小时没人进攻恢复 1 营），每营战力 = 全服战力前 10 名合计 ÷ 15（每天刷新、只升不降、最低 10,000）；20 营全部清空这家本季灭亡（不再吞城 / 围攻、势力城变回普通 NPC 城、老巢变废墟，最后一击的玩家拿首领名将）。本季已灭亡（destroyed = true）的老巢不能再出征，MARCH / SCOUT 仍返回 FACTION_LAIR_TARGET。总开关 faction_enabled 默认关闭：关闭时本协议返回 enabled=false、factions 为空数组，地块不带势力归属，世界里也没有老巢。v102（AISLG-243）起开关可以在赛季中途打开：打开当天就生成老巢、不等换季，势力的「第几天」从开启当天重新算第 1 天（半径 100 格、满 7 天才开始围攻、之后每周 +50 格，与换季启用完全一样）；老巢格上或周围 5 格内有玩家城的那家本季不生成（不吞城、不围攻、不在 factions 里、地图上也没有它的范围与老巢），下季换季再生成，系统会发公告说明是哪几家。
+查询本季的五方势力（只读、无参数、玩家与 Agent 通用）。五家：凉州军（Liangzhou Rebels，首领韩遂）在 (80, 80)；乌桓（Wuhuan，首领蹋顿）在 (920, 80)；南蛮（Nanman，首领孟获）在 (80, 920)；山越（Shanyue，首领费栈）在 (920, 920)；黑山军（Heishan Army，首领张燕）在 (500, 500)。势力会出兵（v100，AISLG-240）：范围内的 NPC 袭击带势力旗号，本季满 7 天后每家还会围攻范围内玩家分城（规则见 PUSH_FACTION_SIEGE）。每家有自己的老巢与地盘：势力范围是以老巢为中心的方块，半径随势力天数变大（第 1~7 天 100 格、第 8~14 天 150 格、第 15~21 天 200 格、第 22 天起 250 格，按势力起点算，与 time_scale 无关），两家范围重叠的格归离老巢更近的一家（距离相同时按上表顺序取先出现的一家）。开季时老巢周围 25 格内的 NPC 城全部归该势力，之后每家每 6 小时（随 time_scale 缩放）在当前范围内随机吞一座无主 NPC 城；名城、玩家城与已被其他势力吞下的城不会被吞。被吞的城仍是普通 NPC 城，可以侦察 / 掠夺 / 占领，只有两点不同：守军与可掠夺库存是同等级普通 NPC 城的 1.5 倍，地块的 faction 字段标出归属（见 GET_WORLD_MAP / GET_TILE）；玩家占下后这座城不再属于势力。老巢坐标对全服公开、不受战争迷雾影响；v101（AISLG-241）起老巢可以打：每家老巢分 20 营，每次进攻只打当前一营（守城战、城墙减伤 50%），当前营打掉多少算多少、打输也保留残血，营清空才进下一营、已打掉的营不会回来（连续 24 小时没人进攻恢复 1 营），20 营由弱到强（v106，AISLG-247）：第 1 营最弱、第 20 营最强，中间逐营递增，强度随全服玩家整体实力成长（具体算法不公开），每天刷新、只升不降；20 营全部清空这家本季灭亡（不再吞城 / 围攻、势力城变回普通 NPC 城、老巢变废墟，最后一击的玩家拿首领名将）。v107（AISLG-249）起老巢被打掉得越多这家越虚——每打掉 5 营升一档压制（最多 3 档，完全由剩余营数算出、营恢复后自动降档）：围城军战力 100 / 75 / 50 / 25%、吞 NPC 城间隔 6 / 9 / 12 / 15 小时、每周吞玩家分城 2 / 2 / 2 / 1 座，当前档位与三项效果见 factions[].suppression。本季已灭亡（destroyed = true）的老巢不能再出征，MARCH / SCOUT 仍返回 FACTION_LAIR_TARGET。总开关 faction_enabled 默认关闭：关闭时本协议返回 enabled=false、factions 为空数组，地块不带势力归属，世界里也没有老巢。v102（AISLG-243）起开关可以在赛季中途打开：打开当天就生成老巢、不等换季，势力的「第几天」从开启当天重新算第 1 天（半径 100 格、满 7 天才开始围攻、之后每周 +50 格，与换季启用完全一样）；老巢格上或周围 5 格内有玩家城的那家本季不生成（不吞城、不围攻、不在 factions 里、地图上也没有它的范围与老巢），下季换季再生成，系统会发公告说明是哪几家。
 
 **请求字段**
 
@@ -19097,9 +19190,14 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
 | factions[].campsTotal | number | （v101）老巢的营数（共 20 营）。 |
 | factions[].campsRemaining | number | （v101）剩余营数（含当前营；0 = 已灭亡）。 |
 | factions[].campRemainingPercent | number | （v101）当前营剩余守军百分比 0~100（满营 100；每次打输保留残血，百分比随之下降）。 |
-| factions[].campPower | number | （v101）每营守军参考战力（全服战力前 10 名合计 ÷ 15，每天刷新、只升不降、最低 10,000）。 |
+| factions[].campPower | number | （v101；v106 改为当前营的战力）当前营守军的参考战力：20 营由弱到强，第 1 营最弱、第 20 营最强，按剩余营数推当前营序号即可对上（当前营序号 = campsTotal − campsRemaining + 1）。强度随全服玩家整体实力成长，每天刷新、只升不降；已灭亡仍给最后的值。侦察（SCOUT）拿到的当前营守军与它同口径。 |
+| factions[].suppression | object | （v107，AISLG-249）这家当前的压制档与三项效果的当前值 { level, siegePercent, swallowIntervalHours, weeklyBranchCap }。压制档完全由剩余营数算出（每打掉 5 营升一档、最多 3 档），不存库：营恢复（24 小时没人进攻）后自动降档；已灭亡的势力四项都是 0 档的值（不再有压制）。 |
+| factions[].suppression.level | number | 压制档 0~3：已打掉 0~4 营 = 0 档、5~9 = 1 档、10~14 = 2 档、15~19 = 3 档（打掉第 20 营就是灭亡）。 |
+| factions[].suppression.siegePercent | number | 围城军战力百分比（0 / 1 / 2 档 = 100 / 75 / 50，3 档 = 25）：围攻发起时按当时档位乘在原公式上、向下取整且不低于 1，已出发的围城军不变。PUSH_FACTION_SIEGE 的 power 与战报里的围城军战力就是这个压制后的实际值。 |
+| factions[].suppression.swallowIntervalHours | number | 吞一座 NPC 城的基准间隔小时数（未随 time_scale 缩放，便于展示）：0 / 1 / 2 / 3 档 = 6 / 9 / 12 / 15 小时（实际时长按部署的 time_scale 缩放）。每家独立取值，已经计时中的下一次按新间隔往后算。 |
+| factions[].suppression.weeklyBranchCap | number | 每周最多吞下的玩家分城数：0~2 档 2 座，3 档 1 座（本周已经吞满的不回溯）。 |
 
-**Agent 提示**：势力城是你附近最好找的掠夺 / 占领目标：它们散在整片地盘上（不是全挤在老巢周围），守军与库存是同等级普通 NPC 城的 1.5 倍，打下来能带走更多、占领后分城库存也更厚。老巢周围 5 格内没有玩家城，所以别把坐标 (80, 80) / (920, 80) / (80, 920) / (920, 920) / (500, 500) 当成选址目标——注册落位与迁城都会避开那几块地方，派兵去老巢会被拒绝（FACTION_LAIR_TARGET）。势力确实会打人（v100，AISLG-240）：范围内的 NPC 袭击会带上势力旗号（PUSH_NPC_ATTACK_WARNING 的 faction / 事件 npc_attack_warning.detail.faction，如「南蛮来袭」），本季满 7 天后每家还会围攻范围内离老巢最近的玩家分城（见 PUSH_FACTION_SIEGE 与事件 faction_siege_warning / faction_siege / faction_city_lost）——主城与名城分城不会被围攻，城被吞后变成该势力的势力城，建筑与库存都在里面，任何玩家都能按占领 NPC 城的流程打回来。势力城被占下后归属立即消失；范围之外的老巢与地盘随本季天数增长，第 22 天起半径 250 格。v101（AISLG-241）起老巢可以打：MARCH（task=plunder）指向老巢坐标，一次只打当前一营（守城战、城墙减伤 50%），当前营守军打掉多少算多少、打输也保留残血，营清空才进下一营、已打掉的营不会回来（连续 24 小时没人进攻恢复 1 营）；每营战力 = 全服战力前 10 名合计 ÷ 15（每天刷新、只升不降、最低 10,000），编成按 义兵 100 : 刀盾 30 : 弓箭 40 : 轻骑 12 缩放。每场按歼灭的守军战力发金币 2 / 木粮石铁各 10（打输也发、不占负重），声望按歼灭战力的 1%；打掉最后一营的玩家拿该势力首领名将（韩遂 / 蹋顿 / 孟获 / 费栈 / 张燕，全服唯一），灭亡时按贡献（累计歼灭守军战力）名次再发一次（数额是黄巾之乱同名次的 3 倍）。任何玩家都能打，不要求入盟、不算攻击玩家、不破新手保护；打之前先 SCOUT 看当前营守军，SCOUT / GET_FACTIONS 都能看到剩余营数与当前营百分比。faction_enabled 关闭的服上这些字段全部为空、也没有旗号与围攻，忽略即可。
+**Agent 提示**：势力城是你附近最好找的掠夺 / 占领目标：它们散在整片地盘上（不是全挤在老巢周围），守军与库存是同等级普通 NPC 城的 1.5 倍，打下来能带走更多、占领后分城库存也更厚。老巢周围 5 格内没有玩家城，所以别把坐标 (80, 80) / (920, 80) / (80, 920) / (920, 920) / (500, 500) 当成选址目标——注册落位与迁城都会避开那几块地方，派兵去老巢会被拒绝（FACTION_LAIR_TARGET）。势力确实会打人（v100，AISLG-240）：范围内的 NPC 袭击会带上势力旗号（PUSH_NPC_ATTACK_WARNING 的 faction / 事件 npc_attack_warning.detail.faction，如「南蛮来袭」），本季满 7 天后每家还会围攻范围内离老巢最近的玩家分城（见 PUSH_FACTION_SIEGE 与事件 faction_siege_warning / faction_siege / faction_city_lost）——主城与名城分城不会被围攻，城被吞后变成该势力的势力城，建筑与库存都在里面，任何玩家都能按占领 NPC 城的流程打回来。势力城被占下后归属立即消失；范围之外的老巢与地盘随本季天数增长，第 22 天起半径 250 格。v101（AISLG-241）起老巢可以打：MARCH（task=plunder）指向老巢坐标，一次只打当前一营（守城战、城墙减伤 50%），当前营守军打掉多少算多少、打输也保留残血，营清空才进下一营、已打掉的营不会回来（连续 24 小时没人进攻恢复 1 营）；20 营由弱到强（v106，AISLG-247）：第 1 营最弱、第 20 营最强，中间逐营递增，强度随全服玩家整体实力成长（具体算法不公开），每天刷新、只升不降，编成按 义兵 100 : 刀盾 30 : 弓箭 40 : 轻骑 12 缩放。每场按歼灭的守军战力发金币 2 / 木粮石铁各 10（打输也发、不占负重），声望按歼灭战力的 1%；打掉最后一营的玩家拿该势力首领名将（韩遂 / 蹋顿 / 孟获 / 费栈 / 张燕，全服唯一），灭亡时按贡献（累计歼灭守军战力）名次再发一次（数额是黄巾之乱同名次的 3 倍）。任何玩家都能打，不要求入盟、不算攻击玩家、不破新手保护；打之前先 SCOUT 看当前营守军，SCOUT / GET_FACTIONS 都能看到剩余营数与当前营百分比。faction_enabled 关闭的服上这些字段全部为空、也没有旗号与围攻，忽略即可。v107（AISLG-249）起打老巢有直接回报：每打掉 5 营升一档压制（factions[].suppression），围城军更弱、吞城更慢、3 档时每周吞分城从 2 座降到 1 座——不去打老巢，这家就一直维持最强。
 
 **示例**
 
@@ -19142,9 +19240,15 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
         "cityCount": 51,
         "destroyed": false,
         "campsTotal": 20,
-        "campsRemaining": 17,
+        "campsRemaining": 15,
         "campRemainingPercent": 42,
-        "campPower": 256000
+        "campPower": 29721,
+        "suppression": {
+          "level": 1,
+          "siegePercent": 75,
+          "swallowIntervalHours": 9,
+          "weeklyBranchCap": 2
+        }
       }
     ]
   }
@@ -19176,6 +19280,193 @@ Agent 定期（建议每完成一批事或每小时）把「玩家不在时发�
     "radius": 0,
     "serverTime": "2026-11-10T04:00:00.000Z",
     "factions": []
+  }
+}
+```
+
+### op 156 · REDEEM_CODE — 兑换码兑换（v109，AISLG-253）
+
+`C→S` 请求-响应 · 需登录后发送
+
+输入运营发出的兑换码领取福利（元宝与 / 或道具），成功返回本次领到的奖励包与领取后的余额、背包。码是 16 位（字符集是去掉 I / L / O / U 的 32 个字符：0123456789ABCDEFGHJKMNPQRSTVWXYZ），玩家看到的显示形式是 XXXX-XXXX-XXXX-XXXX；输入不区分大小写，空格与横线都可以带（`abcd efgh-ijkl mnop` 与 `ABCDEFGHIJKLMNOP` 等价）。两种码：一次性码（每个码只能被一个账号兑换一次，兑换后作废；同一玩家可以兑同一批次的任意多张码）与通用码（同一个码多人都能兑，每人只能兑一次，有兑换人数上限）。**同一个通用码** 每个账号只能兑一次：重复兑换返回 CODE_BATCH_CLAIMED，那个码本身不作废、可以给别人。一次性码没有「同一批次只能兑一张」的限制：拿到同一批的另一个码照样能兑。奖励与码无关，由批次决定：元宝 1..100000（与充值元宝同账户、永久保留、不可转让）与 / 或道具 ×1..99（按普通道具发放，超出堆叠上限 99 时整次兑换失败返回 ITEM_STACK_FULL，码不作废、也没有元宝）。福利发的道具换季会清空，福利发的元宝不会。失败次数限制：每账号每小时最多失败 10 次（码不存在、格式不对、已被使用、过期、同一个通用码已兑过、已被领完都算），超过后 60 分钟内所有兑换请求返回 CODE_RATE_LIMITED；成功兑换不计入失败次数。
+
+**请求字段**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| code | string | 必填。玩家输入的兑换码原文（大小写、空格、横线都不敏感，全角空格 / 横线也可以）。非字符串 → INVALID_PARAMS；规范化后不是 16 位 → CODE_INVALID（含字符集外的字符时不可能对上任何码，同样返回 CODE_INVALID）。 |
+
+**响应 data 字段**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| rewards | object | 本次领到的奖励包：{ ingot?: 元宝数, items?: [{ itemId, count }] }，至少一项。 |
+| ingot | number | 领取后的元宝余额（与 GET_STATE 的 ingot 同口径，永久保留）。 |
+| items | object | 领取后的背包全量 { [itemId]: count }，每种已定义道具都有键（缺省 0），与 GET_STATE / GET_ITEMS 的 items 同口径（总数）。 |
+
+**可能错误**：`INVALID_PARAMS`、`CODE_INVALID`、`CODE_EXPIRED`、`CODE_USED`、`CODE_BATCH_CLAIMED`、`CODE_EXHAUSTED`、`CODE_RATE_LIMITED`、`ITEM_STACK_FULL`（处置建议见第 4 节）
+
+**Agent 提示**：码是玩家自己拿到的，可以替玩家兑换（账号是本人的）。玩家把码贴给你时直接调用，不用先确认；成功后把 rewards 报给玩家。不要猜码或批量尝试：每账号每小时最多失败 10 次，超过后 1 小时内连正确的码都会被拒（CODE_RATE_LIMITED，按返回的 retryAfterSeconds 等待）。CODE_BATCH_CLAIMED 只会出现在通用码上：这个号已经兑过这个码，换别的码没用；一次性码可以兑同一批次的多张，拿到新码直接兑就行。ITEM_STACK_FULL 提示玩家先消耗一些同种道具再兑换，码仍然有效。
+
+**示例**
+
+**兑换成功：元宝 ×500、迁城令 ×2**
+
+请求：
+
+```json
+{
+  "op": 156,
+  "seq": 91,
+  "data": {
+    "code": "abcd efgh-ijkl mnop"
+  }
+}
+```
+
+成功响应：
+
+```json
+{
+  "op": 156,
+  "seq": 91,
+  "ok": true,
+  "data": {
+    "rewards": {
+      "ingot": 500,
+      "items": [
+        {
+          "itemId": "city_order",
+          "count": 2
+        }
+      ]
+    },
+    "ingot": 1500,
+    "items": {
+      "city_order": 4,
+      "city_order_adv": 0
+    }
+  }
+}
+```
+
+**一次性码已被别人兑换：CODE_USED**
+
+请求：
+
+```json
+{
+  "op": 156,
+  "seq": 92,
+  "data": {
+    "code": "ABCD-EFGH-JKMN-PQRS"
+  }
+}
+```
+
+失败响应（`CODE_USED`）：
+
+```json
+{
+  "op": 156,
+  "seq": 92,
+  "ok": false,
+  "error": {
+    "code": "CODE_USED",
+    "message": "这个兑换码已经被使用过了"
+  }
+}
+```
+
+**同一个通用码已经兑过一次：CODE_BATCH_CLAIMED（这个码本身还有效，可以给别人）**
+
+请求：
+
+```json
+{
+  "op": 156,
+  "seq": 93,
+  "data": {
+    "code": "TVWX-YZ01-2345-6789"
+  }
+}
+```
+
+失败响应（`CODE_BATCH_CLAIMED`）：
+
+```json
+{
+  "op": 156,
+  "seq": 93,
+  "ok": false,
+  "error": {
+    "code": "CODE_BATCH_CLAIMED",
+    "message": "这个兑换码你已经兑换过了"
+  }
+}
+```
+
+**输错次数太多：CODE_RATE_LIMITED（附 retryAfterSeconds）**
+
+请求：
+
+```json
+{
+  "op": 156,
+  "seq": 94,
+  "data": {
+    "code": "0000-0000-0000-0000"
+  }
+}
+```
+
+失败响应（`CODE_RATE_LIMITED`）：
+
+```json
+{
+  "op": 156,
+  "seq": 94,
+  "ok": false,
+  "error": {
+    "code": "CODE_RATE_LIMITED",
+    "message": "输错次数太多，请稍后再试（每账号每小时最多 10 次）"
+  },
+  "data": {
+    "retryAfterSeconds": 1800
+  }
+}
+```
+
+**背包里迁城令已满 99 张：ITEM_STACK_FULL（整单回滚，码不作废、元宝没发）**
+
+请求：
+
+```json
+{
+  "op": 156,
+  "seq": 95,
+  "data": {
+    "code": "ABCD-EFGH-JKMN-PQRS"
+  }
+}
+```
+
+失败响应（`ITEM_STACK_FULL`）：
+
+```json
+{
+  "op": 156,
+  "seq": 95,
+  "ok": false,
+  "error": {
+    "code": "ITEM_STACK_FULL",
+    "message": "该道具已达堆叠上限，不能再买这么多"
+  },
+  "data": {
+    "itemId": "city_order",
+    "stackMax": 99,
+    "have": 99,
+    "canGrant": 0
   }
 }
 ```
@@ -20466,14 +20757,14 @@ NPC 出兵后不再立刻结算：先给被袭击账号发预警（预警提前�
 
 `S→C` 服务端推送 · 无 `seq`
 
-账号级状态变化时推送给该账号全部在线连接（发起连接除外，含 Agent 连接）：account_renamed=昵称被 SET_NICKNAME 修改（v52）。推送只携带变化摘要，完整现状按需查询。
+账号级状态变化时推送给该账号全部在线连接（发起连接除外，含 Agent 连接）：account_renamed=昵称被 SET_NICKNAME 修改（v52）；items_changed=道具背包或礼金 / 元宝余额变化（v90）；ingot_changed=元宝余额被充值入账或退款回收（v108，AISLG-251；服务端回调里推，不新增推送号）。推送只携带变化摘要，完整现状按需查询。
 
 **data 字段**
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| reason | 'account_renamed' \| 'items_changed' | 触发本次推送的状态变化。items_changed（v90，AISLG-222）：道具背包或礼金余额变化，data 另带 items（每种道具的数量）与 gift（礼金余额）。 |
-| username | string | 账号的新昵称（即新 username）；reason = items_changed 时无此字段。 |
+| reason | 'account_renamed' \| 'items_changed' \| 'ingot_changed' | 触发本次推送的状态变化。items_changed（v90，AISLG-222）：道具背包或礼金余额变化，data 另带 items（每种道具的总数）、paidCounts（v108：每种道具里元宝买的张数）、gift（礼金余额）与 ingot（元宝余额）。ingot_changed（v108，AISLG-251）：元宝余额变化（充值入账 / 退款回收），data 另带 ingot（变化后的余额）。 |
+| username | string | 账号的新昵称（即新 username）；reason = items_changed / ingot_changed 时无此字段。 |
 
 **Agent 提示**：收到 account_renamed 后，本地缓存的 username 已过期：后续展示（聊天、地图归属、排行榜）与对外称呼一律用新昵称。
 
@@ -20488,6 +20779,19 @@ NPC 出兵后不再立刻结算：先给被袭击账号发预警（预警提前�
   "data": {
     "reason": "account_renamed",
     "username": "卧龙先生"
+  }
+}
+```
+
+推送（`ingot_changed`）：
+
+```json
+{
+  "op": 2020,
+  "push": true,
+  "data": {
+    "reason": "ingot_changed",
+    "ingot": 1000
   }
 }
 ```
@@ -20931,7 +21235,7 @@ NPC 出兵后不再立刻结算：先给被袭击账号发预警（预警提前�
 
 `S→C` 服务端推送 · 无 `seq`
 
-五方势力出兵打玩家分城：本季满 7 天后，每家势力在自己范围内选**离老巢最近的玩家分城**围攻（同一时间最多围 1 座，同一座城 6 小时最多打一次）。每次围攻提前 60 分钟预警（吃烽火台加成，敌情详细度也按烽火台等级分档，与 NPC 袭击预警同一套），预警时给出**当前城防值**。围城军战力 = 该分城官府等级 × 倍率（第 8~14 天 100、15~21 天 150、22 天起 200，随 time_scale 无关），编成按 3 级 NPC 城守军的比例（义兵 100 : 刀盾 30 : 弓箭 40 : 轻骑 12）缩放，不带冲车；战斗走守城战，城墙 / 箭塔 / 城防器械 / 城守 / 协防全部生效。势力打赢（全灭守军）扣 35 城防、城进入 4 小时被动免战、不掠夺资源；城防归零时城被吞，变成该势力的 NPC 城。被围城的主人与驻扎在该城的协防方都会收到本推送（reason 相同、内容相同）。等价事件：faction_siege_warning（预警）/ faction_siege（结算）/ faction_city_lost（失城）。
+五方势力出兵打玩家分城：本季满 7 天后，每家势力在自己范围内选**离老巢最近的玩家分城**围攻（同一时间最多围 1 座，同一座城 6 小时最多打一次）。每次围攻提前 60 分钟预警（吃烽火台加成，敌情详细度也按烽火台等级分档，与 NPC 袭击预警同一套），预警时给出**当前城防值**。围城军战力 = 该分城官府等级 × 倍率（第 8~14 天 100、15~21 天 150、22 天起 200，随 time_scale 无关）× 该家的压制档比例（v107，AISLG-249：0 / 1 / 2 / 3 档 = 100 / 75 / 50 / 25%，向下取整且不低于 1，发起那一刻定），编成按 3 级 NPC 城守军的比例（义兵 100 : 刀盾 30 : 弓箭 40 : 轻骑 12）缩放，不带冲车；战斗走守城战，城墙 / 箭塔 / 城防器械 / 城守 / 协防全部生效。势力打赢（全灭守军）扣 35 城防、城进入 4 小时被动免战、不掠夺资源；城防归零时城被吞，变成该势力的 NPC 城。被围城的主人与驻扎在该城的协防方都会收到本推送（reason 相同、内容相同）。等价事件：faction_siege_warning（预警）/ faction_siege（结算）/ faction_city_lost（失城）。
 
 **data 字段**
 
@@ -20957,7 +21261,7 @@ NPC 出兵后不再立刻结算：先给被袭击账号发预警（预警提前�
 | durabilityAfter | number | hit / swallowed：结算后的城防值（swallowed 恒为 0）。 |
 | protectedUntil | string | hit：城进入 4 小时被动免战的截止时刻（ISO 8601，免战期内城防不回涨）。 |
 
-**Agent 提示**：收到 warning 时先看 durability：城防 100 起，每次被围城军打赢扣 35（两次之间只回涨一点点），所以城防 ≤ 35 的城下一轮就会丢。增援要在 arriveAt 之前进城门（MARCH task=reinforce / 协防 MARCH task=assist 都可，守城战里协防部队与城主驻军合并成守方）；把驻军塞满通常就能守住——常规驻军（义兵 30 × 官府等级 + 弓箭 8 × 官府等级）对上 1.0 倍围城军时全灭概率很低，而驻军只剩一半时大概率失守。守住的城该势力 24 小时内不会再来。城被吞（swallowed）后：建筑与等级留在城里、剩余资源变成这座势力城的可掠夺库存，任何玩家都能按占领 NPC 城的流程打下它并接收建筑与库存；原主人腾出分城名额，且打回来不受放弃分城冷却限制。每家势力每周最多吞 2 座城（一周按本季第 8、15、22 天起算），主城与名城分城永远不会被围攻。
+**Agent 提示**：收到 warning 时先看 durability：城防 100 起，每次被围城军打赢扣 35（两次之间只回涨一点点），所以城防 ≤ 35 的城下一轮就会丢。增援要在 arriveAt 之前进城门（MARCH task=reinforce / 协防 MARCH task=assist 都可，守城战里协防部队与城主驻军合并成守方）；把驻军塞满通常就能守住——常规驻军（义兵 30 × 官府等级 + 弓箭 8 × 官府等级）对上 1.0 倍围城军时全灭概率很低，而驻军只剩一半时大概率失守。守住的城该势力 24 小时内不会再来。城被吞（swallowed）后：建筑与等级留在城里、剩余资源变成这座势力城的可掠夺库存，任何玩家都能按占领 NPC 城的流程打下它并接收建筑与库存；原主人腾出分城名额，且打回来不受放弃分城冷却限制。每家势力每周最多吞 2 座城（一周按本季第 8、15、22 天起算；v107，AISLG-249：这家被压制到 3 档时降为 1 座，见 GET_FACTIONS 的 factions[].suppression），主城与名城分城永远不会被围攻。
 
 **示例**
 
@@ -21034,7 +21338,7 @@ NPC 出兵后不再立刻结算：先给被袭击账号发预警（预警提前�
 | campRemainingPercent | number | 当前营剩余守军百分比 0~100。 |
 | destroyed | boolean | 这家本季是否已灭亡。 |
 
-**Agent 提示**：这是全服广播，与你自己的账号无关；用来及时更新「还剩几营」。真要打之前请先 SCOUT 老巢坐标拿到当前营守军（剩余百分比只是粗略进度），再按自己的全部战力估一下这一营打不打得掉——打不完也保留残血、奖励照发，所以能打就打。灭亡（destroyed）后这家本季不能再打，等换季重生。
+**Agent 提示**：这是全服广播，与你自己的账号无关；用来及时更新「还剩几营」。真要打之前请先 SCOUT 老巢坐标拿到当前营守军（剩余百分比只是粗略进度；20 营由弱到强（v106，AISLG-247）：第 1 营最弱、第 20 营最强，所以前几营适合中等战力单挑、后几营要头部玩家或合力），再按自己的全部战力估一下这一营打不打得掉——打不完也保留残血、奖励照发，所以能打就打。灭亡（destroyed）后这家本季不能再打，等换季重生。
 
 **示例**
 
@@ -21117,6 +21421,7 @@ NPC 出兵后不再立刻结算：先给被袭击账号发预警（预警提前�
 | `MARCH_NOT_RECALLABLE` | 行军不存在、不属于本账号、不在行军途中或已是返程，无法撤回（v13）。 | 用 GET_STATE 的 city.marches 核对行军 id 与状态，只对 status=marching 且 purpose 不是 return 的行军发起 RECALL_MARCH。 |
 | `PLUNDER_COOLDOWN` | 目标地块处于掠夺冷却中（基准 24 小时，实际受全局时间缩放等比缩短；v16：该地块已被成功掠夺，冷却记录见 GET_TILE 的 tile.plunderedAt；冷却内发起掠夺被拒，在途到达仍战斗但资源为零）。 | 读 tile.plunderedAt 判断冷却截止时间，到点后重试掠夺；或改用 task=occupy（占领不受冷却限制）。 |
 | `TASK_INVALID_FOR_TARGET` | 该任务类型不适用于此目标（v16 起；v24 起 NPC 城池也可 task=occupy，本码当前不再由出征返回，保留兼容；玩家城池占领随玩家对抗阶段设计）。 | 改用 task=plunder（或不带 task，缺省即掠夺）。 |
+| `WILD_HERO_UNOCCUPIABLE` | 在野名将所在的野地不能被占领（v104，AISLG-245）：这些野地要留给所有玩家反复挑战守军拿结交资格，地块被占后别人就打不了了。 | 改用 task=plunder 打守军（打赢即得结交资格）；想占野地请挑没有名将标记（tile.wildFamous 为 false 或无此字段）的野地。 |
 | `TERRITORY_LIMIT` | 该城占领的野地数已达官府等级上限（v16：上限 = 官府等级，MARCH task=occupy 发起时初核，Worker 到达时复核——胜利后超限不改归属、幸存部队返程）。 | 升级官府提高上限、召回一块野地驻军，或改用 task=plunder（掠夺不受占领上限限制）。 |
 | `GOVERNMENT_TOO_LOW` | 占领 NPC 城（MARCH task=occupy 目标为 NPC 城池）需要主城官府 ≥ 3 级（v24，AISLG-58）。 | 先升级主城官府到 3 级；或对该 NPC 城改用 task=plunder 掠夺。 |
 | `BRANCH_LIMIT` | 分城数已达上限（v24 起：上限 = floor(主城官府等级 ÷ 2)，v57 由 ÷3 放宽，名城同样计入；发起时初核，Worker 到达时复核——胜利后超限不建分城、幸存部队返程，事件记录 denial=BRANCH_LIMIT）。 | 升级主城官府（每升 2 级多 1 个名额），或放弃一座不需要的分城（DISCARD_CITY），或改用 task=plunder 掠夺。 |
@@ -21157,7 +21462,7 @@ NPC 出兵后不再立刻结算：先给被袭击账号发预警（预警提前�
 | `HERO_FRIENDSHIP_LIMIT` | （v54，AISLG-144）同时结交的在野名将已达上限 2 名（好感未满且未被他人招揽的才计入）。 | 等其中一名好感满 100 并招揽，或它已被他人获得，腾出名额后再结交。 |
 | `HERO_FAVOR_INSUFFICIENT` | （v54，AISLG-144）好感度未满 100，不能招揽（附 favor）。 | 继续 BEFRIEND_HERO 结交（每次 +10，每日最多 5 次）。 |
 | `HERO_FAVOR_FULL` | （v54，AISLG-144）好感度已满 100，不能再结交。 | 直接 RECRUIT_FAMOUS_HERO 招揽。 |
-| `FAMOUS_CLAIMED` | （v54，AISLG-144）该名将已被他人获得（全服唯一）。 | 换一名在野名将；GET_HEROES 的 famousClaims 可查归属。 |
+| `FAMOUS_CLAIMED` | （v54，AISLG-144；v104 AISLG-245 收窄）本账号已经拥有该名将——同一账号不能有两个同名名将；别的账号接手不影响本账号招揽。 | 换一名在野名将；GET_HEROES 的 famousClaims 可查归属。 |
 | `GUARD_ASSIGN_DENIED` | （v36，AISLG-115）城守不能同时出征；城守只能任命未随行出征的本账号武将。 | 先撤任（ASSIGN_HERO heroId=null）再出征，或换其他武将带队。 |
 | `NEWBIE_PROTECTED` | （v38，AISLG-122；门槛 v42 校准为 8 级）目标玩家处于新手保护期（注册后 3 天或任一城官府升到 8 级，先到为准），不能被侦察 / 攻击（SCOUT 与 MARCH 均返回本码）。data.until / data.retryAfterSeconds 为截止时刻与剩余秒数。 | 等保护期结束后再打（按 retryAfterSeconds 睡满后重发），或换目标。新手玩家主动侦察 / 攻击其他玩家会立即失去保护。 |
 | `TARGET_IN_TRUCE` | （v38，AISLG-122）目标处于免战期：城被攻破 / 被抢后的被动免战（4 小时基准）或目标自己开启的主动免战（12 小时基准），玩家与 NPC 都不能再攻击。data.until / data.retryAfterSeconds 为截止时刻与剩余秒数。 | 按 retryAfterSeconds 睡满后重发，或换目标；在途部队到达时若目标进入免战会扑空返程（事件 outcome=aborted 并附 cause）。 |
@@ -21251,9 +21556,16 @@ NPC 出兵后不再立刻结算：先给被袭击账号发预警（预警提前�
 | `STRATAGEM_TOKEN_FULL` | （v86，AISLG-211）该类计谋令持有数已达上限，兑换被拒且不扣军功；响应附 tokenKind / have / limit。上限防止囤到某一周集中施计，换季与军功一起清零。 | 先把手上的令用掉一些再兑换，或改买其他商品。 |
 | `CITY_AMBUSHED` | （v86，AISLG-211）这座城中了十面埋伏，期间不能派出任何部队（MARCH 的各用途、侦察、协防出发、交易所商队、剧本战场入场都被拒）；响应附 retryAfterSeconds。已经在外的部队照常行动、照常可以召回。 | 等到 retryAfterSeconds 之后再派兵；已在外的部队用 RECALL_MARCH 召回不受影响。 |
 | `INSUFFICIENT_GIFT` | （v89，AISLG-221）礼金余额不足，扣除被拒；响应附 balance（当前余额）。不扣、不写事件，其他数据不变。礼金每赛季固定发 1000，换季清零，不能转让或兑换。 | 等下一个赛季（换季后重新登录即回到 1000）或改用金币等其他方式；用 GET_STATE 的 gift 查看当前余额。 |
+| `INSUFFICIENT_INGOT` | （v108，AISLG-251）元宝余额不足，BUY_ITEM（currency = ingot）被拒；响应附 balance（当前余额）与 cost（本次花费）。不扣、不加道具、不写事件，其他数据不变。元宝只能充值获得（1.99 美元 = 1000 元宝），永久保留、换季不清零。 | 用 GET_STATE 的 ingot 看当前余额；不够就让玩家在道具商店页点「充值」，不要替玩家发起充值（Agent 无权充值，付款必须真人在浏览器里完成）。也可以改用礼金支付（BUY_ITEM 带 currency = gift 或不带 currency）。 |
 | `INSUFFICIENT_ITEM` | （v90，AISLG-222）道具数量不足，消耗被拒；响应附 itemId 与 count（当前数量）。不扣、不写事件，其他数据不变。 | 先用 GET_ITEMS 确认数量；不够时用 BUY_ITEM 用礼金买，或等获得途径（任务 / 活动）发放。 |
 | `ITEM_STACK_FULL` | （v90，AISLG-222）购买后会超过该道具的堆叠上限，购买被拒；响应附 stackMax、have（当前数量）、canBuy（还能买几张，已满为 0）。礼金与道具都不变。 | 把购买数量降到 canBuy 以内；已满时先用掉道具再买。 |
 | `ITEM_PRICE_CHANGED` | （v90，AISLG-222）BUY_ITEM 的 expectedPrice 与当前单价不一致（道具调价过）；响应附 price（当前单价）。不扣礼金、不加道具。 | 用 GET_ITEMS 刷新目录，把新单价告诉玩家，让玩家重新确认后带新单价重发；不要自动用新价重试。 |
+| `CODE_INVALID` | （v109，AISLG-253）兑换码无效：码不存在、输入规范化后不是 16 位（或含字符集外的字符）、所属批次已停用（运营停用后未兑换的码立即失效）。什么都不发，也算一次失败（影响每小时的失败次数限制）。 | 核对玩家给的码（不区分大小写，空格与横线可以带）；确实是这个码就说明它无效或这一批已停用，让运营确认。不要猜码重试。 |
+| `CODE_EXPIRED` | （v109，AISLG-253）兑换码所属批次已过期（过期后兑换返回本码）；什么都不发，也算一次失败。 | 告诉玩家这批福利已过期；不要重复尝试。 |
+| `CODE_USED` | （v109，AISLG-253）一次性码已经被兑换过（每个一次性码只能被一个账号兑换一次，兑换后作废）；什么都不发，也算一次失败。 | 告诉玩家这个码已被使用；让发码的人换一个没用过的码。 |
+| `CODE_BATCH_CLAIMED` | （v109，AISLG-253；AISLG-256 起仅通用码）本账号已经兑换过这个通用码（每个账号每个通用码只能兑一次）；什么都不发，也算一次失败。一次性码不再返回本码：同一账号可以兑同批次的多张一次性码。 | 告诉玩家这个兑换码已经兑过了；不要重复尝试（会累积失败次数）。 |
+| `CODE_EXHAUSTED` | （v109，AISLG-253）通用码的兑换人数已达上限（批次创建时设的最多兑换人数）；响应附 limit 与 used。什么都不发，也算一次失败。 | 告诉玩家这个通用码已经领完；等运营开新的一批。 |
+| `CODE_RATE_LIMITED` | （v109，AISLG-253）每账号每小时最多失败 10 次（码不存在 / 格式不对 / 已被使用 / 过期 / 同一通用码已兑过 / 已被领完都算），超过后 1 小时内所有兑换请求都返回本码，即使码是正确的；响应附 retryAfterSeconds。成功兑换不计入失败次数，本码自身也不再累加计数。 | 按 retryAfterSeconds 等待后再兑换；不要继续尝试（只会让窗口继续被占满）。 |
 | `MOVE_CITY_FAMOUS` | （v91，AISLG-220）名城（特殊城池）不能迁移；不扣令、不改任何数据。 | 换一座非名城的城迁移；名城只能靠攻占 / 经营保有。 |
 | `MOVE_CITY_ARMY_OUTSIDE` | （v91，AISLG-220）这座城有部队在外：本城发出的行军（出征 / 返程 / 运输 / 调兵）或派去别人城里的协防。响应附 count。 | 等部队回到本城（或用 RECALL_MARCH 召回、DISMISS_ASSIST 撤回协防）后再迁。驻守自己野地的部队不算在外。 |
 | `MOVE_CITY_HAS_ALLY_FORCE` | （v91，AISLG-220）盟友的部队正在协防这座城；响应附 count。迁城时不会自动遣返。 | 请盟友召回协防，或城主用 DISMISS_ASSIST 遣返后再迁。 |
@@ -22800,9 +23112,11 @@ LOGOUT 吊销本连接登录所用的令牌，服务端随即关闭连接（clos
 - 前排承伤（义兵 / 长枪兵 / 刀盾兵）+ 远程输出（弓箭兵）+ 高速反远程（轻骑兵）是通用结构；
 - 防守同理：驻军全近战时，来袭方的弓箭兵几乎无风险输出——驻军建议同样混编远程。
 
-### 野地进攻口径（v24，AISLG-48）
+### 野地进攻口径（v24，AISLG-48；战损口径 v105）
 
 打 Lv N 野地要带多少兵？下表由战斗引擎固定种子模拟生成（每组 300 局），数值调整后随文档重新生成。推荐兵力 = 守军人数的 2 倍 / 3 倍；净收益 = 战利品（受幸存部队负重封顶，四资源按集市 4:1 折金）− 战损成本，单位金当量。守军取**基准编成**；每块野地实际守军在基准上固定 ±20%，出征前建议先 SCOUT 看具体数量，被打残的野地每小时恢复基准的 25%，可趁虚再打。长枪兵 / 弓箭兵需军营 3 / 5 级。
+
+**兵力占比对称折算战损（v103 起，AISLG-244；v105 扩到所有战斗、攻守对称，AISLG-246）**：**所有**用战斗引擎结算的战斗（打野地 / NPC 城池 / 打其他玩家的城池与野地、守城战、拦截、NPC 袭击、黄巾营地、势力老巢 / 围攻、剧本战场、竞技场、将星塔、协防参战）都按同一条规则折算战损，**攻守双方各算各的**：对每一方，r = 本方参考战力 ÷ 对方参考战力；r ≤ 3 时本方战损不变；r > 3 时本方各兵种损失按 round(原损失 × 3 / r)（四舍五入、不多于原值），幸存部队同步增加——带 10 倍兵的期望战损约为 3 倍兵的 3 / r，兵力越碾压打得越干净（此前堆到 2 倍以上后战损基本不再下降）。对方参考战力为 0（空守军）时不折算；胜负、回合数、战后结算（掠夺 / 占领 / 伤兵与俘虏 / 武将经验）都不变，战报里的 losses 就是实际扣的兵；逐回合统计（roundLog）保留引擎原值，合计可能大于最终损失，以 losses 为准。被碾压的一方 r < 1/3，战损不变，所以实际只会减少强者一方的损失。上表按此口径计算：推荐兵力是「人数倍数」，换算成参考战力后部分组合已 > 3 倍守军（如 Lv5 的长枪 + 弓箭混编），因此这些行的期望净收益比只折攻方时更高。
 
 | 野地等级 | 守军（基准） | 推荐兵力 | 推荐编成 | 胜率 | 单次期望净收益 |
 |---|---|---|---|---|---|
@@ -22811,11 +23125,11 @@ LOGOUT 吊销本连接登录所用的令牌，服务端随即关闭连接（clos
 | Lv2 | 义兵 16 | 2 倍 | 义兵 32 | 100% | +185 |
 | Lv2 | 义兵 16 | 3 倍 | 义兵 48 | 100% | +436 |
 | Lv3 | 义兵 18 + 弓箭兵 1 | 2 倍 | 义兵 25 + 长枪兵 13 | 100% | +291 |
-| Lv3 | 义兵 18 + 弓箭兵 1 | 3 倍 | 义兵 38 + 长枪兵 19 | 100% | +693 |
+| Lv3 | 义兵 18 + 弓箭兵 1 | 3 倍 | 义兵 38 + 长枪兵 19 | 100% | +813 |
 | Lv4 | 义兵 24 + 弓箭兵 2 | 2 倍 | 义兵 35 + 长枪兵 17 | 100% | +173 |
-| Lv4 | 义兵 24 + 弓箭兵 2 | 3 倍 | 义兵 52 + 长枪兵 26 | 100% | +737 |
-| Lv5 | 义兵 30 + 弓箭兵 3 | 2 倍 | 长枪兵 44 + 弓箭兵 22 | 100% | +848 |
-| Lv5 | 义兵 30 + 弓箭兵 3 | 3 倍 | 长枪兵 66 + 弓箭兵 33 | 100% | +1369 |
+| Lv4 | 义兵 24 + 弓箭兵 2 | 3 倍 | 义兵 52 + 长枪兵 26 | 100% | +903 |
+| Lv5 | 义兵 30 + 弓箭兵 3 | 2 倍 | 长枪兵 44 + 弓箭兵 22 | 100% | +1067 |
+| Lv5 | 义兵 30 + 弓箭兵 3 | 3 倍 | 长枪兵 66 + 弓箭兵 33 | 100% | +1728 |
 
 新号开局五资源各 2000，建军营后约可征 23 名义兵——足以稳赢 Lv1 野地（守军义兵 8，带 16~24 名义兵单次净赚约 96~229 金当量）。
 
@@ -22859,7 +23173,7 @@ LOGOUT 吊销本连接登录所用的令牌，服务端随即关闭连接（clos
 - 只加不改：已发布的协议号、字段与错误码只新增、不删除、不改变类型与语义。
 - 新增字段不视为破坏兼容：消费方应容忍请求与响应中出现文档未列出的字段。
 - 必须破坏语义时启用新的协议号承载新行为，旧协议号保留原语义直至正式公告下线。
-- 协议版本随对外协议内容的每次变化递增；当前为 102。
+- 协议版本随对外协议内容的每次变化递增；当前为 109。
 - Agent 可在启动时请求 `GET /agent-api.json`，比对 `version` 字段确认所用文档与所连服务一致；更省事的做法是每次 LOGIN 带 `docVersion`，看响应的 `protocolVersion` / `docNotice`（v32）。
 - 增量变更：`GET /agent-api/changes/{since}`（也接受 `?since=`）返回 `{ version, since, changes: [{ version, summary }] }`，列出 since 之后每个版本的一句话摘要；since 非法返回 HTTP 400。
 

@@ -830,5 +830,128 @@
  *   启用后发一条公告：说明天数从开启当天算第 1 天，以及是哪几家本季没放（原因：该处已有玩家城）。
  *   三、换季路径不变：换季后五家照旧全部生成，faction_started_at 重置为新赛季开始时间，天数从新赛季开始算
  *   （开关在换季时关着的则删掉记录）。协议结构无变化，只有 GET_FACTIONS 的 day 语义改为「势力的第几天」。
+ * v103（兵力占比折算战损，AISLG-244）：玩家打野地原住守军与 NPC 城池（含名城城守阶段）时，
+ *   若我方出战参考战力 ÷ 守军参考战力 r > 3，攻方各兵种损失改为 round(原损失 × 3 / r)（不再多于原值），
+ *   幸存部队同步增加；胜负、守方伤亡、回合数、逐回合战报不变。r ≤ 3 与其余战斗（PvP、竞技场、将星塔、
+ *   剧本战场、NPC 袭击、势力老巢 / 围攻、黄巾营地等）一律不变。协议结构无变化，只有「野地进攻口径」表的
+ *   期望净收益随口径重算，且表格说明新增该规则。
+ *
+ * v104（在野名将改为每个账号各自可得，AISLG-245，只加不改）：
+ *   一、唯一性：29 名在野名将（wild）从「全服唯一」改为「同一账号不能有两个」——famous_heroes 主键从 (name)
+ *   放宽到 (name, owner_account_id)，同名多行；存量行原样保留、可直接用。名城 8 / 黄巾 3 / 势力首领 5 共 16 名
+ *   仍全服唯一（source <> 'wild' 的部分唯一索引 + 授予前先查）。获取流程与数值都不变（打赢守军 → 结交 →
+ *   好感 100 → 招揽；每日 5 次、同时结交 ≤ 2、名将上限 3 照旧）。
+ *   二、字段语义（结构只加一个字段）：
+ *   - GET_HEROES 的 famousClaims[]：新增 ownerCount（全服拥有该名将的账号数）；ownerUsername 对 29 名在野名将
+ *     恒为 null（不再显示单一持有人，界面显示「全服已有 N 人拥有」），名城 / 黄巾 / 首领仍给持有人；
+ *     grantedAt 改为最早一次获得时刻；wildAt 改为「已有 ≥ 1 人拥有」时给出。
+ *   - friendships[].lost 与 unlocks：只看本账号——本账号已拥有该名将才作废 / 从资格列表消失，别的账号招走
+ *     不再影响（原来「被他人招揽 → 进度作废」的口径取消）。
+ *   - MARCH / GET_WORLD_MAP / GET_TILE：TASK_INVALID_FOR_TARGET 之外新增错误码 WILD_HERO_UNOCCUPIABLE——
+ *     在野名将所在野地不能被占领（打下来只拿结交资格，地块保持无主；存量已被占的地块不处理）。
+ *   - tiles[].wildFamous / tile.wildFamousIntel / 战争迷雾的 heroSite.claimed 改为按请求账号判：本账号已拥有
+ *     该名将就不再显示标记 / 情报（原来是「被任何人招走即撤下」）。
+ *   三、下野（v94 被俘超时 / 忠诚度归零）改为只清本账号：删除本账号的武将与本账号的 famous_heroes 归属行、
+ *   只清本账号对该名将的结交进度；别的账号的同名名将与进度不变（原来清该名将全服所有账号的进度）。
+ *   四、RECRUIT_FAMOUS_HERO / BEFRIEND_HERO 的 FAMOUS_CLAIMED 语义收窄为「本账号已拥有该名将」。
+ *
+ * v105（所有战斗按兵力占比对称折算战损，AISLG-246；只改结算口径，协议结构不变）：
+ *   一、规则：v103 只给「玩家打野地原住守军 / NPC 城池」的攻方折算战损，其余战斗（打玩家、守城、
+ *   拦截、NPC 袭击、黄巾营地、势力老巢 / 围攻、剧本战场、竞技场、将星塔、协防参战）仍是「带 2 倍兵
+ *   与 10 倍兵死的一样多」。本版把同一条规则覆盖到所有用战斗引擎结算的战斗，并且攻守对称——
+ *   对每一方，r = 本方参考战力 ÷ 对方参考战力；r ≤ 3 时本方战损不变；r > 3 时本方各兵种损失改为
+ *   round(原损失 × 3 / r)（四舍五入、不多于原值），幸存部队同步增加；对方参考战力为 0 时不折算。
+ *   被碾压的一方 r < 1/3 战损不变，所以实际只会减少强者一方的损失。
+ *   二、不变的：胜负、回合数、逐回合战报（roundLog）、输出伤害、战利品、掠夺 / 占领等战后结算；
+ *   战报、伤兵 / 俘虏拆分、武将经验、幸存部队都用折算后的结果（战报里的损失数 = 实际扣的兵）。
+ *   三、实现：统一在 resolveBattle 出口折算（默认开启），各战斗出口不再各自包装，避免同一结果被
+ *   折算两次；校准脚本要引擎原始战损时显式传 crush: false。「野地进攻口径」表按对称口径重算。
+ *
+ * v106（老巢 20 营由弱到强，AISLG-247；只改数值口径与 GET_FACTIONS 一个字段的语义，不加字段）：
+ *   一、规则：五方势力老巢的 20 营不再是同一个强度，改为由弱到强等比递增——第 1 营最弱、第 20 营最强。
+ *   强度由两个锚点定：G1 = max(10,000, R10 × 0.35)、G20 = max(G1, R3 × 0.35)、
+ *   Gk = G1 × (G20 ÷ G1)^((k − 1) ÷ 19)（向下取整）；R10 / R3 = 全服战力第 10 / 第 3 名账号的单人战力
+ *   （城内 + 野地驻军 + 协防 + 行军中，口径与 v101 相同；不足 10 / 3 人取最后一名，全服无兵时两个锚点
+ *   都是 10,000）。每天刷新一次（沿用 v101 的刷新时刻），两个锚点各自取历史最大（只升不降），
+ *   当前营的残血按新旧满编战力比例缩放（按当前营序号取新旧 Gk）。战斗结算、侦察、面板剩余百分比、
+ *   恢复补满都按当前营序号的 Gk，不再有单一的「每营战力」。
+ *   二、不变的：营数 20、城墙减伤 50%、24 小时无人进攻恢复 1 营、编成比例、歼灭奖励、声望 1%、
+ *   灭亡榜单与首领名将。
+ *   三、协议：GET_FACTIONS 的 factions[].campPower 语义从「每营同一个战力」改为「当前营的战力」
+ *   （按营序号递增）——结构与字段都没变，客户端与 Agent 推当前营序号（campsTotal − campsRemaining + 1）即可。
+ *   表结构：faction_lairs 新增两个锚点列（旧行用旧 camp_power 回填，旧库行为不变）。
+ *
+ * v107（势力压制档，AISLG-249；只加不改，只影响压制生效的取值点与 GET_FACTIONS 一个字段）：
+ *   一、规则：老巢被打掉的营越多，这家势力越虚——每打掉 5 营升一档「压制」，最多 3 档：
+ *   suppressionLevel = clamp(floor((campsTotal − campsRemaining) ÷ 5), 0, 3)。压制档完全由剩余营数算出，
+ *   不存库、不加表字段：营恢复（24 小时没人进攻恢复 1 营）后自动降档；势力灭亡后不再有压制
+ *   （灭亡的势力本来就不再围攻 / 吞城）。
+ *   二、三项效果（0 / 1 / 2 / 3 档）：
+ *   - 围城军战力 = 原公式（分城官府等级 × 周倍率）× 100 / 75 / 50 / 25%，向下取整、不低于 1；
+ *     在围攻发起那一刻定，已出发的围城军不变（预警 / 战报里的 power 就是这个压制后的实际值）；
+ *   - 吞 NPC 城间隔 = 6 / 9 / 12 / 15 小时基准（仍随 time_scale 缩放、不低于 1 秒），每家按自己的档位取值，
+ *     已经计时中的下一次按「上次吞城时刻 + 新间隔」往后算，不立刻补吞；
+ *   - 每周最多吞下的玩家分城数 = 2 / 2 / 2 / 1 座（只有 3 档降为 1；本周已经吞满的不回溯）。
+ *   不变的：袭击频率与强度、势力范围半径、围攻节奏（同一座城 6 小时一次、打输 24 小时冷却）、
+ *   老巢规则（20 营由弱到强、城墙减伤 50%、24 小时恢复 1 营、歼灭奖励、灭亡与换季重生）。
+ *   三、协议：GET_FACTIONS 的 factions[] 新增 suppression = { level, siegePercent, swallowIntervalHours（未缩放的基准小时数）,
+ *   weeklyBranchCap }；新全服播报 faction_suppressed（必达，压制档变化时播一次，升档与降档都播，
+ *   detail = { faction, factionName, level, previousLevel, direction, campsTotal, campsRemaining }）。
+ *   无新增 op / 推送号 / 错误码 / 表字段。
+ *
+ * v108（元宝与第一版充值，AISLG-251，只加不改；礼金的规则一个字不改）：
+ *   一、元宝：账号新增付费货币 accounts.ingot（integer，默认 0，不回填）。只能充值获得，**永久保留**——
+ *   换季不清零（season-reset.ts 那一行 UPDATE 不碰 ingot）、玩家自己重置账号也不动，不能转让 / 赠送 / 交易；
+ *   用途与礼金相同（道具商店买便利道具），不买战力、不买资源。GET_STATE 新增 ingot。
+ *   二、道具两种货币：ITEM_DEFS 新增字段 ingotPrice（数值与 shopPrice 1:1：迁城令 50 / 高级迁城令 100）。
+ *   GET_ITEMS 的 catalog 每项新增 ingotPrice、响应新增 ingot 与 paidCounts（每种道具里元宝买的张数）；
+ *   BUY_ITEM 新增请求参数 currency（'gift' / 'ingot'，缺省 'gift'，旧客户端行为不变），expectedPrice 按所选
+ *   货币的单价核对，不一致仍返回 ITEM_PRICE_CHANGED（附 price 与 currency）；**不自动混用两种货币**，选哪种
+ *   就只扣哪种，不够返回对应的 INSUFFICIENT_GIFT / INSUFFICIENT_INGOT。返回新增 currency / paidCount / ingot。
+ *   三、元宝买的道具换季保留（用户拍板方案 1）：user_items 新增 paid_count（count 里有多少张是元宝买的，
+ *   CHECK 0 ≤ paid_count ≤ count），count 仍是总数、堆叠上限 99 仍按 count 算；元宝购买时 count 与 paid_count
+ *   同时加，礼金购买与其他来源发放只加 count；consumeItem **优先消耗免费的那部分**，用完才动元宝买的；
+ *   换季时 user_items 从 RESET_TABLES 移到 KEEP_TABLES，重置事务里改成 UPDATE user_items SET count = paid_count
+ *   再删 count = 0 的行（礼金买的 / 发放的照旧作废）。事件 item_used 的 detail 新增 paidLeft。
+ *   四、充值（只做国际站一个渠道 Creem）：新 op CREATE_TOPUP（op 155，请求 { productId }，目前只接受
+ *   topup_199 = 1.99 美元 = 1000 元宝）——落 pending 订单、调渠道建结账会话、返回 { orderId, checkoutUrl }；
+ *   **仅玩家连接**（Agent 返回 AGENT_FORBIDDEN，不进 agent-api 文档 / MCP 清单）。限额：每账号每个自然月（UTC）
+ *   最多成功充值 10 次（TOPUP_MONTHLY_LIMIT）、同一账号同时最多 1 个未支付订单（新建会把旧的 pending 作废）、
+ *   每账号滚动 1 小时最多创建 5 个订单（TOPUP_TOO_MANY_PENDING）；未支付订单 24 小时后由 Worker 置 expired。
+ *   渠道不可用（没配 CREEM_API_KEY / CREEM_WEBHOOK_SECRET / CREEM_PRODUCT_TOPUP_1000，或调渠道失败）返回
+ *   TOPUP_UNAVAILABLE。新表 topup_orders（订单）与 payment_webhook_events（provider + event_id 联合唯一，
+ *   回调去重），两张表都跨季保留（不进 RESET_TABLES）。
+ *   五、回调：HTTP POST /pay/creem/webhook（API 进程，响应 no-store、不被 CDN 缓存）。验签用原始请求体
+ *   （头 creem-signature = HMAC-SHA256(raw body) 的十六进制串），签名不对一律 400；先按事件 id 去重，
+ *   再按订单状态幂等。checkout.completed：用渠道商品 id 对照 topup_199 校验（不用金额），订单为 pending 或
+ *   expired（迟到的成功回调也入账）时事务内订单置 paid、ingot += ingot_amount、写 TOPUP_PAID。
+ *   refund.created / dispute.created：按比例回收（floor(refund_amount ÷ amount_paid × ingot_amount)，拒付按整单），
+ *   ingot 最多减到 0，减不够的部分记 clawback_short，不收回已买的道具、不动礼金、不自动封号，写 TOPUP_REFUNDED。
+ *   入账 / 回收后给在线玩家推 PUSH_ACCOUNT_STATE（reason = ingot_changed，不新增推送号）。
+ *   六、新错误码 INSUFFICIENT_INGOT / TOPUP_PRODUCT_INVALID / TOPUP_MONTHLY_LIMIT / TOPUP_TOO_MANY_PENDING /
+ *   TOPUP_UNAVAILABLE；新事件 INGOT_SPENT（ingot_spent）/ TOPUP_PAID（topup_paid）/ TOPUP_REFUNDED（topup_refunded）。
+ *   七、支付渠道适配器在 common/src/payments/（PaymentProvider 接口 + Creem 实现 + 测试用 FakeProvider），
+ *   以后加别家渠道只加适配器，不动订单与入账。
+ * v109（兑换码，AISLG-253，只加不改）：
+ *   一、新 op REDEEM_CODE（op 156，玩家与 Agent 通用）：请求 { code }（玩家输入的原文，大小写、空格、
+ *   横线都不敏感：去空格与横线、转大写后必须是 16 位且字符都在 32 个字符的集合里——0-9 与 A-Z 去掉
+ *   I / L / O / U；显示形式 XXXX-XXXX-XXXX-XXXX）。成功返回 { rewards: { ingot?, items? }, ingot, items }
+ *   （本次奖励包、领取后的元宝余额、领取后的背包全量）。失败返回新错误码 CODE_INVALID（不存在 / 格式不对 /
+ *   批次已停用）、CODE_EXPIRED（批次过期）、CODE_USED（一次性码已被用）、CODE_BATCH_CLAIMED（本账号已领过这一批，
+ *   那个码不作废）、CODE_EXHAUSTED（通用码人数已满，附 limit / used）、CODE_RATE_LIMITED（每账号每小时最多
+ *   失败 10 次，超过后 1 小时内全部拒绝，附 retryAfterSeconds）、ITEM_STACK_FULL（奖励含道具且发放后会超过
+ *   堆叠上限：整次兑换回滚，码不作废、元宝也不发；响应附 itemId / stackMax / have / canGrant）。
+ *   同一账号在同一批次里只能领一次；一次性码兑换后作废，通用码可继续被其他人兑换。
+ *   （AISLG-256 只放行规则、不改协议：一次性码不再限制同一账号同一批次只能领一张，可兑同批多张；
+ *   「同一账号同一批次只领一次」只对通用码继续生效，CODE_BATCH_CLAIMED 只在通用码出现。）
+ *   奖励由批次决定：元宝 1..100000（与充值元宝同账户、永久保留，退款 / 拒付不回收它）与 / 或道具 1..99
+ *   （按普通道具 grantItem 发放——只加 count 不加 paid_count，所以换季会清空）。
+ *   二、新事件 INGOT_GRANTED（ingot_granted，detail = { reason, amount, balance }）与 CODE_REDEEMED
+ *   （code_redeemed，detail = { batchId, codeTail, kind, rewards, ingot, items }；**码只记后 4 位**）。
+ *   兑换成功后向该账号其他在线连接推 PUSH_ACCOUNT_STATE（reason = items_changed，不新增推送号）。
+ *   三、新表 redeem_batches / redeem_codes / redeem_claims / redeem_attempts，四张表都跨季保留
+ *   （不进 RESET_TABLES：同一账号同批次只能领一次、一次性码只能被用一次这两条约束靠它们）；
+ *   redeem_attempts 保留 7 天，由 Worker 定期清理。运营侧用 backend/scripts/redeem-codes.ts
+ *   （create / list / export / disable 四个子命令），没有网页后台。
  */
-export const PROTOCOL_VERSION = 102;
+export const PROTOCOL_VERSION = 109;
