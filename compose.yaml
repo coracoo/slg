@@ -53,6 +53,11 @@ services:
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
       GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:-}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8424}
+      # Optional upstream Linux.do login; empty values leave it disabled.
+      LINUXDO_CLIENT_ID: ${LINUXDO_CLIENT_ID:-}
+      LINUXDO_CLIENT_SECRET: ${LINUXDO_CLIENT_SECRET:-}
+      LINUXDO_REDIRECT_URI: ${LINUXDO_REDIRECT_URI:-}
+      LINUXDO_SITES: ${LINUXDO_SITES:-}
     healthcheck:
       test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:8080/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 10s

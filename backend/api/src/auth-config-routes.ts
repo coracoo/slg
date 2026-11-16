@@ -21,6 +21,7 @@ export interface AuthConfigDeps {
   isPasswordLoginDisabled: (host: string | null) => boolean;
   /** 请求站点的 GitHub 配置套（null = 该站未配置） */
   githubSiteForHost: (host: string | null) => GithubSiteConfig | null;
+  linuxdoEnabledForHost?: (host: string | null) => boolean;
 }
 
 export function registerAuthConfigRoute(app: FastifyInstance, deps: AuthConfigDeps): void {
@@ -40,6 +41,7 @@ export function registerAuthConfigRoute(app: FastifyInstance, deps: AuthConfigDe
       passwordLogin,
       passwordSignup: passwordLogin && deps.passwordSignupEnabled === true,
       githubEnabled: deps.githubSiteForHost(host) !== null,
+      linuxdoEnabled: deps.linuxdoEnabledForHost?.(host) ?? false,
     };
   });
 }

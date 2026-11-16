@@ -94,3 +94,12 @@ docker compose exec -T api node dist/scripts/season.js status
 ## 验证边界
 
 本次只有源码差异与合并、协议文档副本、工作流条件、远端提交和部署引用的静态核对，没有运行应用测试、编译、镜像、数据库迁移或浏览器端到端验证。不能把静态文件核对称为 `docker compose config`、镜像构建或真实数据库测试。未访问、启动或修改你的 NAS、正式数据库和原存档。
+
+
+## 2026-11-16 上游同步：Linux.do 与自托管配置并存
+
+合入上游 `1c381a1c07edc3135baaadf499c0042dfec0872b`（协议 v110、MCP 0.2.9）。保留上游 Linux.do 登录/绑定及配置，自托管 `LOCAL_PASSWORD_SIGNUP_ENABLED` 独立保留，默认仍为 `false`，不会影响已有账号登录。环境示例及后端说明的自托管补充置于文末。
+
+Linux.do 可选：在原 `.env` 追加 `LINUXDO_CLIENT_ID`、`LINUXDO_CLIENT_SECRET`、`LINUXDO_REDIRECT_URI`，沿用 `FRONTEND_URL`；多站点可追加 `LINUXDO_SITES`。不配置则关闭，不需要为本次同步申请 OAuth。回调为实际站点的 `/auth/linuxdo/callback`，不得缓存；具体字段见上游后端 README。
+
+此次仅做静态合并和远端只读核对，未运行测试、类型检查、构建或部署；NAS 升级由用户决定，未操作 NAS 或数据库。
