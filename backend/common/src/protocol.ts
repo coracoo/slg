@@ -283,6 +283,8 @@ export const Op = {
    *  CODE_RATE_LIMITED） */
   REDEEM_CODE: 156,
   OAUTH_AUTH_START: 157,
+  /** C→S Linux.do 微应用登录（v113，AISLG-261：握手阶段通过平台令牌验签后换取会话令牌。**仅玩家连接**，Agent 返回 AGENT_FORBIDDEN 且不进 agent-api 文档） */
+  MAPP_LOGIN: 158,
   /** C→S 公告列表（v60，AISLG-162：生效中公告，或 history=true 的往期；玩家与 Agent 通用） */
   GET_ANNOUNCEMENTS: 96,
   /** C→S 公告正文（v60，AISLG-162：可见的公告，含往期；玩家与 Agent 通用） */
@@ -452,6 +454,10 @@ export const ErrorCode = {
   OUTER_NOT_CLEARED: 'OUTER_NOT_CLEARED',
   /** 放弃分城被拒：该城放弃冷却未结束，本账号暂不能再占回此 NPC 城（v57，AISLG-153；占领资格复核也返回它） */
   DISCARD_COOLDOWN: 'DISCARD_COOLDOWN',
+  /** 占领名城被拒：本账号名下已有 1 座名城（v111，AISLG-259；每账号同一时间最多 1 座，到达复核也返回它） */
+  FAMOUS_LIMIT: 'FAMOUS_LIMIT',
+  /** 占领名城被拒：本账号刚因任期届满失去这座名城，48 小时内不能占回它（v111，AISLG-259；响应附 bannedUntil / retryAfterSeconds） */
+  FAMOUS_BANNED: 'FAMOUS_BANNED',
   /** 放弃分城被拒：主城不能放弃（v57，AISLG-153） */
   DISCARD_MAIN_CITY: 'DISCARD_MAIN_CITY',
   /** 该城或其名下野地正有行军在途（指向本城）或有未结的 NPC 来袭：放弃分城（v57）与遣散士兵（v84，AISLG-209）都拒绝 */
@@ -566,6 +572,12 @@ export const ErrorCode = {
   GITHUB_ALREADY_BOUND: 'GITHUB_ALREADY_BOUND',
   LINUXDO_UNAVAILABLE: 'LINUXDO_UNAVAILABLE',
   LINUXDO_ALREADY_BOUND: 'LINUXDO_ALREADY_BOUND',
+  /** Linux.do 微应用服务未开启或当前连接非微应用环境（v113，AISLG-261） */
+  MAPP_UNAVAILABLE: 'MAPP_UNAVAILABLE',
+  /** Linux.do 论坛信任等级低于准入门槛（v113，AISLG-261） */
+  MAPP_TRUST_LEVEL_LOW: 'MAPP_TRUST_LEVEL_LOW',
+  /** Linux.do 微应用平台令牌无效或缺失（v113，AISLG-261：握手验证失败走 HTTP 401，此码为已建连接兜底） */
+  MAPP_TOKEN_INVALID: 'MAPP_TOKEN_INVALID',
   /** 请求过于频繁（v43：二维码生成 / Google 登录尝试 / GitHub 授权发起均按 IP 限频，20 次/分钟） */
   RATE_LIMITED: 'RATE_LIMITED',
   // AGENT_TOKEN_LIMIT（v43，多令牌上限）已随 v46 移除：每账号一个永久令牌，无上限概念。
@@ -947,6 +959,9 @@ export interface GetEventsRequestData {
 }
 
 export interface GetAgentInfoResponseData {
+  /** 账号第一次创建的时间（ISO 8601，v115 新增）：取 accounts.created_at，玩家与 Agent 连接取值相同；
+   *  只读字段，不参与任何游戏规则 */
+  accountCreatedAt: string;
   agentOnline: boolean;
   connections: Array<{ role: InitiatorRole; connectedAt: string }>;
   /** Agent 最近一次上报的计划（v10；从未上报为 null） */
@@ -1107,6 +1122,7 @@ export type {
 } from './protocol-agent';
 export type {
   ServerBroadcastType,
+  ServerBroadcastCategory,
   ServerBroadcastView,
   GetServerBroadcastsRequestData,
   GetServerBroadcastsResponseData,
@@ -1116,7 +1132,16 @@ export type {
   ModelLeaderboardEntryView,
   GetLeaderboardResponseData,
 } from './protocol-server';
-export { SERVER_BROADCAST_TYPES, isServerBroadcastType, LEADERBOARD_KINDS, isLeaderboardKind } from './protocol-server';
+export {
+  SERVER_BROADCAST_TYPES,
+  SERVER_BROADCAST_CATEGORIES,
+  SERVER_BROADCAST_EVENT_TYPES,
+  isServerBroadcastType,
+  isServerBroadcastCategory,
+  serverBroadcastCategory,
+  LEADERBOARD_KINDS,
+  isLeaderboardKind,
+} from './protocol-server';
 export type {
   BuildRequestData,
   UpgradeRequestData,

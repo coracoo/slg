@@ -71,6 +71,7 @@ import {
 import { REQUEST_GOOGLE_BIND, REQUEST_GOOGLE_LOGIN } from './protocol-doc-ops-google';
 import { REQUEST_GITHUB_AUTH_START, REQUEST_OAUTH_REDEEM } from './protocol-doc-ops-github';
 import { REQUEST_OAUTH_AUTH_START } from './protocol-doc-ops-linuxdo';
+import { REQUEST_MAPP_LOGIN } from './protocol-doc-ops-mapp';
 import { PUSH_YELLOW_TURBAN_STATE, REQUEST_GET_YELLOW_TURBAN } from './protocol-doc-ops-yt';
 import { PUSH_MOVING_TARGET_STATE, REQUEST_GET_MOVING_TARGETS } from './protocol-doc-ops-moving';
 import {
@@ -190,7 +191,7 @@ const REQUEST_GET_STATE: RequestOpDoc = {
     { name: 'city.shieldUntil', type: 'string | null', desc: '主动免战截止（v38，AISLG-122，账号级）：TRUCE 开启后 12 小时基准随缩放；开着时别人打不了你（含 NPC 袭击目标池跳过）、你也不能出兵打玩家（SELF_TRUCE_ACTIVE，打野地 / NPC 不受限）。未开启为 null。' },
     { name: 'city.shieldNextAt', type: 'string | null', desc: '下一次可开启主动免战的时刻（v38，AISLG-122；每周一次，ISO 8601）；当前可开启为 null。' },
     { name: 'city.durability', type: 'number | null', desc: '分城城防值（v40，AISLG-124）：0..100，被「占领」打赢一击 −35（冲车加成最多再 −15）、归零一击换主；免战结束后每小时回涨 10 至满（免战内不回涨）。主城为 null（永不被占领）。' },
-    { name: 'city.luoyangBonusPercent（v79 洛阳之主联盟 +5%，已计入 production）/ city.famousName / city.productionBonusPercent', type: 'string | null / number', desc: '名城分城标记（v24 新增，AISLG-56）：占领名城得到的分城带名城名（famousName）与独占产量加成百分数（productionBonusPercent，当前 20，已计入 production）；普通城为 null / 0。v64（AISLG-168）：占领名城的分城可征募该名城的专属兵（名城 → 兵种对照见 RECRUIT 的 summary），失守即失去征募资格。' },
+    { name: 'city.luoyangBonusPercent（v79 洛阳之主联盟 +5%，已计入 production）/ city.famousName / city.productionBonusPercent / city.famousExpiresAt', type: 'string | null / number', desc: '名城分城标记（v24 新增，AISLG-56）：占领名城得到的分城带名城名（famousName）与独占产量加成百分数（productionBonusPercent，当前 20，已计入 production）；普通城为 null / 0。v64（AISLG-168）：占领名城的分城可征募该名城的专属兵（名城 → 兵种对照见 RECRUIT 的 summary），失守即失去征募资格。v111（AISLG-259 名城任期轮换）：famousExpiresAt 为该城的任期到期时刻（ISO 8601；普通城为 null），到期该城重归无主（城里驻军 / 名下野地驻军 / 在外部队回主城，建筑与库存随城作废）。' },
     { name: 'city.famousEffect', type: 'object | null', desc: `名城独有效果（v62 新增，AISLG-166）：{ kind, percent, resources }，只有占领者享受、跟着城走（换主人归新主人，放弃 / 被占即失效）。洛阳守城城墙减伤 +5 个百分点、长安箭塔伤害 +20%、官渡 / 成都 / 建业 / 邺城辖下对应资源的野地产出 +25%、许昌自己城池之间的调兵 / 运输行军速度 +20%、襄阳仓库防掠夺保护额 +50%。普通城为 null。` },
     { name: 'city.guard', type: 'object | null', desc: '城守（v36 新增，AISLG-115）：该城任命的武将 { heroId, name, famous, lead, force, wit, level, bonusPercent }；未任为 null。产量加成（四资源非金，智力 × 0.1% 封顶 5%）已计入 production；守城战另享攻防加成（见 ASSIGN_HERO）。' },
     { name: 'city.recruitQueue', type: 'array', desc: '征兵队列（v11 新增）：第 1 项为征募中（status=recruiting，dueAt 非空），其余为排队（status=queued，dueAt 为 null）；已取消条目不在其中。' },
@@ -206,7 +207,7 @@ const REQUEST_GET_STATE: RequestOpDoc = {
     ...INGOT_STATE_FIELDS,
     ...MOVE_CITY_STATE_FIELDS,
     { name: 'cities', type: 'array', desc: 'v12 新增：账号全部城池 { id, name, level, x, y, isMain, title 城池称号, nobility 爵位 }，主城在前；v24 起 level = 各城官府等级。未占领 NPC 城池时只有主城一座。' },
-    { name: 'branch', type: 'object', desc: 'v24 新增（AISLG-58）：分城名额 { count 现有分城数（不含主城）, limit 上限 = floor(主城官府等级 ÷ 2)（v57 由 ÷3 放宽）, minGovernment 占领 NPC 城所需的主城官府最低等级（3） }。名城（AISLG-56）同样计入。' },
+    { name: 'branch', type: 'object', desc: 'v24 新增（AISLG-58）：分城名额 { count 现有分城数（不含主城）, limit 上限 = floor(主城官府等级 ÷ 2)（v57 由 ÷3 放宽）, minGovernment 占领 NPC 城所需的主城官府最低等级（3）, famousCount 现有名城数（v111 新增，AISLG-259）, famousLimit 同时可占名城数上限（v111：恒为 1） }。名城（AISLG-56）同样计入分城数。' },
     { name: 'capitalSwap', type: 'object', desc: 'v82 新增（AISLG-205，设为主城）：{ cooldownUntil 设为主城的冷却截止（ISO 8601，冷却未结束才有值，否则 null）, underAttack 本账号任一城或野地正有他人玩家的掠夺 / 占领出征在途, blocked 逐分城的不可设原因 { [cityId]: FAMOUS_CITY_NOT_CAPITAL / CAPITAL_SWAP_DURABILITY_LOW / BRANCH_LIMIT_EXCEEDED }（未列出的分城可设） }。供前端置灰，权威判定仍在 SET_CAPITAL。' },
     { name: 'city.storage', type: 'object', desc: '储量上限（v7 新增，v8 规则确认；v22 AISLG-41 随全局缩放）：{ gold, food, wood, stone, iron }；四资源各自 = （10000 + 对应资源**建筑产量**（各生产建筑等级 × 每级速率之和，**不含**无建筑的 100/h 基础产量）× 100）× timeScale，金币 = 100 万 × timeScale——上限与产出同幅缩放，填满时长不受缩放影响：四资源恒为基准 100 小时；金币随官府等级与金矿占领加成变化（仅有官府产金时 = 10000 ÷ 官府等级 小时，官府 Lv4 时才是 2500 小时），请用 storage[k] ÷ production[k] 现算。达到上限后停止对应生产；已有超限存量不扣减。仓库不改变储量上限（v21 起防掠夺保护消费方已接入：NPC 袭击主城攻破后可掠量 = max(0, 存量 − 保护额)，保护量 4000×等级、四资源固定均分各 1000×等级；金币不受仓库保护，但 NPC 单次最多抢走存量的 5%（v41 AISLG-125）、玩家互掠为存量的 10%）。' },
     { name: 'city.queue', type: 'array', desc: '建造队列（v4 新增）：第 1 项为在建（status=building，dueAt 非空），其余为排队（status=queued，dueAt 为 null），按入队顺序；已取消的条目不在其中（CANCEL_BUILD 取消）。' },
@@ -306,7 +307,7 @@ const REQUEST_GET_EVENTS: RequestOpDoc = {
     {
       name: 'events[].type',
       type: 'string',
-      desc: "事件类型：'build_started' | 'build_queued' | 'build_completed' | 'build_cancelled'（v7） | 'recruit_started' | 'recruit_queued' | 'recruit_completed' | 'recruit_cancelled'（v11） | 'march_started' | 'march_completed' | 'wilderness_occupied' | 'wilderness_lost'（detail = { x, y, cause = npc_attack / recall / conquest / inactive（v98，AISLG-238，账号长期未上线被收回）, terrain, level }） | 'npc_city_occupied' | 'npc_raid'（v12） | 'city_renamed'（v7） | 'account_reset'（v9，重置后事件流只剩这一条） | 'agent_connected' | 'agent_disconnected' | 'gift_spent'（v89，礼金扣除，detail = { reason, amount, balance }）· 'item_granted' / 'item_used' / 'item_bought'（v90，AISLG-222，道具发放 { itemId, requested, granted, reason } / 消耗 { itemId, amount, left, reason } / 礼金购买 { itemId, count, price, cost, owned, gift }） | 'resource_exchanged'（v22，集市兑换成交，detail = { resource, amount, gold, rate }） | 'npc_attack_warning'（v23，NPC 袭击预警，detail = { x, y, target, terrain, level, armyMin, armyMax, arriveAt, attackId }；v100 起势力范围内的袭击另带 faction = { key, name, nameEn } 与 lair = { x, y }（出发老巢），见 PUSH_NPC_ATTACK_WARNING） | 'starvation_warning' / 'mutiny'（v34，断粮预警 / 哗变） | 'hero_recruited' / 'hero_dismissed' / 'hero_arrears' / 'hero_wounded' / 'hero_level_up' / 'hero_granted' / 'guard_changed'（v36，AISLG-114/115/116，武将：招募 / 解雇 / 欠饷 / 重伤 / 升级 / 获得名将 / 城守任命）· 'wilderness_depleted'（v61，AISLG-165，名下野地储量采空，detail = { x, y, terrain, level, at }）· 'truce_cancelled'（v71，AISLG-190，主动免战提前解除，detail = { until, cancelledAt }）· 'troops_disbanded'（v84，AISLG-209，遣散城内驻军，detail = { cityId, troops, refunded }）· 'hero_left'（v94，AISLG-228，名将下野，detail = { heroId, heroName, cause = loyalty / captive_expired }，胜方得结交资格时另有一条 qualified = true）/ 'hero_captured'（v94，名将被俘，主人与胜方各一条，detail = { heroId, heroName, ownerUsername, captorUsername, capturedUntil, ransomGold, side }）/ 'hero_ransomed'（v94，名将被赎回，detail = { heroId, heroName, ransomGold, taxShare, destroyed, side }）/ 'hero_loyalty_low'（v94，忠诚度降到 30 及以下，detail = { heroId, heroName, loyalty }）· 'faction_siege_warning'（v100，AISLG-240，势力围攻分城预警，detail = { siegeId, faction: { key, name, nameEn }, cityId, cityName, x, y, level, power, durability, beaconLevel, intel, armyMin, armyMax, arriveAt }）/ 'faction_siege'（v100，围攻结算，detail = { siegeId, faction, cityId, cityName, x, y, power, garrisonPower, rounds, losses, reportId, outcome = repelled / hit / swallowed, durability, damage?, durabilityAfter?, protectedUntil? }）/ 'faction_city_lost'（v100，城被势力吞下，detail = { cityId, cityName, x, y, faction, mainCityId, wildernessLost, facilitiesLost, reportId, siegeId }）。",
+      desc: "事件类型：'build_started' | 'build_queued' | 'build_completed' | 'build_cancelled'（v7） | 'recruit_started' | 'recruit_queued' | 'recruit_completed' | 'recruit_cancelled'（v11） | 'march_started' | 'march_completed' | 'wilderness_occupied' | 'wilderness_lost'（detail = { x, y, cause = npc_attack / recall / conquest / inactive（v98，AISLG-238，账号长期未上线被收回）, terrain, level }） | 'npc_city_occupied' | 'npc_raid'（v12） | 'city_renamed'（v7） | 'account_reset'（v9，重置后事件流只剩这一条） | 'famous_expiring' / 'famous_expired'（v111，AISLG-259 名城任期快到 / 任期届满重归无主；detail = { name, cityId, x, y, stage?, expiresAt?, expiredAt?, bannedUntil? }） | 'agent_connected' | 'agent_disconnected' | 'gift_spent'（v89，礼金扣除，detail = { reason, amount, balance }）· 'item_granted' / 'item_used' / 'item_bought'（v90，AISLG-222，道具发放 { itemId, requested, granted, reason } / 消耗 { itemId, amount, left, reason } / 礼金购买 { itemId, count, price, cost, owned, gift }） | 'resource_exchanged'（v22，集市兑换成交，detail = { resource, amount, gold, rate }） | 'npc_attack_warning'（v23，NPC 袭击预警，detail = { x, y, target, terrain, level, armyMin, armyMax, arriveAt, attackId }；v100 起势力范围内的袭击另带 faction = { key, name, nameEn } 与 lair = { x, y }（出发老巢），见 PUSH_NPC_ATTACK_WARNING） | 'starvation_warning' / 'mutiny'（v34，断粮预警 / 哗变） | 'hero_recruited' / 'hero_dismissed' / 'hero_arrears' / 'hero_wounded' / 'hero_level_up' / 'hero_granted' / 'guard_changed'（v36，AISLG-114/115/116，武将：招募 / 解雇 / 欠饷 / 重伤 / 升级 / 获得名将 / 城守任命）· 'wilderness_depleted'（v61，AISLG-165，名下野地储量采空，detail = { x, y, terrain, level, at }）· 'truce_cancelled'（v71，AISLG-190，主动免战提前解除，detail = { until, cancelledAt }）· 'troops_disbanded'（v84，AISLG-209，遣散城内驻军，detail = { cityId, troops, refunded }）· 'hero_left'（v94，AISLG-228，名将下野，detail = { heroId, heroName, cause = loyalty / captive_expired }，胜方得结交资格时另有一条 qualified = true）/ 'hero_captured'（v94，名将被俘，主人与胜方各一条，detail = { heroId, heroName, ownerUsername, captorUsername, capturedUntil, ransomGold, side }）/ 'hero_ransomed'（v94，名将被赎回，detail = { heroId, heroName, ransomGold, taxShare, destroyed, side }）/ 'hero_loyalty_low'（v94，忠诚度降到 30 及以下，detail = { heroId, heroName, loyalty }）· 'faction_siege_warning'（v100，AISLG-240，势力围攻分城预警，detail = { siegeId, faction: { key, name, nameEn }, cityId, cityName, x, y, level, power, durability, beaconLevel, intel, armyMin, armyMax, arriveAt }）/ 'faction_siege'（v100，围攻结算，detail = { siegeId, faction, cityId, cityName, x, y, power, garrisonPower, rounds, losses, reportId, outcome = repelled / hit / swallowed, durability, damage?, durabilityAfter?, protectedUntil? }）/ 'faction_city_lost'（v100，城被势力吞下，detail = { cityId, cityName, x, y, faction, mainCityId, wildernessLost, facilitiesLost, reportId, siegeId }）。",
     },
     { name: 'events[].initiator', type: "'player' | 'agent' | null", desc: '发起事件的连接声明的登录类型。' },
     { name: 'events[].cityId', type: 'string | null', desc: '关联城池 id，无关联时为 null。' },
@@ -369,9 +370,10 @@ const REQUEST_GET_AGENT_INFO: RequestOpDoc = {
   name: 'GET_AGENT_INFO',
   title: '查询 Agent 信息',
   preAuth: false,
-  summary: '返回当前 Agent 是否在线、各在线 Agent 连接的上线时间、Agent 最近上报的计划（v10 起的 plan 快照），以及 Agent 近期事件（最新 10 条，只含 initiator 为 agent 的事件）；账号绑定状态（wechatBound / googleBound / githubBound + githubLogin，供网页设置区；Agent 令牌不在此下发——它经 GET_AGENT_TOKEN 专门协议、仅玩家连接可查，v46）。v49 起不再返回 directive（作战方针已移除：玩家改与自己的 Agent 直接讨论）。',
+  summary: '返回当前 Agent 是否在线、各在线 Agent 连接的上线时间、Agent 最近上报的计划（v10 起的 plan 快照），以及 Agent 近期事件（最新 10 条，只含 initiator 为 agent 的事件）；账号绑定状态（wechatBound / googleBound / githubBound + githubLogin，供网页设置区；Agent 令牌不在此下发——它经 GET_AGENT_TOKEN 专门协议、仅玩家连接可查，v46）。v49 起不再返回 directive（作战方针已移除：玩家改与自己的 Agent 直接讨论）。v115 新增 accountCreatedAt（账号创建时间，只读）。',
   requestFields: [],
   dataFields: [
+    { name: 'accountCreatedAt', type: 'string', desc: '账号第一次创建的时间（ISO 8601，v115 新增）：取账号表已有的 accounts.created_at，玩家连接与 Agent 连接取到的值相同。纯只读字段，不参与任何游戏规则。' },
     { name: 'agentOnline', type: 'boolean', desc: '是否存在至少一条声明为 Agent 的在线连接。' },
     { name: 'connections', type: 'array', desc: '当前在线的 Agent 连接列表。' },
     { name: 'connections[].role', type: "'agent'", desc: '恒为 agent（本列表只含 Agent 连接）。' },
@@ -398,6 +400,7 @@ const REQUEST_GET_AGENT_INFO: RequestOpDoc = {
         seq: 4,
         ok: true,
         data: {
+          accountCreatedAt: '2026-09-20T11:22:33.000Z',
           agentOnline: true,
           connections: [{ role: 'agent', connectedAt: '2026-09-25T07:59:00.000Z' }],
           plan: {
@@ -559,6 +562,8 @@ export const OP_DOC: Record<Op, OpDoc> = {
   [Op.GOOGLE_BIND]: REQUEST_GOOGLE_BIND,
   [Op.GITHUB_AUTH_START]: REQUEST_GITHUB_AUTH_START,
   [Op.OAUTH_AUTH_START]: REQUEST_OAUTH_AUTH_START,
+  // Linux.do 微应用（v113，AISLG-261）：仅玩家连接，不进 Agent 文档（见 protocol-doc-ops-mapp.ts 的 MAPP_AGENT_HIDDEN_OPS）
+  [Op.MAPP_LOGIN]: REQUEST_MAPP_LOGIN,
   [Op.OAUTH_REDEEM]: REQUEST_OAUTH_REDEEM,
   [Op.RESEARCH_TECH]: withCityId(REQUEST_RESEARCH_TECH),
   [Op.CANCEL_RESEARCH]: REQUEST_CANCEL_RESEARCH,

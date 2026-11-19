@@ -12,6 +12,7 @@ import { useGameSession } from './state/useGameSession';
 import { useIncomingAttacks } from './state/useIncomingAttacks';
 import { reportShareLabel } from './components/chat/chatText';
 import { useCopy } from './i18n/bundle';
+import { MappStatusScreen } from './mapp/MappStatusScreen';
 
 export default function App() {
   const session = useGameSession();
@@ -26,6 +27,8 @@ export default function App() {
   const [leaderboardKind, setLeaderboardKind] = useState<LeaderboardKind>('power');
   const [ytOpen, setYtOpen] = useState(false);
   const [warningOpen, setWarningOpen] = useState(false);
+  // 新手接入弹窗（AISLG-267）：Agent 面板「接入指引」手动打开（自动弹由 ModalHost 自己判断）
+  const [guideOpen, setGuideOpen] = useState(false);
   const { fetchLeaderboard } = session;
   const openLeaderboard = (kind: LeaderboardKind = leaderboardKind) => {
     setLeaderboardKind(kind);
@@ -58,6 +61,7 @@ export default function App() {
     openWarning: () => setWarningOpen(true),
     openLeaderboard,
     openYellowTurban: () => setYtOpen(true),
+    openNewcomerGuide: () => setGuideOpen(true),
   };
 
   return (
@@ -85,8 +89,17 @@ export default function App() {
                     onCloseYt={() => setYtOpen(false)}
                     warningOpen={warningOpen}
                     onCloseWarning={() => setWarningOpen(false)}
+                    guideOpen={guideOpen}
+                    onCloseGuide={() => setGuideOpen(false)}
                   />
                 </>
+              ) : typeof __MAPP__ !== 'undefined' && __MAPP__ ? (
+                <MappStatusScreen
+                  mode={session.loginError ? (session.loginErrorCode === 'MAPP_TRUST_LEVEL_LOW' ? 'trust-level-low' : 'error') : 'loading'}
+                  errorCode={session.loginErrorCode ?? undefined}
+                  message={session.loginError ?? undefined}
+                  onRetry={session.loginWithMapp}
+                />
               ) : (
                 <main role="主体-未登录" className="flex h-dvh justify-center overflow-y-auto p-3">
                   <div role="主体-登录框" className="mt-[10vh] h-fit w-full max-w-lg">

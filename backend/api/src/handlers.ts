@@ -86,6 +86,7 @@ import { handleWechatOp, onWxConnectionClosed, type WxService } from './handlers
 import { handleGoogleBind, handleGoogleLogin, type GoogleService } from './handlers-google';
 import { handleGithubAuthStart, handleOauthRedeem, type GithubService } from './handlers-github';
 import { handleOauthAuthStart, type LinuxdoService } from './handlers-linuxdo';
+import type { MappService } from './mapp';
 import { handleGetServerBroadcasts } from './handlers-server';
 import { handleChatOp } from './handlers-chat';
 import { handleClaimDaily, handleGetDaily, handleGetSignin, handleSignin } from './handlers-quest';
@@ -111,6 +112,7 @@ import { handleMoveCity } from './handlers-move-city';
 import { loadMoveCityView } from '../../common/src/move-city-db';
 import { SEASON_GIFT } from '../../common/src/gift';
 import { BRANCH_MIN_GOVERNMENT, branchCityLimit } from '../../common/src/branch-city';
+import { FAMOUS_CITY_LIMIT } from '../../common/src/famous-tenure';
 import { handleGetSeason, handleGetHallOfFame, respondMaintenance } from './handlers-season';
 import { maintenanceActive } from './maintenance-gate';
 
@@ -124,6 +126,7 @@ export interface HandlerContext {
   /** GitHub 一键登录服务（v45；未配置 GitHub OAuth App 或单元测试不提供时，相关协议返回 GITHUB_UNAVAILABLE） */
   github?: GithubService;
   linuxdo?: LinuxdoService;
+  mapp?: MappService;
   /** 关闭密码登录的站点 Host（v47，AISLG-130：PASSWORD_LOGIN_DISABLED_HOSTS，如国际站
    *  slg.yuntianyou.cc）；这些 Host 上的连接发 LOGIN 密码登录返回 PASSWORD_LOGIN_DISABLED */
   passwordDisabledHosts: ReadonlySet<string>;
@@ -137,7 +140,7 @@ export interface HandlerContext {
 /** 登录前即可发送的协议：LOGIN、微信扫码登录一组（WX_QR_CREATE 的 bind 用途在处理器内要求已登录）、
  *  Google 登录（GOOGLE_BIND 在处理器内要求玩家已登录）与 GitHub 授权 / 一次性码兑换
  * （GITHUB_AUTH_START 的 bind 用途在处理器内要求玩家已登录） */
-const PRE_AUTH_OPS: ReadonlySet<number> = new Set([Op.LOGIN, Op.WX_QR_CREATE, Op.WX_SCAN, Op.WX_CONFIRM, Op.WX_CANCEL, Op.GOOGLE_LOGIN, Op.GITHUB_AUTH_START, Op.OAUTH_AUTH_START, Op.OAUTH_REDEEM]);
+const PRE_AUTH_OPS: ReadonlySet<number> = new Set([Op.LOGIN, Op.WX_QR_CREATE, Op.WX_SCAN, Op.WX_CONFIRM, Op.WX_CANCEL, Op.GOOGLE_LOGIN, Op.GITHUB_AUTH_START, Op.OAUTH_AUTH_START, Op.OAUTH_REDEEM, Op.MAPP_LOGIN]);
 
 /** 换季维护期间仍可发送的协议（v65）：登录相关、LOGOUT 与 GET_SEASON；其余游戏类请求返回 MAINTENANCE */
 const MAINTENANCE_EXEMPT_OPS: ReadonlySet<number> = new Set([...PRE_AUTH_OPS, Op.LOGOUT, Op.GET_SEASON]);
@@ -437,6 +440,13 @@ async function dispatchOp(
     case Op.OAUTH_REDEEM:
       await handleOauthRedeem(ctx, conn, op, seq, data);
       break;
+    case Op.MAPP_LOGIN:
+      if (!ctx.mapp) {
+        respondError(ctx.registry, conn, op, seq, 'MAPP_UNAVAILABLE');
+        break;
+      }
+      await ctx.mapp.handleMappLogin(ctx, conn, op, seq);
+      break;
     case Op.RECRUIT: {
       const params = readRecruitParams(data);
       if (!params) {
@@ -709,12 +719,13 @@ async function handleGetState(
   // v12：附带账号全部城池（主城在前；占领 NPC 城池后出现分城），供客户端定位与展示；
   // v24（AISLG-58）：level = 各城官府等级；branch 给出分城名额与占领门槛
   const citiesRes = await ctx.pool.query(
-    `SELECT c.id, c.name, COALESCE(${effectiveLevelSql('g.level', "'government'", 'c.famous_name')}, 0)::int AS level, c.x, c.y
+    `SELECT c.id, c.name, COALESCE(${effectiveLevelSql('g.level', "'government'", 'c.famous_name')}, 0)::int AS level, c.x, c.y,
+            c.famous_name
      FROM cities c LEFT JOIN city_buildings g ON g.city_id = c.id AND g.kind = 'government'
      WHERE c.account_id = $1 ORDER BY c.created_at`,
     [accountId],
   );
-  const cities = citiesRes.rows.map((row: { id: string; name: string; level: number; x: number | null; y: number | null }, index: number) => ({
+  const cities = citiesRes.rows.map((row: { id: string; name: string; level: number; x: number | null; y: number | null; famous_name: string | null }, index: number) => ({
     id: row.id,
     name: row.name,
     level: row.level,
@@ -729,6 +740,9 @@ async function handleGetState(
     count: Math.max(0, cities.length - 1),
     limit: branchCityLimit(mainGovernment),
     minGovernment: BRANCH_MIN_GOVERNMENT,
+    // v111（AISLG-259）：名城任期轮换——现有名城数与同时可占上限（前端据此在出征前提示「已占名城」）
+    famousCount: citiesRes.rows.filter((row: { famous_name: string | null }) => row.famous_name !== null).length,
+    famousLimit: FAMOUS_CITY_LIMIT,
   };
   // v82（AISLG-205）：设为主城的冷却 / 来袭 / 逐城不可设原因，供前端置灰
   const capitalSwap = await loadCapitalSwapView(ctx.pool, accountId);

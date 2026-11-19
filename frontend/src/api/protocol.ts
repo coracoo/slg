@@ -5,7 +5,7 @@ import type { CityGuardView } from './protocol-hero';
 import type { CityStratagemView } from './protocol-stratagem';
 import { RESOURCE_KEYS } from './protocol-wire';
 
-export const PROTOCOL_VERSION = 109;
+export const PROTOCOL_VERSION = 115;
 
 /** 协议号（请求与响应用同一值，推送以 op 区分类型） */
 export const Op = {
@@ -252,6 +252,8 @@ export const Op = {
   GITHUB_AUTH_START: 62,
   /** 发起第三方 OAuth 授权：data.provider 与 data.purpose */
   OAUTH_AUTH_START: 157,
+  /** 用平台令牌握手后换取会话令牌（v113，AISLG-261）：Linux.do 微应用登录 */
+  MAPP_LOGIN: 158,
   /** 用一次性登录码换会话令牌（v45）：data.code；OAuth 回跳进页面时使用 */
   OAUTH_REDEEM: 63,
   PUSH_BUILD_STATE: 2000,
@@ -449,6 +451,9 @@ export type ErrorCode =
   | 'GITHUB_ALREADY_BOUND'
   | 'LINUXDO_UNAVAILABLE'
   | 'LINUXDO_ALREADY_BOUND'
+  | 'MAPP_UNAVAILABLE'
+  | 'MAPP_TRUST_LEVEL_LOW'
+  | 'MAPP_TOKEN_INVALID'
   | 'RATE_LIMITED'
   | 'AGENT_PASSWORD_FORBIDDEN'
   | 'PASSWORD_LOGIN_CLOSED'
@@ -458,6 +463,9 @@ export type ErrorCode =
   | 'CHAT_RATE_LIMITED'
   | 'NICKNAME_TAKEN'
   | 'DISCARD_COOLDOWN'
+  /** v111（AISLG-259）：已有一座名城 / 到期失去这座城的 48 小时内不能再占回 */
+  | 'FAMOUS_LIMIT'
+  | 'FAMOUS_BANNED'
   | 'DISCARD_MAIN_CITY'
   | 'CITY_IN_BATTLE'
   | 'CITY_STARVING'
@@ -994,6 +1002,8 @@ export interface CityView {
   name: string;
   /** 名城分城标记（v24 AISLG-56）：占领名城得到的分城带名城名；普通城为 null */
   famousName: string | null;
+  /** 名城任期到期时刻（v111，AISLG-259）：名城的分城才有值，到期该城重归无主；普通城为 null */
+  famousExpiresAt: string | null;
   /** 该城的独占产量加成百分数（v24 AISLG-56：名城分城 +20%，已计入 production）；普通城为 0 */
   productionBonusPercent: number;
   /** 洛阳之主联盟的全员产量加成（v79 AISLG-200；0 或 5，已计入 production） */
@@ -1111,13 +1121,17 @@ export interface BuildStatePushData {
 
 /** PUSH_CITY_STATE（op 2002）推送载荷：城池级状态变化 */
 export interface CityStatePushData {
-  /** city_renamed=城池改名；account_reset=账号数据被重置（v9）；city_discarded=分城被放弃（v57）；capital_changed=设为主城（v82，cityId 为新主城）；troops_disbanded=城内驻军被遣散（v84）；troop_pools_changed=伤兵 / 俘虏 / 逃兵池子变化（v85，附 cityId 与 pool） */
-  reason: 'city_renamed' | 'account_reset' | 'city_discarded' | 'capital_changed' | 'troops_disbanded' | 'troop_pools_changed' | 'stratagem';
+  /** city_renamed=城池改名；account_reset=账号数据被重置（v9）；city_discarded=分城被放弃（v57）；capital_changed=设为主城（v82，cityId 为新主城）；troops_disbanded=城内驻军被遣散（v84）；troop_pools_changed=伤兵 / 俘虏 / 逃兵池子变化（v85，附 cityId 与 pool）；
+   *  famous_expiring=名城任期快到（v111，附 stage 1 剩 24 小时 / 2 剩 1 小时与 expiresAt）；famous_expired=名城任期届满已重归无主（v111） */
+  reason: 'city_renamed' | 'account_reset' | 'city_discarded' | 'capital_changed' | 'troops_disbanded' | 'troop_pools_changed' | 'stratagem' | 'famous_expiring' | 'famous_expired';
   cityId: string;
   /** reason=city_renamed 时的新名称 */
   name?: string;
   /** reason=capital_changed 时的原主城 id（已变为分城） */
   formerCapitalId?: string;
+  /** v111（AISLG-259）：reason=famous_expiring 时的提醒阶段与任期到期时刻（ISO 8601） */
+  stage?: number;
+  expiresAt?: string;
 }
 
 /** SET_CAPITAL（op 141，v82，AISLG-205）请求载荷：cityId 为要设为主城的分城，confirm 必须显式为 true */

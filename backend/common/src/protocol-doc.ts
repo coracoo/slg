@@ -314,6 +314,14 @@ export const ERROR_DOC: Record<ErrorCode, ErrorDoc> = {
     desc: '主城不能放弃，DISCARD_CITY 只能放弃分城（v57，AISLG-153）。',
     action: '如要放弃的是分城，请传该分城的 cityId（GET_STATE 的 cities[]，isMain 为 false）。',
   },
+  FAMOUS_LIMIT: {
+    desc: '占领名城被拒：本账号名下已有 1 座名城（v111，AISLG-259）——每账号同一时间最多占 1 座，占 NPC 名城与打下他人名城都算。MARCH task=occupy 发起时初核，Worker 到达时复核（NPC 名城：幸存部队返程，事件 occupied=false 与 denial=FAMOUS_LIMIT；玩家名城：只降城防不换主）。',
+    action: '等现有名城的任期结束（GET_STATE 的 city.famousExpiresAt 为到期时刻），或主动放弃那座名城（DISCARD_CITY）；打这座城的外围 / 掠夺不受限。',
+  },
+  FAMOUS_BANNED: {
+    desc: '占领名城被拒：本账号刚因任期届满失去这座名城，48 小时内（按全局时间缩放）不能再占回它（v111，AISLG-259；响应附 bannedUntil 与 retryAfterSeconds）。只对「到期失去这个名号的那个人」生效。',
+    action: '等 bannedUntil（GET_WORLD_MAP / GET_TILE 的 tile.bannedUntil 也能查到）过后再占；在此期间可以去占其他名城，也可以打这座城的外围 / 掠夺。',
+  },
   CITY_IN_BATTLE: {
     desc: '该城或其名下野地正有行军在途（来袭、运输或占领），或有未结的 NPC 来袭：此时不能放弃分城（v57，AISLG-153），也不能遣散士兵（v84，AISLG-209，否则会变成「躲战损 + 拿回一半资源」的投机）。不改任何数据。',
     action: '等这些行军结算或 NPC 来袭结束后再放弃 / 遣散；GET_STATE 的 city.inBattle 为 true 时可以先不发起。',
@@ -537,6 +545,18 @@ export const ERROR_DOC: Record<ErrorCode, ErrorDoc> = {
   LINUXDO_ALREADY_BOUND: {
     desc: '（v110）该 Linux.do 身份已被绑定，或当前账号已绑定 Linux.do。',
     action: '登录已绑定的账号，或使用其他 Linux.do 身份。',
+  },
+  MAPP_UNAVAILABLE: {
+    desc: '（v113，AISLG-261）微应用服务未开启或当前连接非微应用环境。',
+    action: '确认服务端已开启微应用支持，且连接带有平台验证令牌。Agent 不涉及。',
+  },
+  MAPP_TRUST_LEVEL_LOW: {
+    desc: '（v113，AISLG-261）论坛信任等级低于准入门槛。',
+    action: '在论坛提升信任等级后再进入游戏。Agent 不涉及。',
+  },
+  MAPP_TOKEN_INVALID: {
+    desc: '（v113，AISLG-261）微应用平台令牌无效或缺失。',
+    action: '重新进入应用以获取有效令牌。Agent 不涉及。',
   },
   RATE_LIMITED: {
     desc: '（v43）请求过于频繁：同一 IP 每分钟最多生成 20 张微信二维码（v44 起 Google 登录尝试、v45 起 GitHub 授权发起同样限频，各 20 次/分钟）。',
@@ -1028,7 +1048,7 @@ export const ERROR_DOC: Record<ErrorCode, ErrorDoc> = {
 export const CONNECTION_RULES: string[] = [
   `连接地址由运营方提供，WebSocket 路径固定为 /ws（本地开发为 ws://127.0.0.1:8080/ws）；HTTP 健康检查 GET /health。`,
   '连接建立后必须在时限内完成一次成功的 LOGIN（默认 15 秒，部署可调），否则服务端以 close code 4001 主动断开。',
-  '登录成功前只允许发送 LOGIN（op 1）、微信扫码登录的协议（WX_QR_CREATE / WX_SCAN / WX_CONFIRM / WX_CANCEL，op 54–57，仅供网页与微信小游戏）、GOOGLE_LOGIN（op 60，仅供网页）与 GITHUB_AUTH_START / OAUTH_REDEEM（op 62 / 63，仅供网页），其他协议号一律返回 NOT_LOGGED_IN；登录后重复发送 LOGIN 返回 ALREADY_LOGGED_IN。等人扫码的连接，登录时限会延长到二维码过期之后。',
+  '登录成功前只允许发送 LOGIN（op 1）、微信扫码登录的协议（WX_QR_CREATE / WX_SCAN / WX_CONFIRM / WX_CANCEL，op 54–57，仅供网页与微信小游戏）、GOOGLE_LOGIN（op 60，仅供网页）、GITHUB_AUTH_START / OAUTH_AUTH_START / OAUTH_REDEEM（op 62 / 157 / 63，仅供网页）与 MAPP_LOGIN（op 158，仅供 Linux.do 微应用），其他协议号一律返回 NOT_LOGGED_IN；登录后重复发送 LOGIN 返回 ALREADY_LOGGED_IN。等人扫码的连接，登录时限会延长到二维码过期之后。',
   'Google 一键登录（v44）与 Agent 无关：网页用 Google Identity Services 拿到 ID Token 后经 GOOGLE_LOGIN 换会话令牌再 LOGIN；没绑定过的 Google 账号自动建号（无密码），这类账号的 Agent 接入同样走「Agent 令牌」。',
   'GitHub 一键登录（v45）与 Agent 无关：网页经 GITHUB_AUTH_START 拿到 GitHub 授权地址后整页跳转，授权结果由 HTTP 回调（GET /auth/github/callback）302 带回前端，网页用 OAUTH_REDEEM 把 60 秒一次性登录码换成会话令牌再 LOGIN；没绑定过的 GitHub 账号自动建号（无密码），这类账号的 Agent 接入同样走「Agent 令牌」。',
   '每条请求帧可携带 seq（正整数，由客户端自增分配）；响应帧原样带回该值用于关联请求，推送帧没有 seq。',

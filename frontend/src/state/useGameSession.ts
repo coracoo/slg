@@ -120,6 +120,8 @@ export interface GameSession {
   connection: ConnectionStatus;
   loginBusy: boolean;
   loginError: string | null;
+  loginErrorCode?: string | null;
+  loginWithMapp?: () => Promise<void>;
   buildError: string | null;
   /** 征兵 / 取消征兵失败的人读提示（v11，征兵面板内展示） */
   recruitError: string | null;
@@ -193,8 +195,13 @@ export interface GameSession {
   /** 最近一次拉到的离线日报（Agent 页摘要用；不弹窗）与拉取动作 */
   offlineSummary: GetOfflineReportResponseData | null;
   loadOfflineSummary: () => Promise<void>;
-  /** 全服播报（v23 AISLG-60）：最近 20 条（新→旧）；登录后拉取 + 推送置顶 */
+  /** 全服播报（v23 AISLG-60）：最近 20 条（新→旧）；登录后拉取 + 推送置顶。
+   *  v112（AISLG-260）拆两份：broadcasts 只含 war（系统播报页签 / 底栏），eventBroadcasts 只含 event（活动页签） */
   broadcasts: ServerBroadcastView[];
+  /** 活动 / 玩法节点播报（v112）：最近 20 条（新→旧），给聊天「活动」页签 */
+  eventBroadcasts: ServerBroadcastView[];
+  /** 两类播报合并（新→旧）：底栏「全服播报」用（各留 20 条） */
+  allBroadcasts: ServerBroadcastView[];
   /** 打开播报列表（当前条目点击时也会刷新一次） */
   fetchServerBroadcasts: () => Promise<void>;
   /** 排行榜（v23 AISLG-61）：当前榜快照；null = 尚未拉取 */
@@ -276,6 +283,7 @@ export function useGameSession(): GameSession {
   const [connection, setConnection] = useState<ConnectionStatus>('idle');
   const [loginBusy, setLoginBusy] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [loginErrorCode, setLoginErrorCode] = useState<string | null>(null);
   const [buildError, setBuildError] = useState<string | null>(null);
   const [recruitError, setRecruitError] = useState<string | null>(null);
   const [defenseError, setDefenseError] = useState<string | null>(null);
@@ -517,15 +525,18 @@ export function useGameSession(): GameSession {
   // 联盟地图标记（AISLG-184 / F2）：随所在联盟加载；PUSH_ALLIANCE_MARK 增量合并；离盟 / 登出清空
   const allianceMarks = useAllianceMarks(clientRef, connection === 'online', alliance.state?.alliance?.id ?? null, alliance.state?.myRole ?? null);
   const { clear: allianceMarksClear, onPush: onAllianceMarkPush } = allianceMarks;
+  const { checkOfflineReportRef, fetchServerBroadcasts, eventBroadcasts, onBroadcastPush, onNpcWarningPush, onFactionSiegePush, resetNpcWarnings } = extras;
   const chat = useChat({
     clientRef,
     online: connection === 'online',
     accountId: account?.accountId ?? null,
     allianceId: alliance.state?.alliance?.id ?? null,
+    // v112：活动页签的列表与未读位置（本机 localStorage，见 state/chatEventRead.ts）
+    eventBroadcasts,
+    refreshBroadcasts: fetchServerBroadcasts,
   });
   const announcements = useAnnouncements(clientRef);
   const { refresh: refreshAnnouncements, onPush: onAnnouncementPush, reset: resetAnnouncements } = announcements;
-  const { checkOfflineReportRef, fetchServerBroadcasts, onBroadcastPush, onNpcWarningPush, onFactionSiegePush, resetNpcWarnings } = extras;
   // 赛季切片（v65 AISLG-134）：换季预告 / 维护遮罩 / 新赛季重连收尾；名人堂切片：打开页签时按需拉取
   const season = useSeasonSession(clientRef, connection === 'online');
   const { applyLogin: applySeasonLogin, onPush: onSeasonPush, onMaintenance: onSeasonMaintenance, refresh: refreshSeason, clear: seasonClear } = season;
@@ -680,6 +691,13 @@ export function useGameSession(): GameSession {
         const data = frame.data as unknown as CityStatePushData;
         if (data.reason === 'city_renamed') {
           setCity((prev) => (prev && data.name && data.cityId === prev.id ? { ...prev, name: data.name } : prev));
+        } else if (data.reason === 'famous_expired') {
+          // v111（AISLG-259）：名城任期届满（本账号的城重归无主）：城池列表变了，复位为主城并全量刷新
+          resetCityList();
+          void syncAll('initial');
+          return;
+        } else if (data.reason === 'famous_expiring') {
+          // v111：任期快到，只刷新城池剩余时间（下方增量查询同时把事件补进事件流）
         } else if (data.reason === 'city_discarded' || data.reason === 'capital_changed') {
           // 分城被放弃 / 主城对调（可能是本账号另一连接发起）：选中的城可能已不存在或身份已变，复位为主城并全量刷新
           resetCityList();
@@ -1060,10 +1078,67 @@ export function useGameSession(): GameSession {
     },
     [ensureClient, tokenLogin],
   );
+
+  const loginWithMapp = useCallback(async () => {
+    setLoginBusy(true);
+    setLoginError(null);
+    setLoginErrorCode(null);
+    try {
+      setConnection('connecting');
+      const client = ensureClient();
+      await client.connect();
+      const res = await client.request(Op.MAPP_LOGIN, {});
+      if (!res.ok) {
+        setConnection('idle');
+        const code = res.error?.code;
+        setLoginErrorCode(code ?? null);
+        if (code === 'MAPP_TRUST_LEVEL_LOW') {
+          setLoginError('论坛信任等级不足');
+        } else if (code === 'MAPP_UNAVAILABLE') {
+          setLoginError('微应用服务暂未开放');
+        } else if (code === 'MAPP_TOKEN_INVALID') {
+          setLoginError('平台身份已过期，请重新进入应用');
+        } else {
+          setLoginError(res.error?.message || '微应用登录失败');
+        }
+        return;
+      }
+      const data = res.data as unknown as { sessionToken?: string; username?: string; created?: boolean };
+      const sessionToken = data?.sessionToken;
+      if (typeof sessionToken !== 'string') {
+        setConnection('idle');
+        setLoginError('登录失败：未收到有效会话令牌');
+        return;
+      }
+      await tokenLogin(sessionToken, 'linuxdo');
+    } catch (err) {
+      setConnection('idle');
+      if (err instanceof ConnectionError) {
+        setLoginError('连接失败，请重新进入应用');
+      } else {
+        setLoginError(err instanceof Error ? err.message : '微应用登录失败');
+      }
+    } finally {
+      setLoginBusy(false);
+    }
+  }, [ensureClient, tokenLogin]);
+
   const security = useAccountSecurity({ clientRef, setAgent, setAccount });
 
   useEffect(() => {
     aliveRef.current = true;
+    if (typeof __MAPP__ !== 'undefined' && __MAPP__) {
+      setBooting(true);
+      void loginWithMapp().finally(() => {
+        setBooting(false);
+      });
+      return () => {
+        aliveRef.current = false;
+        clearTimers();
+        clientRef.current?.close();
+        clientRef.current = null;
+      };
+    }
     // OAuth 回跳：地址栏带一次性码 / 绑定结果（oauthReturn.ts 已顺手把参数抹掉）。
     // code 优先于本地保存的令牌——用户刚授权的是哪个号就进哪个号；绑定 / 失败结果在登录
     // 成功后进事件流，未登录场景由登录页的 loginError 显示。
@@ -1479,6 +1554,8 @@ export function useGameSession(): GameSession {
     connection,
     loginBusy,
     loginError,
+    loginErrorCode,
+    loginWithMapp,
     buildError,
     recruitError,
     city,

@@ -1,8 +1,8 @@
 # SLG · Selfhost 自托管版
 
-SLG 是可由玩家或 AI Agent 游玩的三国策略游戏。本分支合入 [athlan20/slg 的上游版本](https://github.com/athlan20/slg/tree/8f4165229dabfba741fe9fcac993ad1fd272a21b)，保留新版玩法，补充面向 NAS / 私有服务器的自托管支持。
+SLG 是可由玩家或 AI Agent 游玩的三国策略游戏。本分支合入 [athlan20/slg 的上游版本](https://github.com/athlan20/slg/tree/eeb7f5a4f4f0566b4e784b041c9ca68bae660c1b)，保留新版玩法，补充面向 NAS / 私有服务器的自托管支持。
 
-游戏介绍、截图与玩法见 [上游中文说明](https://github.com/athlan20/slg/blob/8f4165229dabfba741fe9fcac993ad1fd272a21b/README.md)；原项目：[athlan20/slg](https://github.com/athlan20/slg)。
+游戏介绍、截图与玩法见 [上游中文说明](https://github.com/athlan20/slg/blob/eeb7f5a4f4f0566b4e784b041c9ca68bae660c1b/README.md)；原项目：[athlan20/slg](https://github.com/athlan20/slg)。
 
 ## 本分支提供什么
 
@@ -13,10 +13,11 @@ SLG 是可由玩家或 AI Agent 游玩的三国策略游戏。本分支合入 [a
 
 ## 本次上游更新
 
-**2026-11-12：本次按维护者要求，仅进行静态判断与合并后发布，未运行测试。合入协议 v109 / MCP 0.2.8；这不是已通过运行验证或生产存档升级验收的版本。**
+**2026-11-19：本次按维护者要求，仅进行静态判断与合并后发布，未运行测试。合入协议 v115 / MCP 0.2.14；这不是已通过运行验证或生产存档升级验收的版本。**
 
 - 保留本地注册开关、已有账号登录、同源 WebSocket、Docker 两文件部署和可配置 npm 镜像。数据库仍为 PostgreSQL 16，原卷、端口和默认配置不变。
-- 本轮从 v102 更新至 v109：战损按兵力比例折算，29 名在野名将改为各账号独立获取，老巢加入梯度战力和压制档，战场展示入场编成；新增元宝、兑换码与支付接口，迁城令价格调整。详见 [11 月 11 日说明](deploy/2026-11-11/announcement-zh.md) 与 [Agent API](docs/agent-api.md)。
+- 本轮从 v110 更新至 v115，新增名城 7 天任期、Linux.do 微应用、聊天已读与新手引导改进，详见 [11 月 16 日说明](deploy/2026-11-16/announcement-zh.md)。现有名城从升级时起算任期，到期建筑、库存和队列随城作废，部署前请核对公告。
+- 此前 v102 至 v109：战损按兵力比例折算，29 名在野名将改为各账号独立获取，老巢加入梯度战力和压制档，战场展示入场编成；新增元宝、兑换码与支付接口，迁城令价格调整。详见 [11 月 11 日说明](deploy/2026-11-11/announcement-zh.md) 与 [Agent API](docs/agent-api.md)。
 - **真实充值不会随本模板自动开启**：现有 Compose 不传入支付渠道配置，缺少配置时支付服务关闭；兑换码仍由本地运营生成与兑换。充值卡可能显示，但会提示渠道不可用。本模板也未添加 `/pay/` 回调代理，若未来经营收费服务，需要另行完整配置。
 - **商业文案尚未适配自托管**：上游新增隐私、条款、定价页面，包含商业退款、第三方登录和 HTTPS 等表述，不完全符合本地密码 / HTTP 自托管环境。本次仅同步代码，不代表启用收费服务；对外运营前应自行审阅并调整这些页面。
 - 本轮新增名将归属主键、老巢战力、元宝 / 付费道具及充值 / 兑换码表的迁移。元宝和充值 / 兑换记录跨季保留，元宝购买的道具跨季保留；未验证旧存档迁移。
@@ -26,6 +27,12 @@ SLG 是可由玩家或 AI Agent 游玩的三国策略游戏。本分支合入 [a
 - API 启动会执行表结构及存量数据迁移，包括主城酒馆/书院合并与队列退款、礼金、迷雾和势力相关数据。请先备份，并在隔离 PostgreSQL 16 数据库检查旧存档升级。
 - 同一数据库同一时刻只运行一个 Worker。不要照抄过期赛季日期，不要误执行 `end-now`。
 - 本分支不导入上游 GitHub Actions 工作流；上游公告、npm 发布及正式服务部署步骤不属于本次仓库同步。
+
+## 支持上游作者
+
+喜欢这个项目？请作者喝杯咖啡 ☕
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/U2G122M74W)
 
 ## 部署
 
@@ -55,7 +62,7 @@ SLG 是可由玩家或 AI Agent 游玩的三国策略游戏。本分支合入 [a
 - PostgreSQL 使用 `postgres:16-alpine`，沿用原卷；不要直接切换现有数据库的主版本。
 - 网页端口 `8424`，可通过 `SLG_PORT` 修改；`SLG_BIND_IP` 默认 `0.0.0.0`，请按需限制网络访问。
 - npm 默认使用 `https://registry.npmmirror.com`，可通过 `NPM_REGISTRY` 覆盖。这不保证 GitHub 或容器镜像仓库在国内可达。
-- 默认构建源码固定为 [`8811cd3e42a7ec431fc5bb2dfbe59d3fe99fcf2a`](https://github.com/coracoo/slg/commit/8811cd3e42a7ec431fc5bb2dfbe59d3fe99fcf2a)，可通过 `SLG_SOURCE_REF` 指定已发布的完整 40 位提交 SHA；固定版本不代表已经通过测试。
+- 默认构建源码由 `Dockerfile` 与 `compose.yaml` 中的 `SLG_SOURCE_REF` 固定，可通过 `SLG_SOURCE_REF` 指定已发布的完整 40 位提交 SHA；固定版本不代表已经通过测试。
 
 HTTPS 请在外层可信反向代理配置，并启用 WebSocket 转发；使用 OAuth 时，将 `FRONTEND_URL` 和回调地址设为实际访问地址。
 
@@ -70,7 +77,7 @@ HTTPS 请在外层可信反向代理配置，并启用 WebSocket 转发；使用
 
 ## 如何跟进上游
 
-上游同步只维护 `selfhost`，不修改本仓库 `main`，不使用 GitHub Actions。具体执行范围以维护者最新授权为准；本次依明确指示不以运行测试作为发布门槛，发布记录应如实注明未测试。
+上游同步只维护 `selfhost`，不使用 GitHub Actions。具体执行范围以维护者最新授权为准；本次依明确指示不以运行测试作为发布门槛，发布记录应如实注明未测试。
 
 没有上游新版本时静默跳过。无法判断合并、不能保护自托管改动、发现并发更新，或无法确保不触发 Actions 时停止发布并说明原因。源码合并提交之后，再以配置提交将部署文件固定到该完整源码 SHA，不使用可变分支名。
 
