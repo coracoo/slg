@@ -1,99 +1,197 @@
-# SLG · Selfhost 自托管版
+**简体中文** | [English](README.en.md)
 
-SLG 是可由玩家或 AI Agent 游玩的三国策略游戏。本分支合入 [athlan20/slg 的上游版本](https://github.com/athlan20/slg/tree/eeb7f5a4f4f0566b4e784b041c9ca68bae660c1b)，保留新版玩法，补充面向 NAS / 私有服务器的自托管支持。
+> 本仓库是 [athlan20/slg](https://github.com/athlan20/slg) 的自托管分支。下文保留上游项目介绍；公测链接指向上游。NAS 或私有服务器请看 [Docker 本地部署（selfhost）](#docker-本地部署selfhost)。
 
-游戏介绍、截图与玩法见 [上游中文说明](https://github.com/athlan20/slg/blob/eeb7f5a4f4f0566b4e784b041c9ca68bae660c1b/README.md)；原项目：[athlan20/slg](https://github.com/athlan20/slg)。
+<div align="center">
 
-## 本分支提供什么
+# SLG · 让你的 AI 替你征战三国
 
-- **本地账号注册**：`LOCAL_PASSWORD_SIGNUP_ENABLED=true` 时开放，默认关闭；普通登录不会自动创建账号。
-- **保留原密码登录**：已有账号和密码哈希沿用原数据库，无需重置；Google / GitHub 登录配置也可继续使用。
-- **同源 WebSocket**：网页与 WebSocket 共用访问域名和端口，适合 NAS 与反向代理部署。
-- **两文件构建部署**：本地只需 `Dockerfile`、`compose.yaml` 和原来的 `.env`，构建时自动下载固定提交源码，无需手动下载源码包。
+**一款为 AI Agent 而生的网页三国策略游戏。**
+你可以亲自建城、练兵、攻城略地，也可以把一个令牌交给你的 AI，让它 7×24 小时替你运营。
 
-## 本次上游更新
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Node](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-%3E%3D13-4169E1?logo=postgresql&logoColor=white)
 
-**2026-11-19：本次按维护者要求，仅进行静态判断与合并后发布，未运行测试。合入协议 v115 / MCP 0.2.14；这不是已通过运行验证或生产存档升级验收的版本。**
+[![SLG MCP server](https://mcprush.com/badge/slg-mcp/card.svg)](https://mcprush.com/to/slg-mcp?ref=badge)
 
-- 保留本地注册开关、已有账号登录、同源 WebSocket、Docker 两文件部署和可配置 npm 镜像。数据库仍为 PostgreSQL 16，原卷、端口和默认配置不变。
-- 本轮从 v110 更新至 v115，新增名城 7 天任期、Linux.do 微应用、聊天已读与新手引导改进，详见 [11 月 16 日说明](deploy/2026-11-16/announcement-zh.md)。现有名城从升级时起算任期，到期建筑、库存和队列随城作废，部署前请核对公告。
-- 此前 v102 至 v109：战损按兵力比例折算，29 名在野名将改为各账号独立获取，老巢加入梯度战力和压制档，战场展示入场编成；新增元宝、兑换码与支付接口，迁城令价格调整。详见 [11 月 11 日说明](deploy/2026-11-11/announcement-zh.md) 与 [Agent API](docs/agent-api.md)。
-- **真实充值不会随本模板自动开启**：现有 Compose 不传入支付渠道配置，缺少配置时支付服务关闭；兑换码仍由本地运营生成与兑换。充值卡可能显示，但会提示渠道不可用。本模板也未添加 `/pay/` 回调代理，若未来经营收费服务，需要另行完整配置。
-- **商业文案尚未适配自托管**：上游新增隐私、条款、定价页面，包含商业退款、第三方登录和 HTTPS 等表述，不完全符合本地密码 / HTTP 自托管环境。本次仅同步代码，不代表启用收费服务；对外运营前应自行审阅并调整这些页面。
-- 本轮新增名将归属主键、老巢战力、元宝 / 付费道具及充值 / 兑换码表的迁移。元宝和充值 / 兑换记录跨季保留，元宝购买的道具跨季保留；未验证旧存档迁移。
-- **升级后长期不活跃账号会失去野地**：本人和 Agent 都超过现实时间 7 天未活跃时，Worker 每小时检查并收回全部野地、销毁望楼且不退款；驻军回到所属城，城池与城内资源保留。Worker 启动约一小时后开始首轮检查，旧存档中已超过阈值的账号也适用。
-- **名将有忠诚度和被俘规则**：在野名将忠诚度耗尽或被俘逾期可能离队。请阅读 [11 月 6 日说明](deploy/2026-11-06/announcement-zh.md) 和 [11 月 7 日说明](deploy/2026-11-07/announcement-zh.md)。
-- 五方势力受 `faction_enabled` 控制，默认关闭；启用后可能围攻并吞并普通分城。v102 从当季启用当天计算势力天数，满 7 天后才开始围攻，见 [11 月 8 日说明](deploy/2026-11-08/announcement-zh.md)。本次不修改该开关。
-- API 启动会执行表结构及存量数据迁移，包括主城酒馆/书院合并与队列退款、礼金、迷雾和势力相关数据。请先备份，并在隔离 PostgreSQL 16 数据库检查旧存档升级。
-- 同一数据库同一时刻只运行一个 Worker。不要照抄过期赛季日期，不要误执行 `end-now`。
-- 本分支不导入上游 GitHub Actions 工作流；上游公告、npm 发布及正式服务部署步骤不属于本次仓库同步。
+### 🎮 公测进行中 → [slg.yuntianyou.cc](https://slg.yuntianyou.cc)
 
-## 支持上游作者
+[立即进入游戏](https://slg.yuntianyou.cc) · [Agent 接入文档](docs/agent-api.md) · [自行部署](#自行部署)
 
 喜欢这个项目？请作者喝杯咖啡 ☕
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/U2G122M74W)
 
-## 部署
+</div>
 
-需要 Docker Compose，以及访问 GitHub、容器镜像仓库和 npm 的网络。
+> **正式对外公测中**：打开 [slg.yuntianyou.cc](https://slg.yuntianyou.cc)，用 Google 或 GitHub 账号一键登录即可开玩，无需下载安装。界面支持中文和英文，默认跟随浏览器语言，也能随时切换。
+> 欢迎带上你的 AI 一起入局，问题和建议请提 [Issue](https://github.com/athlan20/slg/issues)。
 
-1. 下载本分支的 [Dockerfile](Dockerfile) 和 [compose.yaml](compose.yaml)，放入原部署目录，保留原 `.env`。已有部署请先按下方升级注意事项备份、核对配置，再替换文件。
-2. `.env` 必须提供 `POSTGRES_PASSWORD`；已有部署继续使用原密码。新装请自行设置强密码。需要开放本地注册时添加：
+---
 
-   ```dotenv
-   LOCAL_PASSWORD_SIGNUP_ENABLED=true
-   ```
+![世界地图](docs/screenshots/map.png)
 
-3. 完成配置核对后，在部署目录执行：
+## 这个游戏有什么不一样
+
+传统 SLG 拼的是谁更肝：半夜定闹钟收资源、掐着点出兵、时刻提防被偷袭。
+在这里，**AI Agent 是一等公民**：
+
+- 🤖 **自带 AI，不限模型**：服务端不跑任何 AI。Claude、ChatGPT、本地模型，或者你自己写的脚本，只要会连 WebSocket、能读 JSON，就能上场。
+- 📋 **一键交给 AI**：游戏里点「复制给 AI」，完整的协议文档、服务器地址和你的专属令牌会一起进剪贴板，贴给 AI 就能开始玩。
+- ⚖️ **人和 AI 规则完全一样**：网页和 Agent 走同一套协议、同一套服务端校验，没有后门，也没有专供 AI 的捷径。比的是谁的策略更好，不是谁更会钻空子。
+- 🔐 **令牌和密码分开**：Agent 只能用令牌登录，拿不到你的账号密码；觉得令牌泄露了，一键重置，旧令牌立刻失效。
+- 📖 **协议文档自动生成**：[Agent API 文档](docs/agent-api.md)由服务端协议定义直接生成，带完整示例和错误码。版本更新时，Agent 登录会收到提示，并能拉取增量变更清单。
+- 🧠 **AI 和你互相汇报**：Agent 可以上报自己的计划、给战报写点评、在你离线时写日报；你上线一看，就知道它这一夜干了什么。
+
+## 玩法一览
+
+### 🏯 城建与经济
+- **15 种建筑**，每种最高 20 级：农田、伐木场、采石场、铁矿、民房、官府、军营、仓库、城墙、书院、校场、烽火台、驿站、箭塔、酒馆。
+- 粮、木、石、铁、金五种资源持续产出，离线照样累积；建造和升级支持排队、连续升级。
+- 仓库保护部分资源不被掠夺；集市可以把多余资源换成金币，也能在**玩家交易所**挂单卖资源、标价收资源或金币，由商队送货（成交双方各扣 5% 手续费）。
+- 军队要吃粮：断粮后城里的驻军会逐小时哗变减员。
+
+### ⚔️ 兵种与战斗
+- **11 个兵种**：民夫、义兵、斥候、长枪兵、刀盾兵、弓箭兵、轻骑兵、铁骑兵、辎重车、床弩、冲车，兵种之间互相克制。
+- **多回合战斗**：双方在战场上按速度推进、进入射程才开打，弓弩先手、骑兵突进、冲车拆墙，每场都有详细战报和逐回合伤害走势图。
+- 守方有城墙加成、箭塔自动射击、武将坐镇城守。
+- **城防器械**：城墙里可以花资源打造陷阱、拒马、滚木、擂石，平时囤着，守城战开打时自动使用（陷阱 / 拒马开战即用，滚木 / 擂石等攻方贴墙）。
+
+### 🗺️ 世界地图
+- 占领野地收资源，抢占稀有的**金矿**直接产金。
+- 侦察并攻打 NPC 城池，打下来变成你的分城。
+- **8 座名城**需要分两阶段攻打，首占可获得名将。
+- 地图上有游荡的**流寇和商队**，可以截击；部队提前到位还能**设伏**。
+- 城池之间可以调兵、运送资源，驿站加快行军。
+
+### 🎖️ 武将与科技
+- 在酒馆招募武将，带兵出征提供攻击和减伤加成，也能坐镇城守。
+- 武将要发俸禄，欠饷不能出征；带队战败会重伤休养。
+- **声望与爵位**：世界地图战斗按歼敌战力攒声望，自动升爵（平民 → 王）；爵位给每日俸禄、解锁占领名城、五大夫 / 列侯各加 1 个普通武将名额；城池按官府等级显示县城 / 郡城 / 州城 / 都城称号。
+- 在书院研究十六项科技（发展 / 军事两栏）：农耕、负重、储存、补给、建筑、研究、掠夺、维修 + 行军、侦察、城防、练兵、战斗、防护、驾驭、抛射。
+
+### 🔥 全服事件与玩家对抗
+- **黄巾之乱**：周期性的全服 PvE 事件，各地出现黄巾营地，所有玩家一起平乱。
+- **剧本战场·官渡之战**：每周二 20:00 报名、周三 20:00 开战、周四 20:00 结束。选袁绍军或曹操军，带一支兵进 30×30 独立战场抢 9 个据点，攒军功换资源与兵，按阵营胜负与个人名次发奖。
+- **剧本战场·讨伐董卓 / 赤壁之战**：每周一场按「官渡 → 讨董 → 赤壁」轮换。讨董是全服合作，汜水关、虎牢关、洛阳依次攻下（吕布守虎牢关，全员按进度领奖）；赤壁是孙刘对曹操，风向每 6 小时交替，顺风方射程 +10%，东南风火攻、曹方连锁战船，爵位大夫才能报名。
+- **联盟外交**：联盟之间可结为友盟（互不攻击、互相协防，最多 2 个），也能单方面把某联盟标成敌对（地图标红，最多 5 个）；解除友好后有 24 小时不可攻击、72 小时不可再结好的冷却。
+- **盟友协防**：把部队派进盟友的城驻扎，被打时和城主一起守（伤亡按开战兵力比例分摊），随时召回、城主也能遣返。
+- **玩家对抗**：可以掠夺其他玩家的城池、抢夺他们的野地，攻占他们的分城（主城永远不能被占）。
+- 对抗有硬规则保护，**不靠熬夜防守**：
+  - 新手保护期 3 天。
+  - 每周一次 12 小时主动免战。
+  - 城被攻破后自动免战。
+  - 大号打小号收益递减。
+  - 烽火台提前预警来袭部队。
+- 排行榜、全服播报、NPC 来袭预警、离线日报一应俱全。
+
+## 游戏截图
+
+| 总览 | 城池与建筑 |
+| :---: | :---: |
+| ![总览：军情、兵力、最近动态](docs/screenshots/overview.png) | ![城池：15 种建筑与升级](docs/screenshots/city.png) |
+| **武将与科技** | **战报与情报** |
+| ![养成：武将招募与科技研究](docs/screenshots/growth.png) | ![情报：战报、动态与行军](docs/screenshots/intel.png) |
+| **战报详情** | **Agent 面板** |
+| ![战报详情：双方兵力与伤害走势](docs/screenshots/battle-report.png) | ![Agent：计划、操作记录与离线日报](docs/screenshots/agent.png) |
+
+## 让你的 AI 来玩
+
+最省事的方式是 MCP 插件（`slg-mcp`）：在 Claude Desktop / Cursor / Claude Code 的 MCP 配置里加一段即可零代码接入，见 [mcp/README.md](mcp/README.md)；游戏内 Agent 面板也有「复制 MCP 配置」一键复制（令牌自动带上）。
+
+手动接入（任何语言、任何框架都能连）：
+
+1. 打开公测服 [slg.yuntianyou.cc](https://slg.yuntianyou.cc)，用 Google 或 GitHub 登录。
+2. 打开 **Agent** 面板，点「复制给 AI」。
+3. 把剪贴板内容贴给你的 AI（或者你自己的脚本）。剪贴板里有协议文档、服务器地址和你的 Agent 令牌，AI 照着文档连上即可。
+
+协议是标准 WebSocket + JSON，每条消息长这样：
+
+```json
+{ "op": 1, "seq": 1, "data": { "token": "sk_...", "asAgent": true } }
+```
+
+登录后，Agent 可以查询城池、建造、征兵、出征、侦察、读战报。玩家在网页上能实时看到 Agent 是否在线、最近做了什么、它的下一步计划。
+
+## 自行部署
+
+想在本地开发或自己搭一套服务器，需要 **Node.js ≥ 20** 和 **PostgreSQL ≥ 13**。
+
+```bash
+# 1. 准备数据库（表结构在 API 启动时自动创建）
+createdb slg
+
+# 2. 配置后端
+cp backend/.env.example backend/.env    # 填入 DATABASE_URL
+(cd backend && npm install)
+(cd frontend && npm install)
+
+# 3. 一键启动 API(8080) + Worker + 前端(8424)
+./dev.sh
+```
+
+然后打开 <http://localhost:8424>。
+
+新账号只能通过第三方登录创建，本地开发需要配置 Google 或 GitHub 登录，见 [`backend/README.md`](backend/README.md) 的环境变量说明。时间倍速、跨域、双站点等部署细节也在那里。
+
+## Docker 本地部署（selfhost）
+
+本分支提供 Docker Compose 部署与同源 WebSocket。上文的第三方登录说明适用于上游；在 selfhost 中，可以用 `LOCAL_PASSWORD_SIGNUP_ENABLED=true` 开放本地账号注册，默认关闭。已有账号与密码继续使用原数据库。
+
+1. 将 [Dockerfile](Dockerfile) 和 [compose.yaml](compose.yaml) 放在同一目录。新装请在 `.env` 中设置 `POSTGRES_PASSWORD`；已有部署保留原 `.env`、密码和数据卷。
+2. **已有存档先看[升级与备份说明](README.Selfhost.zh-CN.md#升级前必须核对)，不要直接重建启动。** 新装或完成升级前检查后，在部署目录执行：
 
    ```sh
    docker compose config --quiet
-   docker compose build api worker frontend
-   docker compose up -d
+   docker compose up -d --build
    docker compose ps
    ```
 
-访问 `http://NAS地址:8424`。首次构建和启动可能需要较长时间。
+3. 打开 `http://NAS地址:8424`。默认端口可通过 `SLG_PORT` 修改。HTTPS 和 WebSocket 反代、固定源码版本及存档迁移见 [自托管部署指南](README.Selfhost.zh-CN.md)。
 
-默认配置：
+## 技术架构
 
-- 项目名 `slg`，服务 `db / api / worker / frontend`，数据卷 `postgres-data`；数据库用户和库名均为 `slg`。
-- PostgreSQL 使用 `postgres:16-alpine`，沿用原卷；不要直接切换现有数据库的主版本。
-- 网页端口 `8424`，可通过 `SLG_PORT` 修改；`SLG_BIND_IP` 默认 `0.0.0.0`，请按需限制网络访问。
-- npm 默认使用 `https://registry.npmmirror.com`，可通过 `NPM_REGISTRY` 覆盖。这不保证 GitHub 或容器镜像仓库在国内可达。
-- 默认构建源码由 `Dockerfile` 与 `compose.yaml` 中的 `SLG_SOURCE_REF` 固定，可通过 `SLG_SOURCE_REF` 指定已发布的完整 40 位提交 SHA；固定版本不代表已经通过测试。
+```
+ 浏览器（React）──┐
+                 ├── WebSocket + JSON ──▶  API（Fastify）  ──┐
+ 你的 AI Agent ───┘                                          ├──▶ PostgreSQL
+                                          Worker（到期结算）──┘
+```
 
-HTTPS 请在外层可信反向代理配置，并启用 WebSocket 转发；使用 OAuth 时，将 `FRONTEND_URL` 和回调地址设为实际访问地址。
+| 目录 | 职责 |
+| --- | --- |
+| `frontend/` | React + TypeScript + Tailwind CSS + Rsbuild，纯 DOM 界面，四套皮肤可切换 |
+| `backend/api/` | Fastify + `@fastify/websocket`，负责连接、登录与协议分发 |
+| `backend/worker/` | 独立进程，处理建造完成、行军到达、战斗、事件刷新等到期任务 |
+| `backend/common/` | API 与 Worker 共用的游戏规则、协议定义和文档生成 |
+| `test/` | 跨前后端的端到端测试（Playwright 与真实联调） |
+| `docs/` | 设计文档与生成的 Agent API 文档 |
 
-## 升级与数据安全
+设计上的几个取舍：
 
-**已有存档请先阅读 [详细迁移指南](README.Selfhost.zh-CN.md)，不要直接覆盖自行修改过的 Compose。**
+- **PostgreSQL 是唯一的权威状态**：到期任务也存在数据库里，Worker 重启不丢任务、不重复结算；暂时不需要 Redis。
+- **资源懒结算**：读取或扣减时才按流逝时间结算产量，不靠定时任务刷全服。
+- **标准 WebSocket**：不用 Socket.IO，任何语言的 Agent 都能直接接入。
+- **规则只写一份**：API 与 Worker 共用 `backend/common`，前端只做展示。
 
-- 核对实际项目名、数据卷、端口、数据库凭据和环境变量，避免误连新卷或错误数据库。
-- 升级前停止 API / Worker 写入，备份数据库，并保留原部署文件、`.env` 和旧镜像；建议先在隔离新卷恢复备份试运行。
-- 升级前确认世界地块数为 **1,000,000**。数量异常时，新版初始化可能重建世界并清除领地 / 行军，应停止升级并调查。
-- **不要执行 `docker compose down -v`，它会删除存档卷。** 数据库结构发生变化后，仅回滚镜像不保证兼容。
+## 文档
 
-## 如何跟进上游
+- [Agent API 参考](docs/agent-api.md)：完整协议、示例与错误码（由 `backend` 下 `npm run gen:api-doc` 生成，请勿手改）
+- [后端说明](backend/README.md)：运行方式、环境变量、关键机制与数值
+- [前端说明](frontend/README.md)：命令、目录结构与皮肤
+- [兑换码（礼券）运维手册](docs/redeem-ops.md)：批量生成、导出、查码、作废、对账，面向运维
+- [玩家对抗规则](docs/phase-3-pvp.md)：PvP 的设计取舍与具体数值
+- [战斗数值校准](docs/battle-calibration.md)：战斗与掠夺数值是怎么模拟定下来的
+- [第一期功能范围](docs/phase-1-launch-scope.md)、[早期最小闭环设计](docs/phase-1-mvp.md)：项目早期的设计记录
 
-上游同步只维护 `selfhost`，不使用 GitHub Actions。具体执行范围以维护者最新授权为准；本次依明确指示不以运行测试作为发布门槛，发布记录应如实注明未测试。
+## 参与贡献
 
-没有上游新版本时静默跳过。无法判断合并、不能保护自托管改动、发现并发更新，或无法确保不触发 Actions 时停止发布并说明原因。源码合并提交之后，再以配置提交将部署文件固定到该完整源码 SHA，不使用可变分支名。
+欢迎提 Issue 和 PR。动手之前建议先读一下 [`AGENTS.md`](AGENTS.md)，里面是本项目的协作约定，比如单文件行数上限、协议改动先对齐契约等。
 
-**NAS 部署仍由你手动完成。** 获取更新后的 `Dockerfile` 与 `compose.yaml`，按升级指南核对配置和备份，再决定是否构建和启动。若 `.env` 中设置了 `SLG_SOURCE_REF`，它会覆盖部署文件的默认值，需同步核对。
+## 许可与致谢
 
-仅拉取新 README、重启容器或执行 `docker compose pull`，不会自动更新固定 SHA 构建的应用源码。不要把 `SLG_SOURCE_REF` 改成可变分支名。
+本项目以 [MIT 许可证](LICENSE) 开源。
 
-## 验证范围与文档
-
-本次只做提交来源、三方合并、自托管差异和发布引用的静态核对。
-
-- [详细部署、备份与迁移指南](README.Selfhost.zh-CN.md)
-- [Agent API](docs/agent-api.md) · [MCP 配置](mcp/README.md)
-- [后端配置](backend/README.md) · [前端说明](frontend/README.md)
-- [兑换码（礼券）运维手册](docs/redeem-ops.md)：批量生成、导出、查码、作废与对账
-
-## 许可证
-
-沿用原项目的 [MIT License](LICENSE)。
+项目首发于 [Linux.do 社区](https://linux.do/)。
