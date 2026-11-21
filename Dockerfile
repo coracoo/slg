@@ -4,7 +4,7 @@ ARG NGINX_IMAGE=nginx:1.28-alpine
 # Only Dockerfile + compose.yaml + your existing .env are needed locally.
 # Publish the reviewed patch first, then pin its full 40-character commit SHA.
 FROM ${NODE_IMAGE} AS source
-ARG SLG_SOURCE_REF=ca4791509a6cf8ca0e4364fca0a50cd8724846ba
+ARG SLG_SOURCE_REF=3d518df7fba4ac5980ce6498d5e1f35070bb0b70
 WORKDIR /source
 ADD https://github.com/coracoo/slg/archive/${SLG_SOURCE_REF}.tar.gz /tmp/slg.tar.gz
 RUN node -e "if (!/^[0-9a-f]{40}$/.test(process.argv[1])) process.exit(1)" "$SLG_SOURCE_REF" \
