@@ -78,6 +78,8 @@ import { TOPUP_COPY } from '../copy-topup';
 import { TOPUP_COPY_EN } from '../copy-topup-en';
 import { REDEEM_COPY } from '../copy-redeem';
 import { REDEEM_COPY_EN } from '../copy-redeem-en';
+import { PLUNDER_DAILY_COPY } from '../copy-plunder-daily';
+import { PLUNDER_DAILY_COPY_EN } from '../copy-plunder-daily-en';
 import { MOVE_CITY_COPY } from '../copy-move-city';
 import { MOVE_CITY_COPY_EN } from '../copy-move-city-en';
 import { LEGAL_COPY } from '../copy-legal';
@@ -144,6 +146,7 @@ const ZH = {
   TOPUP_COPY,
   LEGAL_COPY,
   REDEEM_COPY,
+  PLUNDER_DAILY_COPY,
 };
 
 export type Bundle = typeof ZH;
@@ -209,6 +212,7 @@ const EN: Bundle = {
   TOPUP_COPY: TOPUP_COPY_EN,
   LEGAL_COPY: LEGAL_COPY_EN,
   REDEEM_COPY: REDEEM_COPY_EN,
+  PLUNDER_DAILY_COPY: PLUNDER_DAILY_COPY_EN,
 };
 
 const BUNDLES: Record<Lang, Bundle> = { zh: ZH, en: EN };
